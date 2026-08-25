@@ -1,0 +1,29 @@
+{
+  "name": "@pleaseai/harness-cf-transport",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Opens the AI SDK harness bridge socket from workerd — through a Cloudflare Sandbox binding or straight over `fetch` — so the adapter never reaches for `ws`",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ws": "./src/ws.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "0.13.0-next.724.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260825.1",
+    "@pleaseai/eslint-config": "^0.0.4",
+    "bun-types": "^1.3.14",
+    "eslint": "^10.7.0",
+    "typescript": "^5.9.3"
+  }
+}

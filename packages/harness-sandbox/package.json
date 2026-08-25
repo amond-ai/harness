@@ -1,0 +1,28 @@
+{
+  "name": "@pleaseai/harness-sandbox",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The AI SDK harness's HarnessV1SandboxProvider, written once over @pleaseai/sandbox-contract so every backend behind that contract gets one",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "@ai-sdk/harness": "1.0.87",
+    "@pleaseai/sandbox-contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@pleaseai/eslint-config": "^0.0.4",
+    "bun-types": "^1.3.14",
+    "eslint": "^10.7.0",
+    "typescript": "^5.9.3"
+  }
+}

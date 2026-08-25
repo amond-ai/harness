@@ -152,7 +152,7 @@ function fakeFiles(state: FakeState): E2bSandboxLike['files'] {
       }))
     }) as E2bSandboxLike['files']['read'],
     write: async (path, data) => {
-      state.files.set(path, typeof data === 'string' ? encode(data) : data)
+      state.files.set(path, typeof data === 'string' ? encode(data) : new Uint8Array(data))
     },
     exists: async path => state.files.has(path) || state.dirs.has(path),
     // Scoped to the directory asked for, the way e2b's own `files.list` is: an unscoped
@@ -189,6 +189,7 @@ export function fakeSandbox(nextPid = 2054): Fake {
     sandboxId: 'sbx-1',
     commands: fakeCommands(state),
     files: fakeFiles(state),
+    getHost: port => `${String(port)}-sbx-1.e2b.app`,
     setTimeout: async (timeoutMs) => {
       state.calls.renewed.push(timeoutMs)
     },

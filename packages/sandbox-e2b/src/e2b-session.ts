@@ -25,6 +25,7 @@ import type {
 import type { E2bSandboxLike } from './e2b-surface'
 import type { JournalMeta } from './journal'
 import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@pleaseai/sandbox-contract'
+import { createE2bFiles } from './e2b-files'
 import { isProcessId, journalledCommand, journalPaths, serializeJournalMeta } from './journal'
 import { createJournalIo } from './journal-io'
 import { decodeCursor, encodeCursor, replayPositioned } from './log-replay'
@@ -408,6 +409,7 @@ export function createE2bSession(
   }
 
   return {
+    ...createE2bFiles(sandbox),
     exec: async (command: SandboxCommand, execOptions?: SandboxExecOptions) => {
       const id = newProcessId()
       const paths = journalPaths(root, id)

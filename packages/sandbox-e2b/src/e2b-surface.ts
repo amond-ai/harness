@@ -59,11 +59,19 @@ export interface E2bSandboxLike {
   }
   files: {
     read: E2bFileRead
-    write: (path: string, data: string) => Promise<unknown>
+    write: (path: string, data: string | ArrayBuffer) => Promise<unknown>
     exists: (path: string) => Promise<boolean>
     list: (path: string) => Promise<{ name: string }[]>
     makeDir: (path: string) => Promise<boolean>
   }
+  /**
+   * The public host e2b routes a sandbox port through — `<port>-<sandboxId>.e2b.app`.
+   *
+   * A bare host with no scheme, and synchronous: e2b formats it from the sandbox's own id
+   * rather than asking its API, which is why `portEndpoint` can answer without a round trip
+   * once the sandbox is in hand.
+   */
+  getHost: (port: number) => string
   /** Re-applies the sandbox's lifetime, restarting e2b's countdown from now. */
   setTimeout: (timeoutMs: number) => Promise<void>
   kill: () => Promise<boolean>

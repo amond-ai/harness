@@ -195,7 +195,84 @@ export interface SandboxProcessHandle {
  * discovery calls that answer from cold state, so a backend that needs warming must do it
  * through a request that reaches the container server.
  */
-export interface SandboxSession {
+/**
+ * Encodings the file surface accepts. `'none'` is not here: it selects the streaming
+ * overload of {@link SandboxFiles.readFile} rather than an encoding of the returned text.
+ */
+export type SandboxFileEncoding = 'utf-8' | 'utf8' | 'base64'
+
+/**
+ * A streamed read — `readFile(path, { encoding: 'none' })`.
+ *
+ * Carries the stream and nothing else. Cloudflare's own result also reports `size`, but a
+ * backend that streams without knowing the length up front would have to read the whole file
+ * to answer, and no caller asks — so requiring it would bill every backend for a number
+ * nobody reads.
+ */
+export interface SandboxFileStream {
+  content: ReadableStream<Uint8Array>
+}
+
+/** A decoded read. `encoding` reports what the backend chose when the caller did not. */
+export interface SandboxFileContent {
+  content: string
+  encoding?: 'utf-8' | 'base64'
+}
+
+/**
+ * Reading and writing files in the sandbox.
+ *
+ * Split out because it arrived for one caller — the AI SDK harness session, whose
+ * `SandboxSession` requires full file I/O — and the contract's own note says to widen only
+ * when a caller appears. It is declared in *Cloudflare's* shape (positional path,
+ * encoding-selected overloads) rather than the harness's (options objects, three read
+ * variants), which keeps the property this package is built on: `@cloudflare/sandbox`'s
+ * client satisfies the contract with no mapping layer, and a non-Cloudflare backend pays
+ * the mapping cost. The harness's own shape is a further translation, and it belongs in the
+ * harness provider — written once, over the contract, for every backend at once.
+ */
+export interface SandboxFiles {
+  /** Rejects when the path does not exist; callers wanting absence-as-value pair it with `exists`. */
+  readFile: ((path: string, options: { encoding: 'none' }) => Promise<SandboxFileStream>)
+    & ((path: string, options?: { encoding?: SandboxFileEncoding }) => Promise<SandboxFileContent>)
+  writeFile: (
+    path: string,
+    content: string | ReadableStream<Uint8Array>,
+    options?: { encoding?: SandboxFileEncoding },
+  ) => Promise<unknown>
+  mkdir: (path: string, options?: { recursive?: boolean }) => Promise<unknown>
+}
+
+/**
+ * Where a port inside the sandbox can be reached, and what to send when dialing it.
+ *
+ * Structurally `HarnessV1PortEndpoint`, because the AI SDK harness is the caller that made
+ * this surface necessary and its adapter consumes exactly this shape: it asks for
+ * `{ url, headers }` and constructs the socket itself. That is also why this is a *data*
+ * shape and not a `connectPort()` handing back a socket — a dial method would have no
+ * caller, and the rule this contract states about itself is to declare only what is used.
+ *
+ * **The URL is not promised to be publicly routable.** It is promised to be dialable by the
+ * runtime the orchestrator runs in, which is both weaker and more useful. e2b answers with a
+ * real public host (`https://<port>-<id>.e2b.app`); a Cloudflare sandbox has no such address
+ * a Worker should use, because its bridge port is private and the Worker reaches it by asking
+ * the Durable Object to open the socket (`wsConnect`) rather than by resolving a name. So the
+ * Cloudflare backend answers with a URL tagged for its own transport, which
+ * `@pleaseai/harness-cf-transport` recognises and dials through the binding, while an
+ * untagged URL is dialed directly. Which of the two a backend mints is the backend's
+ * business, and no caller has to know.
+ */
+export interface SandboxPortEndpoint {
+  readonly url: string
+  readonly headers?: Readonly<Record<string, string>>
+}
+
+export interface SandboxPortEndpointOptions {
+  /** Scheme the caller intends to speak over the port. */
+  protocol?: 'http' | 'https' | 'ws' | 'wss'
+}
+
+export interface SandboxSession extends SandboxFiles {
   exec: (command: SandboxCommand, options?: SandboxExecOptions) => Promise<SandboxProcessHandle>
   getProcess: (id: string) => Promise<SandboxProcessHandle | null>
   listProcesses: () => Promise<ProcessStatus[]>
@@ -214,4 +291,24 @@ export interface SandboxSession {
 export interface SandboxProvider {
   readonly backend: string
   session: (sandboxId: string) => SandboxSession
+  /**
+   * How to reach `port` inside the sandbox named by `sandboxId`.
+   *
+   * On the *provider* rather than the session, and deliberately. `SandboxSession` is
+   * satisfied by `@cloudflare/sandbox`'s own client with no mapping layer at all — that is
+   * the property this whole package is built on — and one added method would end it, because
+   * the vendor object has no `portEndpoint` and never will: the tagging described on
+   * {@link SandboxPortEndpoint} is this repo's protocol, not Cloudflare's. A provider, by
+   * contrast, is written here for every backend, so it is where a shape nobody upstream
+   * implements belongs.
+   *
+   * Required rather than optional: a backend that cannot say where its ports are cannot run
+   * the harness at all, and finding that out at the first connect — inside a workflow step —
+   * is strictly worse than finding it out at build time.
+   */
+  portEndpoint: (
+    sandboxId: string,
+    port: number,
+    options?: SandboxPortEndpointOptions,
+  ) => Promise<SandboxPortEndpoint>
 }

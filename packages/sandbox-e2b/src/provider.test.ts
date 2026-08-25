@@ -21,6 +21,7 @@ function stubSandbox(sandboxId: string, killed: string[] = []): E2bSandboxLike {
       list: async () => [],
       makeDir: async () => true,
     },
+    getHost: port => `${String(port)}-${sandboxId}.e2b.app`,
     setTimeout: async () => {},
     kill: async () => {
       killed.push(sandboxId)
@@ -41,6 +42,13 @@ function fakeApi(existing: Record<string, string> = {}): { api: E2bSandboxApi, c
   const api: E2bSandboxApi = {
     create: async (template, opts) => {
       calls.created.push({ template, opts: opts as Record<string, unknown> })
+      // Registered so a later `list` finds it, as e2b's really would. Without this the fake
+      // makes every acquisition look like a first one, and a provider that created a second
+      // sandbox for an id it had already created would go unnoticed.
+      const tagged = (opts.metadata ?? {}).pleaseSandboxId
+      if (tagged !== undefined) {
+        existing[tagged] = 'sbx-new'
+      }
       return stubSandbox('sbx-new', calls.killed)
     },
     connect: async (sandboxId) => {
@@ -185,6 +193,110 @@ describe('createE2bProvider', () => {
 
     expect(calls.created).toHaveLength(2)
     expect(calls.listed.map(query => query.pleaseSandboxId)).toEqual(['run-1', 'run-2'])
+  })
+
+  /**
+   * `lazySession`'s memo is per session object, so it cannot cover `portEndpoint`, which needs
+   * the `E2bSandboxLike` itself and so reaches for the acquisition directly. Two first calls
+   * in flight at once would each `list` (finding nothing) and each `create`, leaving a sandbox
+   * nothing holds a handle to — and the run then talks to whichever of the two it got.
+   */
+  it('shares one acquisition between a first session use and a portEndpoint racing it', async () => {
+    const { api, calls } = fakeApi()
+    const provider = createE2bProvider({ api })
+    await Promise.all([
+      provider.session('run-42').exists('/'),
+      provider.portEndpoint('run-42', 3001),
+    ])
+
+    expect(calls.created).toHaveLength(1)
+    expect(calls.listed).toHaveLength(1)
+  })
+
+  it('shares one acquisition between concurrent first portEndpoint calls', async () => {
+    const { api, calls } = fakeApi()
+    const provider = createE2bProvider({ api })
+    await Promise.all([
+      provider.portEndpoint('run-42', 3001),
+      provider.portEndpoint('run-42', 3002),
+    ])
+
+    expect(calls.created).toHaveLength(1)
+  })
+
+  /**
+   * Shared only while in flight. A settled acquisition is not memoised at provider level —
+   * `portEndpoint` is documented as costing a round trip, and a sandbox that was destroyed
+   * must not be handed back by a memo that outlived it — so a later call lists again and
+   * reattaches rather than creating a second sandbox.
+   */
+  it('reattaches rather than creating again once an acquisition has settled', async () => {
+    const { api, calls } = fakeApi()
+    const provider = createE2bProvider({ api })
+    await provider.portEndpoint('run-42', 3001)
+    await provider.portEndpoint('run-42', 3002)
+
+    expect(calls.created).toHaveLength(1)
+    expect(calls.listed).toHaveLength(2)
+  })
+
+  /**
+   * e2b's ports are publicly routable, so the endpoint is a real address and not a tag the
+   * way the Cloudflare backend's is — `getHost` answers the bare host e2b assigned that port.
+   */
+  it('answers with the host e2b assigned the port', async () => {
+    const { api } = fakeApi({ 'run-42': 'sbx-existing' })
+    const endpoint = await createE2bProvider({ api }).portEndpoint('run-42', 3001)
+
+    expect(endpoint.url).toBe('https://3001-sbx-existing.e2b.app/')
+  })
+
+  /**
+   * The scheme the caller names is honoured in kind but never in plaintext, and that override
+   * is the behaviour these four rows pin. `@ai-sdk/harness-claude-code` asks for `'ws'`; an
+   * e2b port answers nothing at all over plain HTTP, so the literal reading of that request
+   * can only mint a URL that provably cannot be dialed — see the note on `portEndpoint`
+   * itself for the measurement. Both directions are asserted, because a mapping that upgraded
+   * everything to `wss` would pass a test that only checked `'ws'`.
+   */
+  it.each([
+    ['ws', 'wss://3001-sbx-existing.e2b.app/'],
+    ['wss', 'wss://3001-sbx-existing.e2b.app/'],
+    ['http', 'https://3001-sbx-existing.e2b.app/'],
+    ['https', 'https://3001-sbx-existing.e2b.app/'],
+  ] as const)('answers a %s request over TLS, in the same kind', async (protocol, expected) => {
+    const { api } = fakeApi({ 'run-42': 'sbx-existing' })
+    const endpoint = await createE2bProvider({ api }).portEndpoint('run-42', 3001, { protocol })
+
+    expect(endpoint.url).toBe(expected)
+  })
+
+  it('defaults to https when the caller names no scheme', async () => {
+    const { api } = fakeApi({ 'run-42': 'sbx-existing' })
+    const endpoint = await createE2bProvider({ api }).portEndpoint('run-42', 3001)
+
+    expect(endpoint.url).toBe('https://3001-sbx-existing.e2b.app/')
+  })
+
+  /**
+   * The id the caller names is the orchestrator's, and e2b has never heard of it — the host
+   * can only be asked of the sandbox e2b actually holds. A provider that formatted the
+   * contract id into a hostname would mint an address that resolves to nothing.
+   */
+  it('resolves the e2b sandbox rather than formatting the contract id into a host', async () => {
+    const { api, calls } = fakeApi({ 'run-42': 'sbx-existing' })
+    const endpoint = await createE2bProvider({ api }).portEndpoint('run-42', 3001)
+
+    expect(calls.listed).toEqual([{ pleaseSandboxId: 'run-42' }])
+    expect(calls.connected).toEqual(['sbx-existing'])
+    expect(endpoint.url).not.toContain('run-42')
+  })
+
+  it('carries no headers, because e2b needs none to reach an open port', async () => {
+    const { api } = fakeApi({ 'run-42': 'sbx-existing' })
+    const endpoint = await createE2bProvider({ api }).portEndpoint('run-42', 3001)
+
+    expect(endpoint.headers).toBeUndefined()
   })
 
   it('forwards the sandbox environment and lifetime to create', async () => {
