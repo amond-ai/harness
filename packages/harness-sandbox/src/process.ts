@@ -19,7 +19,7 @@
  */
 import type { HarnessV1NetworkSandboxSession } from '@ai-sdk/harness'
 import type { ProcessLogEvent, SandboxProcessHandle, SandboxSession } from '@pleaseai/sandbox-contract'
-import { bestEffort } from './best-effort'
+import { bestEffort, nowAborted } from './best-effort'
 
 /** The process half of the harness session. */
 export type HarnessProcessSurface = Pick<HarnessV1NetworkSandboxSession, 'run' | 'spawn'>
@@ -34,6 +34,19 @@ export interface ProcessSurfaceOptions {
   defaultWorkingDirectory: string
 }
 
+/** A started process, and the way to take its abort listener back off the caller's signal. */
+interface StartedProcess {
+  handle: SandboxProcessHandle
+  /**
+   * Undo the `addEventListener` below — idempotent, and a no-op when there is no signal.
+   *
+   * Handed back rather than kept private because the listener outlives this function by
+   * design and only this function holds the closure that identifies it. Every later exit that
+   * refuses the spawn has to be able to take it off, and none of them can name it.
+   */
+  detach: () => void
+}
+
 /**
  * Start the command, with both of the guards that keep an aborted caller from leaking it.
  *
@@ -43,7 +56,7 @@ export interface ProcessSurfaceOptions {
 async function startProcess(
   options: ProcessSurfaceOptions,
   processOptions: ProcessOptions,
-): Promise<SandboxProcessHandle> {
+): Promise<StartedProcess> {
   // Refuse before anything starts. A listener attached to an already-aborted signal never
   // fires — the DOM spec fires `abort` exactly once, confirmed under Bun 1.3.14 — so
   // wiring one up and returning would leave a live process in the sandbox for a caller
@@ -79,13 +92,45 @@ async function startProcess(
   //
   // Killing and then throwing the reason keeps the contract the pre-check already set: a
   // caller that aborted gets a rejection, never a live process it holds no handle for.
-  abortSignal?.addEventListener('abort', () => void bestEffort(() => handle.kill()), { once: true })
+  //
+  // The pre-check calls the listener's own closure rather than awaiting a kill of its own,
+  // and that is the whole difference between starting the cleanup and waiting for it.
+  // `kill()` is an RPC into the sandbox, so a backend slow or stuck there would hold the
+  // rejection back for as long as it hung — this guard's own bug class, a call outliving the
+  // signal that cancelled it, reintroduced by the line that refuses the call. Nothing reads
+  // the outcome either way, since `bestEffort` discards both the value and the failure, so
+  // the wait bought only the delay. A listener cannot await at all, which is why the two
+  // halves of one guard disagreed about one call until they were the same call (#273).
+  //
+  // What that costs, stated rather than left for a reader to find: under workerd a promise
+  // that is neither awaited nor handed to `waitUntil` is cancelled when the request's I/O
+  // context is torn down, so a handler returning right after this rejection could cancel the
+  // kill before it lands — the leak this guard exists to close, arriving by another route.
+  // Awaiting is still not the answer, because it reinstates the hang above and because the
+  // listener has floated since #268 and cannot do otherwise; the answer is a `waitUntil`-style
+  // hook on {@link ProcessSurfaceOptions}, which needs a caller to thread one from and this
+  // package has none yet. Named here so the next reader inherits the trade-off, not just the
+  // choice (review, PR #274).
+  const killProcess = (): void => void bestEffort(() => handle.kill())
+  abortSignal?.addEventListener('abort', killProcess, { once: true })
+  const detach = (): void => {
+    abortSignal?.removeEventListener('abort', killProcess)
+  }
   if (abortSignal?.aborted === true) {
-    await bestEffort(() => handle.kill())
+    // Taken off again, which `{ once: true }` cannot do here: that collects a listener when it
+    // *fires*, and this one never will — `abort` already fired, which is why the check exists
+    // at all. Left on, it holds `handle` and this closure for as long as the caller holds the
+    // signal, and one signal serves a whole turn: `files.ts`'s `collect` removes its own in a
+    // `finally` for the same reason. `spawn` detaches on the other exit that refuses a spawn,
+    // the one where {@link openLogStream} throws; what neither of them touches is the way out
+    // below, where the listener is the guard and killing a later abort is its whole job
+    // (gemini review, PR #274).
+    detach()
+    killProcess()
     throw abortSignal.reason
   }
 
-  return handle
+  return { handle, detach }
 }
 
 /**
@@ -117,6 +162,26 @@ async function startProcess(
  *   (nobody will read it) and the reason thrown; the kill is deliberately *not* repeated,
  *   because the listener already issued it (codex review, PR #268).
  *
+ * Whether the cleanup is waited on turns on who is waiting, which is why the `catch` branches
+ * on the signal and the recheck does not.
+ *
+ * For a caller that has cancelled — the recheck, and the `catch`'s aborted branch — the
+ * cleanup is started and never waited on, for the reason {@link startProcess}'s pre-check
+ * gives: `kill()` and `cancel()` are RPCs into the sandbox, and awaiting one hands a hung
+ * backend the power to delay a rejection that caller is already owed.
+ *
+ * For a caller that has *not* — the `catch`'s other branch — the kill is awaited, and the
+ * answer is re-read afterwards, since a caller can abort inside a wait that is an RPC. The
+ * ordering the await buys is the point rather than the outcome. `bestEffort` discards the outcome
+ * either way, but awaiting still guarantees the kill has been issued *before* the failure
+ * reaches a caller that is still waiting for a result and may retry the moment it arrives.
+ * `sandbox-e2b` pins exactly that ordering one layer down — `kill() does not resolve until the
+ * walk has actually reaped the process`, whose comment names the retry that would otherwise
+ * clone into the same checkout while the previous process tree was still being killed (codex
+ * and cubic reviews, PR #260). Nothing is racing a rejection here that nobody asked for, so
+ * the delay costs the caller nothing it did not already spend on the failed `logs()` call
+ * (codex review, PR #274).
+ *
  * The `catch` restores the reason for the same purpose {@link waitForProcessExit}'s does: once
  * the signal is forwarded, an abort surfaces here as whatever the backend raises for a
  * cancelled read, and a caller handed that cannot recognise its own abort.
@@ -137,11 +202,23 @@ async function openLogStream(
     events = await handle.logs({ follow: true, replay: true, signal: abortSignal })
   }
   catch (cause) {
+    if (abortSignal?.aborted === true) {
+      void bestEffort(() => handle.kill())
+      throw abortSignal.reason
+    }
     await bestEffort(() => handle.kill())
-    throw abortSignal?.aborted === true ? abortSignal.reason : cause
+    // Asked again, after the await rather than before it, because the await is long enough to
+    // change the answer: this branch was chosen for a caller that had not cancelled, and it
+    // then waits for a kill that is an RPC into the sandbox. A caller aborting inside that
+    // wait is exactly the case the wait exists for — the slow kill — and handing it the
+    // backend's log-open error would leave it unable to recognise its own cancellation, which
+    // every other abort site here is written to prevent. {@link nowAborted} rather than the
+    // comparison spelled inline, because the branch above narrowed `aborted` to `false` and
+    // TypeScript then rejects re-reading it (TS2367, measured here as well as in `files.ts`).
+    throw nowAborted(abortSignal) ? abortSignal.reason : cause
   }
   if (abortSignal?.aborted === true) {
-    await bestEffort(() => events.cancel())
+    void bestEffort(() => events.cancel())
     throw abortSignal.reason
   }
   return events
@@ -210,9 +287,25 @@ async function collectOutput(process: HarnessProcess): Promise<RunResult> {
 
 export function createProcessSurface(options: ProcessSurfaceOptions): HarnessProcessSurface {
   async function spawn(processOptions: ProcessOptions): Promise<HarnessProcess> {
-    const handle = await startProcess(options, processOptions)
+    const { handle, detach } = await startProcess(options, processOptions)
     const { abortSignal } = processOptions
-    const { stdout, stderr } = splitProcessStreams(await openLogStream(handle, abortSignal))
+    let events: ReadableStream<ProcessLogEvent>
+    try {
+      events = await openLogStream(handle, abortSignal)
+    }
+    catch (cause) {
+      // The other exit that refuses a spawn, and it leaks the same listener the pre-check
+      // does: the caller is handed a rejection and no process, while the signal keeps a
+      // callback holding a handle nobody can reach. `once` cannot collect it on an aborted
+      // signal — `abort` has fired — and on the unaborted branch it never fires at all.
+      //
+      // Rethrown untouched. {@link openLogStream} has already decided whether this caller
+      // sees its own abort reason or the backend's cause, and re-deriving that here would be
+      // a second copy of the decision, free to disagree with the first.
+      detach()
+      throw cause
+    }
+    const { stdout, stderr } = splitProcessStreams(events)
     return {
       // `pid` is optional and nothing here reads it. The contract exposes it only through
       // `status()`, so populating it would buy a round trip per spawn for a field no caller

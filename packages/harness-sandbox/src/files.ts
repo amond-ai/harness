@@ -53,7 +53,7 @@
  */
 import type { HarnessV1NetworkSandboxSession } from '@ai-sdk/harness'
 import type { SandboxSession } from '@pleaseai/sandbox-contract'
-import { bestEffort } from './best-effort'
+import { bestEffort, nowAborted } from './best-effort'
 
 /** The file half of the harness session — everything below `run`/`spawn`. */
 export type HarnessFileSurface = Pick<
@@ -343,22 +343,6 @@ async function collect(
     // left on it per read accumulates for as long as the caller holds the signal.
     abortSignal?.removeEventListener('abort', release)
   }
-}
-
-/**
- * Whether the signal has fired *as of now*, asked again rather than answered from before.
- *
- * A call rather than `abortSignal?.aborted === true` spelled inline, and not for taste:
- * {@link collect}'s own pre-check narrows that property to `false` for the rest of the
- * function, so TypeScript rejects the later comparison as one that "appears to be
- * unintentional" (TS2367). It is not unintentional — it is the point. `aborted` flips while
- * the drain is suspended in `await reader.read()`, which is precisely the window the listener
- * and this catch exist for, and no narrowing taken before that `await` can speak for what is
- * true after it. The type predicate re-asks the question and hands back the signal itself, so
- * the reason can be read from it.
- */
-function nowAborted(abortSignal: AbortSignal | undefined): abortSignal is AbortSignal {
-  return abortSignal?.aborted === true
 }
 
 /** One array from many, sized up front so the chunks are copied exactly once. */
