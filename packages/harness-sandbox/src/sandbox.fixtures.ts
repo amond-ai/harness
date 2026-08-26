@@ -57,6 +57,12 @@ export interface FakeSandboxState {
   writes: FakeWriteCall[]
   mkdirs: { path: string, recursive?: boolean }[]
   /**
+   * Every path `exists` was asked about — the probe a read's own abort guard has to precede.
+   * `reads` cannot stand in for it: a read is two calls, and a surface that refused only the
+   * second one still asked the sandbox the first question after the caller had cancelled.
+   */
+  probes: string[]
+  /**
    * Directory creations and writes in the order they were actually issued.
    *
    * Recorded separately because the per-call lists cannot answer an ordering question: a
@@ -322,6 +328,7 @@ function emptyState(): FakeSandboxState {
     reads: [],
     writes: [],
     mkdirs: [],
+    probes: [],
     events: [],
     execs: [],
     kills: 0,
@@ -416,7 +423,10 @@ function fakeSession(deps: FakeSessionDeps): SandboxSession {
     },
     getProcess: () => Promise.resolve(null),
     listProcesses: () => Promise.resolve([]),
-    exists: path => Promise.resolve({ exists: state.files(sandboxId).has(path) }),
+    exists: (path) => {
+      state.probes.push(path)
+      return Promise.resolve({ exists: state.files(sandboxId).has(path) })
+    },
     destroy: () => {
       state.destroys++
       if (options.destroyThrows !== undefined) {
