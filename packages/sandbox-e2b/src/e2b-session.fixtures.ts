@@ -44,6 +44,17 @@ export interface Fake {
   holdCommandWaits: () => () => void
   /** What a background command's `wait()` reports; non-zero means it did not finish. */
   commandExitCode: number
+  /**
+   * Session ids the fake reports survivors in.
+   *
+   * The backend asks with `pgrep -s <sid>`, which the fake answers from this set the way the
+   * sandbox answers it from its process table: a wrapper that led a session and left a
+   * detached child behind is still *in* that session, however thoroughly e2b has forgotten
+   * the wrapper itself (`scripts/spike-e2b-session.ts`). Left entirely to the test rather
+   * than derived from the reap command: the whole question is what is running that the fake's
+   * own process table — like e2b's — never knew about.
+   */
+  sessions: Set<number>
 }
 
 /**
@@ -59,6 +70,7 @@ interface FakeState {
   /** What each pid was started as, so `list()` can report it the way e2b does. */
   wrappers: Map<number, string>
   killed: Fake['killed']
+  sessions: Set<number>
   calls: Fake['calls']
   stream: { chunkSize: number }
   waits: { held: boolean, queue: (() => void)[], exitCode: number }
@@ -76,12 +88,19 @@ function fakeCommands(state: FakeState): E2bSandboxLike['commands'] {
       // A background command's effects have *not* landed when e2b's `run` resolves — it
       // returns as soon as the command starts. Modelled by holding the reap until the handle
       // is waited on, which is what makes a caller that awaits only the start observable.
-      const reaped = /^reap\(\) \{.* reap (\d+)$/.exec(cmd)
+      // Both branches of the reap command name the pid the same way, and the fake cannot
+      // evaluate the `sid === pid` test that chooses between them — but it does not need to:
+      // either branch leaves the tree dead, which is what the fake models.
+      const reaped = /^reap\(\) \{.*; else reap (\d+) ; fi$/.exec(cmd)
       const reap = (): void => {
         if (reaped) {
           state.live.delete(Number(reaped[1]))
         }
       }
+      // The session probe, answered from the fake's own sessions rather than by exit code —
+      // the backend deliberately reads the answer out of stdout so that "found nothing" and
+      // "could not run" stay apart.
+      const probed = /^pgrep -s (\d+) /.exec(cmd)
       if (opts?.background !== true) {
         reap()
       }
@@ -96,6 +115,9 @@ function fakeCommands(state: FakeState): E2bSandboxLike['commands'] {
           }
           reap()
           state.live.delete(assigned)
+          if (probed) {
+            return { exitCode: 0, stdout: state.sessions.has(Number(probed[1])) ? 'survivors' : 'none' }
+          }
           return { exitCode: state.waits.exitCode }
         },
       }
@@ -179,6 +201,7 @@ export function fakeSandbox(nextPid = 2054): Fake {
     live: new Set<number>(),
     wrappers: new Map<number, string>(),
     killed: { sandbox: false, pids: [] },
+    sessions: new Set<number>(),
     calls: { list: 0, read: 0, renewed: [], readFormats: [], cancelled: [], pulled: 0 },
     stream: { chunkSize: Number.MAX_SAFE_INTEGER },
     waits: { held: false, queue: [], exitCode: 0 },
@@ -205,6 +228,7 @@ export function fakeSandbox(nextPid = 2054): Fake {
     ran: state.ran,
     live: state.live,
     killed: state.killed,
+    sessions: state.sessions,
     calls: state.calls,
     get chunkSize() {
       return state.stream.chunkSize

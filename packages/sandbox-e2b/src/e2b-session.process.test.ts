@@ -6,6 +6,8 @@
  */
 import { describe, expect, it } from 'bun:test'
 import { decode, encode, fakeSandbox, ROOT, session } from './e2b-session.fixtures'
+import { journalledScriptIn, journalPaths, SESSION_OPEN } from './journal'
+import { quoteArg, quoteArgv } from './shell-quote'
 
 describe('createE2bSession', () => {
   describe('exec()', () => {
@@ -15,9 +17,12 @@ describe('createE2bSession', () => {
 
       expect(handle.id).toBe('run-1')
       expect(fake.ran).toHaveLength(1)
-      expect(fake.ran[0].cmd).toContain(`'claude' '-p' 'do it'`)
-      expect(fake.ran[0].cmd).toContain(`> '${ROOT}/run-1.out'`)
-      expect(fake.ran[0].cmd).toContain(`2> '${ROOT}/run-1.err'`)
+      // Read through the peel: `exec` now hands e2b the script as one quoted word under the
+      // session prefix, and what matters here is still what the wrapper runs.
+      const script = journalledScriptIn(fake.ran[0].cmd)
+      expect(script).toContain(`'claude' '-p' 'do it'`)
+      expect(script).toContain(`> '${ROOT}/run-1.out'`)
+      expect(script).toContain(`2> '${ROOT}/run-1.err'`)
       expect(fake.ran[0].opts.background).toBe(true)
       expect(fake.ran[0].opts.cwd).toBe('/workspace')
     })
@@ -74,6 +79,48 @@ describe('createE2bSession', () => {
       await expect(active.getProcess('run-1')).rejects.toThrow('e2b api unavailable')
     })
 
+    it('recovers an argv containing a quote element for element, not merely approximately', async () => {
+      // `liveTurnProcess` matches a recovered process against the argv it is about to start,
+      // so this round trip *is* the duplicate-turn guard. The argv now passes through
+      // `quoteArg` twice — once per element, once for the whole script — and one backslash
+      // out of place makes a live turn unrecognisable and starts a second `claude` beside it.
+      // Asserted as equality: `toContain` would pass on a prefix of the truth.
+      const payload = `x'; rm -rf / #`
+      const fake = fakeSandbox()
+      const active = session(fake, ['run-1'])
+      await active.exec(['claude', '-p', payload])
+      // Deleted so the answer can only come from e2b's listing, which is the record the turn
+      // cannot rewrite and the only one recovery has.
+      fake.files.delete(`${ROOT}/run-1.meta.json`)
+
+      const handle = await active.getProcess('run-1')
+
+      expect((await handle!.status()).command).toEqual(['claude', '-p', payload])
+    })
+
+    it('still sees a legacy wrapper whose own prompt quotes the session prefix', async () => {
+      // The consequence, asserted where it lands rather than only at the peel: this is the
+      // duplicate-turn guard's own input. A wrapper started before #276 carries no prefix of
+      // ours, so a prompt quoting `setsid --wait sh -c '…'` — an issue body about this
+      // feature — used to be peeled at the *prompt's* occurrence, leaving a line with neither
+      // the journal redirection nor the argv in it. `recoveredProcesses` then reported no such
+      // process, `getProcess` answered null, `killTurn` reads null as a confirmed death, and a
+      // second `claude` starts in the checkout the first is still working in.
+      const argv = ['claude', '-p', `run ${SESSION_OPEN}'{ echo hi ; }' to detach`] as const
+      const paths = journalPaths(ROOT, 'abc123')
+      const legacy = `{ ${quoteArgv(argv)} ; } > ${quoteArg(paths.stdout)} 2> ${quoteArg(paths.stderr)}`
+        + ` ; printf '%s' "$?" > ${quoteArg(paths.exit)}`
+      const fake = fakeSandbox()
+      fake.sandbox.commands.list = async () => [{ pid: 4242, cmd: '/bin/bash', args: ['-l', '-c', legacy] }]
+
+      const handle = await session(fake, []).getProcess('abc123')
+
+      expect(handle).not.toBeNull()
+      const status = await handle!.status()
+      expect(status.state).toBe('running')
+      expect(status.command).toEqual(argv)
+    })
+
     it('reattaches to an exited process, which e2b itself cannot', async () => {
       const fake = fakeSandbox()
       const started = await session(fake).exec(['echo', 'hi'])
@@ -88,6 +135,23 @@ describe('createE2bSession', () => {
   })
 
   describe('exec() journal bookkeeping', () => {
+    it('reports a meta-write failure it could not reap as one that may still be running', async () => {
+      // The remedy for a plain write failure is a retry, and a retry clones into the same
+      // checkout. `commands.kill` leaves the wrapped command reparented and running, so a
+      // caller told only "disk full" would start that clone beside a live process.
+      const fake = fakeSandbox()
+      fake.sandbox.files.write = async () => {
+        throw new Error('disk full')
+      }
+      fake.commandExitCode = 137
+
+      const failure = await session(fake).exec(['claude']).catch((error: unknown) => error)
+
+      expect(String(failure)).toContain('may still be running')
+      expect(String(failure)).toContain('2054')
+      expect((failure as { cause?: unknown }).cause).toBeInstanceOf(Error)
+    })
+
     it('kills the process it just started when its meta cannot be written', async () => {
       // The pid is only knowable host-side, so a failed meta write leaves a turn that
       // nothing can name: no handle, no `getProcess`, no row in `listProcesses` — and so no
@@ -148,6 +212,52 @@ describe('createE2bSession', () => {
       expect(reap.cmd).toContain('reap 7')
       expect(reap.cmd.indexOf('pgrep -P')).toBeLessThan(reap.cmd.indexOf('kill -KILL'))
       expect(fake.killed.pids).toEqual([])
+    })
+
+    it('kill() reaps the session when the wrapper leads one, and walks the tree when it does not', async () => {
+      // Measured (`scripts/spike-e2b-session.ts`): `pkill -KILL -s <sid>` against a `setsid`
+      // wrapper emptied the session and the reaper survived, because the reaper is in envd's
+      // session and the victim in its own. The condition is the point: wrappers started
+      // before the session wrapping share session 511 *with envd*, so an unconditional
+      // `pkill -s` would kill envd and destroy the sandbox. Only a process that is its own
+      // session leader can pass `sid = pid`, and 511 is envd's own pid, never a wrapper's.
+      const fake = fakeSandbox(7)
+      const handle = await session(fake).exec(['sleep'])
+
+      await handle.kill()
+
+      const reap = fake.ran.at(-1)!.cmd
+      expect(reap).toContain('ps -o sid= -p 7')
+      expect(reap).toContain(`[ "$sid" = "7" ]`)
+      expect(reap).toContain('pkill -KILL -s 7')
+      // and the walk is still there for the wrapper that answers 511.
+      expect(reap).toContain('else reap 7')
+    })
+
+    it('kill() reports an unconfirmed kill rather than resolving like a completed reap', async () => {
+      // `killTurn` reads a resolved kill as a confirmed one and starts the next attempt. The
+      // fallback SIGKILLs the wrapper alone, so its child is reparented and keeps writing to
+      // the checkout — and the wrapper's session is where that child is still visible.
+      const fake = fakeSandbox(7)
+      const handle = await session(fake).exec(['sleep'])
+      fake.sessions.add(7)
+      // The walk is stopped at its budget rather than refused outright, which is the case
+      // that matters: the session is still probeable, and it answers.
+      fake.commandExitCode = 137
+
+      await expect(handle.kill()).rejects.toThrow('run-1')
+      expect(fake.killed.pids).toEqual([7])
+    })
+
+    it('kill() resolves when the fallback left nothing running in that session', async () => {
+      // Only an *observed* survivor is a failed kill. A fallback whose session is empty did
+      // reap the tree, and failing it would report every such kill as unconfirmed.
+      const fake = fakeSandbox(7)
+      const handle = await session(fake).exec(['sleep'])
+      fake.commandExitCode = 137
+
+      await expect(handle.kill()).resolves.toBeUndefined()
+      expect(fake.killed.pids).toEqual([7])
     })
 
     it('kill() does not resolve until the walk has actually reaped the process', async () => {

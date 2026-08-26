@@ -66,6 +66,44 @@ export function unquoteArgv(quoted: string): string[] | undefined {
 }
 
 /**
+ * The first occurrence of `needle` *outside* quoting, or `-1` — {@link quoteArg}'s grammar
+ * applied to a search rather than to a read.
+ *
+ * `indexOf` is not this. Everything {@link quoteArgv} emits is inside quotes, so a caller
+ * looking for a marker it wrote itself finds the argv's copy instead whenever its own marker
+ * is absent — which is exactly the case a journal wrapper written before the marker existed
+ * presents (`journalledScriptIn`, PR #276).
+ *
+ * The scan is not a `'` toggle either, and that is the whole reason it lives beside
+ * {@link unquoteFirstArg} rather than being written wherever it is needed. `quoteArg` emits
+ * `it's` as `'it'\''s'`, so between two quoted segments there is a `\'` that is an escaped
+ * quote *outside* quoting: consumed as two characters, or the scan finishes with its state
+ * inverted and reports matches inside quotes as top-level ones. It mirrors that reading
+ * rather than sharing it because the two answer different questions — this one walks past
+ * bare text that {@link unquoteFirstArg} refuses outright.
+ */
+export function unquotedIndexOf(text: string, needle: string): number {
+  let at = 0
+  let quoted = false
+  while (at < text.length) {
+    if (!quoted && text.startsWith(needle, at)) {
+      return at
+    }
+    if (text[at] === `'`) {
+      quoted = !quoted
+      at++
+    }
+    else if (!quoted && text.startsWith(`\\'`, at)) {
+      at += 2
+    }
+    else {
+      at++
+    }
+  }
+  return -1
+}
+
+/**
  * The first quoted word at `from`, and the offset just past it — {@link quoteArg} inverted
  * over a prefix rather than a whole line.
  *

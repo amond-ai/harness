@@ -28,6 +28,7 @@ import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@pleaseai/san
 import { createE2bFiles } from './e2b-files'
 import { isProcessId, journalledCommand, journalPaths, serializeJournalMeta } from './journal'
 import { createJournalIo } from './journal-io'
+import { createLifetimeRenewer } from './lifetime'
 import { decodeCursor, encodeCursor, replayPositioned } from './log-replay'
 import { createWrapperTable, livenessFrom } from './wrapper-table'
 
@@ -48,19 +49,6 @@ const DEFAULT_POLL_MS = 250
  * healthy turn.
  */
 const LIVENESS_PROBE_INTERVAL_MS = 5_000
-
-/**
- * How many renewals fit inside one sandbox lifetime.
- *
- * Four, so three attempts remain after one fails and the sandbox still outlives the turn,
- * while a long turn pays a handful of `setTimeout` calls rather than one per liveness probe.
- */
-const RENEWALS_PER_LIFETIME = 4
-
-/** The shortest gap between two renewals of a `lifetime`-long sandbox. */
-function renewalIntervalMs(lifetime: number): number {
-  return Math.max(LIVENESS_PROBE_INTERVAL_MS, lifetime / RENEWALS_PER_LIFETIME)
-}
 
 export interface E2bSessionOptions {
   /** Directory the journal lives in. Created on first `exec`. */
@@ -83,12 +71,7 @@ export interface E2bSessionOptions {
    * knows about (codex review, PR #260).
    */
   commandTimeoutMs?: number
-  /**
-   * Lifetime re-applied to the sandbox while a wait is in flight. Unset disables renewal.
-   *
-   * Taken from the provider's configured `timeoutMs` rather than chosen here, so the
-   * lifetime that gets renewed is the one the sandbox was created with.
-   */
+  /** Lifetime re-applied to the sandbox while a wait is in flight. Unset disables renewal. */
   sandboxTimeoutMs?: number
   /**
    * Monotonic milliseconds. Injected only so a wait's deadline — and the absence of one —
@@ -115,6 +98,12 @@ export function createE2bSession(
   const { readMeta, readSliceFrom, streamFile } = journal
   const table = createWrapperTable(sandbox, root, now)
   const { killTree, listedWrapper, livenessOf, recoveredCommand, recoveredProcesses } = table
+  const { confirmReaped, sessionSurvivors } = table
+  const renewSandboxLifetime = createLifetimeRenewer(sandbox, {
+    lifetime: options.sandboxTimeoutMs,
+    floorMs: LIVENESS_PROBE_INTERVAL_MS,
+    elapsedMs,
+  })
 
   /**
    * Has this id left anything in the journal — an exit record or a transcript?
@@ -144,45 +133,6 @@ export function createE2bSession(
    */
   function withoutMeta(id: string): JournalMeta {
     return { id, pid: 0, command: ['<unrecorded>'], startedAt: now() }
-  }
-
-  /** When the lifetime was last pushed back, so a wait does not renew once per probe. */
-  let renewedAt: number | undefined
-
-  /**
-   * Push the sandbox's stop-clock back while a turn is still running.
-   *
-   * e2b stops a sandbox at its configured lifetime regardless of what is running inside it,
-   * and the run workflow tolerates a live turn for six hours against a lifetime set in
-   * minutes. Failure is swallowed because a renewal that did not land is not a reason to
-   * abandon a wait over a healthy process — but it is logged, since a silently unrenewed
-   * sandbox is the exact failure this call exists to prevent.
-   *
-   * Rate-limited against the lifetime rather than the caller's cadence: `waitForExit` asks
-   * on every liveness probe, and renewing an hourly lifetime every five seconds is ~4,300
-   * remote round trips for one turn, all but a handful of them redundant (gemini review,
-   * PR #260). The state is per session, not per wait, because the sandbox is one — two
-   * concurrent waits renewing it separately would buy nothing.
-   */
-  async function renewSandboxLifetime(): Promise<void> {
-    const lifetime = options.sandboxTimeoutMs
-    if (lifetime === undefined) {
-      return
-    }
-    const at = elapsedMs()
-    if (renewedAt !== undefined && at - renewedAt < renewalIntervalMs(lifetime)) {
-      return
-    }
-    // Stamped before the call, not after it: an e2b that is refusing `setTimeout` would
-    // otherwise be asked again on every probe, which is the cadence this exists to stop.
-    // A quarter-lifetime interval still leaves three further attempts before it expires.
-    renewedAt = at
-    try {
-      await sandbox.setTimeout(lifetime)
-    }
-    catch (error) {
-      console.warn(`sandbox-e2b: could not renew sandbox lifetime: ${String(error)}`)
-    }
   }
 
   /**
@@ -231,6 +181,17 @@ export function createE2bSession(
       ({ ...base, state: 'exited', exit: { code, timedOut: false }, endedAt: now() })
 
     if (livenessFrom(listed) !== 'gone') {
+      return { ...base, state: 'running' }
+    }
+    // Gone from e2b's table is not the same as over: e2b lists only what it started itself,
+    // so a child the turn detached and then orphaned is invisible to that table while it
+    // keeps writing to the checkout. `running` is the honest reading of a session that is not
+    // empty — the turn's work demonstrably has not stopped, and calling it finished is what
+    // frees the checkout for a second `claude` (#266). `'unknown'` lands there too, by step
+    // 3's asymmetry. What this does and does not bind is argued at `sessionSurvivors`; the
+    // short of it is that the session id comes from `meta.pid`, so a turn that rewrites or
+    // deletes its meta is outside the guard's reach and one that only forges an exit is not.
+    if (await sessionSurvivors(meta.pid) !== 'none') {
       return { ...base, state: 'running' }
     }
     const settled = code ?? await readExitCode(paths)
@@ -339,7 +300,9 @@ export function createE2bSession(
           // no trustworthy pid to aim at, and the journal's is the turn's to choose.
           return
         }
-        await killTree(listed.pid)
+        if (await killTree(listed.pid) === 'fallback') {
+          await confirmReaped(meta.id, listed.pid)
+        }
       },
     }
   }
@@ -394,7 +357,22 @@ export function createE2bSession(
         // budget — or, unbounded, forever — and then report something the caller cannot
         // tell from a merely slow turn. Re-read once first, for the round-trip window
         // between the wrapper's `printf` and its shell exiting.
-        if (await livenessOf(meta.id) === 'gone') {
+        //
+        // Gated on the wrapper's session, and on *both* endings rather than only the resolve:
+        // `awaitTurn` reaches an exit through this loop and not through `status()`, so this is
+        // the path #266's forgery actually takes, and the `no_exit_record` throw is what
+        // `killTurn` meets after a fallback kill leaves a reparented child and no `$?`.
+        //
+        // A survivor is neither ending. It is not a journalled exit — the contract forbids
+        // synthesising one — and it is not a process gone for good, so the loop keeps going
+        // and the *caller's* deadline decides. A bounded wait then ends in
+        // `SandboxWaitTimeoutError`, which says "still running, wait longer or kill it":
+        // exactly true here, and already read as an unconfirmed kill. An unbounded one keeps
+        // waiting, which is what `awaitTurn` wants — it races this against the watchdog, and a
+        // turn still writing to the checkout is precisely what must not settle. Short-circuited
+        // behind the liveness verdict and inside the interval block, so it costs at most one
+        // command per `LIVENESS_PROBE_INTERVAL_MS` and never one per poll.
+        if (await livenessOf(meta.id) === 'gone' && await sessionSurvivors(meta.pid) === 'none') {
           const settled = await readExitCode(paths)
           if (settled !== undefined) {
             return { code: settled, timedOut: false }
@@ -450,8 +428,18 @@ export function createE2bSession(
         // (measured, `scripts/spike-e2b-kill-tree.ts`), and materialization is retried — so
         // a transient meta-write failure would race the retry against an orphaned clone in
         // the same checkout (codex review, PR #260).
-        await killTree(started.pid)
-        throw cause
+        if (await killTree(started.pid) === 'reaped') {
+          throw cause
+        }
+        // The reap fell back, so the tree may still be running — and nothing can name it,
+        // which is the whole reason this path kills at all. Said in the error rather than
+        // left as the plain write failure, whose remedy (retry) is the wrong one while a
+        // process may still be writing to that checkout.
+        throw new Error(
+          `journal meta for '${id}' could not be written and its wrapper (pid ${String(started.pid)})`
+          + ` could not be reaped; it may still be running`,
+          { cause },
+        )
       }
       return handleFor(meta)
     },

@@ -35,8 +35,12 @@ export interface E2bCommandHandle {
    * The SDK throws `CommandExitError` on a non-zero exit, but the result is checked rather
    * than the throw relied on: a command e2b stops at its `timeoutMs` must not be able to
    * arrive here as a success and skip the fallback (cubic review, PR #260).
+   *
+   * `stdout` is the collected output, which the SDK's own `CommandResult` carries. The
+   * session probe in `wrapper-table.ts` answers in it rather than through an exit code,
+   * precisely so "found nothing" and "could not run" stay distinguishable.
    */
-  wait: () => Promise<{ exitCode?: number }>
+  wait: () => Promise<{ exitCode?: number, stdout?: string }>
 }
 
 export interface E2bSandboxLike {

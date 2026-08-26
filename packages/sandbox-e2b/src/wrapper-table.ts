@@ -9,7 +9,7 @@
 import type { SandboxCommand } from '@pleaseai/sandbox-contract'
 import type { E2bSandboxLike } from './e2b-surface'
 import type { JournalMeta } from './journal'
-import { ARGV_CLOSE, ARGV_OPEN, isProcessId, STDOUT_SUFFIX } from './journal'
+import { ARGV_CLOSE, ARGV_OPEN, isProcessId, journalledScriptIn, STDOUT_SUFFIX } from './journal'
 import { unquoteArgv, unquoteFirstArg } from './shell-quote'
 
 /**
@@ -30,6 +30,30 @@ const KILL_WALK_TIMEOUT_MS = 30_000
  * costs.
  */
 export type Liveness = 'live' | 'gone' | 'unknown'
+
+/** How long the session probe gets: two `pgrep`s worth of work, so a budget, not a wait. */
+const SESSION_PROBE_TIMEOUT_MS = 15_000
+
+/**
+ * What is left of a wrapper's own session — and, third case, that the probe could not say.
+ *
+ * `'unknown'` is kept apart from `'none'` for the reason {@link Liveness} keeps it apart from
+ * `'gone'`: this answer decides whether a turn may be declared finished, and a probe that
+ * failed knows nothing about the turn. Collapsing the two would make one failed round trip
+ * indistinguishable from an empty session, which is the reading that ends an attempt.
+ */
+export type SessionSurvivors = 'survivors' | 'none' | 'unknown'
+
+/**
+ * Whether {@link WrapperTable.killTree} reaped the tree or fell back to e2b's own kill.
+ *
+ * Returned rather than only logged, because the two are not the same event and the caller
+ * acts on the difference: `commands.kill` SIGKILLs the wrapper, which cannot propagate it, so
+ * a fallback leaves the wrapped command reparented to init and running. Resolving identically
+ * for both is how an unconfirmed kill came to be reported as a confirmed one (codex review,
+ * PR #260, round 16).
+ */
+export type KillOutcome = 'reaped' | 'fallback'
 
 /**
  * What e2b's process table says about one journal wrapper.
@@ -58,7 +82,9 @@ export interface WrapperTable {
   listedWrapper: (id: string) => Promise<ListedWrapper | undefined>
   recoveredProcesses: () => Promise<Map<string, JournalMeta>>
   recoveredCommand: (commandLine: string) => SandboxCommand
-  killTree: (pid: number) => Promise<void>
+  sessionSurvivors: (sid: number) => Promise<SessionSurvivors>
+  confirmReaped: (id: string, pid: number) => Promise<void>
+  killTree: (pid: number) => Promise<KillOutcome>
 }
 
 export function createWrapperTable(
@@ -176,11 +202,12 @@ export function createWrapperTable(
    * would be truncated, and every live process under it would read as gone.
    */
   function journalIdIn(commandLine: string): string | undefined {
-    const closed = commandLine.lastIndexOf(ARGV_CLOSE)
+    const script = journalledScriptIn(commandLine)
+    const closed = script.lastIndexOf(ARGV_CLOSE)
     if (closed < 0) {
       return undefined
     }
-    const path = unquoteFirstArg(commandLine.slice(closed + ARGV_CLOSE.length))?.value
+    const path = unquoteFirstArg(script.slice(closed + ARGV_CLOSE.length))?.value
     const prefix = `${root}/`
     if (path === undefined || !path.startsWith(prefix) || !path.endsWith(STDOUT_SUFFIX)) {
       return undefined
@@ -196,13 +223,100 @@ export function createWrapperTable(
    * can contain the terminator verbatim, and it always precedes the real one.
    */
   function wrappedArgvIn(commandLine: string): string | undefined {
-    const opened = commandLine.indexOf(ARGV_OPEN)
-    const closed = commandLine.lastIndexOf(ARGV_CLOSE)
-    return opened >= 0 && closed > opened ? commandLine.slice(opened + ARGV_OPEN.length, closed) : undefined
+    const script = journalledScriptIn(commandLine)
+    const opened = script.indexOf(ARGV_OPEN)
+    const closed = script.lastIndexOf(ARGV_CLOSE)
+    return opened >= 0 && closed > opened ? script.slice(opened + ARGV_OPEN.length, closed) : undefined
   }
 
   /**
-   * Kill the wrapped command and everything under it, not just the shell e2b tracks.
+   * Is anything still running in the session a wrapper led?
+   *
+   * The question `commands.list()` cannot answer. e2b lists only the processes it started
+   * itself, so a child the turn detached — and then orphaned by killing the wrapper — is
+   * invisible to exactly the table this backend trusts (#266). `journalledCommand` starts the
+   * wrapper under `setsid --wait`, which measurably gives it a session of its own
+   * (`scripts/spike-e2b-session.ts`): after `commands.kill(pid)` on such a wrapper,
+   * `pgrep -s <sid>` returned the orphaned `sh` and its `sleep`, reparented to init and still
+   * in the wrapper's session.
+   *
+   * The session id is the wrapper's **pid**. Not a value read back from anywhere the turn can
+   * write — a recorded sid could be pointed at an empty session, which is the forgery this
+   * closes — but the measured consequence of how envd starts a command: `setsid` execs rather
+   * than forks there, so the wrapper *is* the session leader and `sid === pid` held 8/8 across
+   * four runs of each shape. It also cannot be read afterwards: `ps -o sid= -p <pid>` on an
+   * exited wrapper prints nothing, so this has to be derivable up front.
+   *
+   * A pid of `0` or less is a process reached through the journal files alone, which never
+   * recorded one. Nothing is issued for it: `pgrep -s 0` means *the caller's own session*, so
+   * asking would report a survivor for every such process forever.
+   *
+   * The probe always exits `0` and says which it found in stdout, so a `pgrep` that matched
+   * nothing — exit `1` — is not indistinguishable from a probe that could not run.
+   *
+   * **What this binds, and what it does not.** The caller supplies the session id, and its
+   * only source for an exited process is `meta.pid` — a field in the file the turn itself
+   * writes. So this reaches a turn that forges an exit *without* touching its meta, which is
+   * the shape #266 describes, and it reaches neither of the two ways of touching it:
+   *
+   * - **rewrite.** `meta.pid` is set to any other number, and the probe asks about a session
+   *   that is not the wrapper's.
+   * - **delete.** With no meta, `getProcess` reattaches through the journal files alone and
+   *   `withoutMeta` supplies `pid: 0`, for which nothing is asked at all. This is the cheaper
+   *   of the two — one `rm`, no need to learn a pid first — so it is named here rather than
+   *   left to be inferred from `withoutMeta`.
+   *
+   * Neither is a tolerable accident dressed up as a limit: they are the adversary this guard
+   * exists for, deliberately disabling it. Closing them is one fix, not two, because both
+   * spellings have the same root — the identity comes from a file the turn owns — and it
+   * needs a session identity that does not (#277). `e2b-session.ts` already refuses the
+   * journal for `command` and takes it from e2b's listing for exactly this reason; the
+   * session id has no such second source yet, because a session cannot be read back once its
+   * leader has exited.
+   */
+  async function sessionSurvivors(sid: number): Promise<SessionSurvivors> {
+    if (!Number.isInteger(sid) || sid <= 0) {
+      return 'none'
+    }
+    try {
+      const probe = await sandbox.commands.run(
+        `pgrep -s ${String(sid)} > /dev/null 2>&1 && printf survivors || printf none`,
+        { background: true, timeoutMs: SESSION_PROBE_TIMEOUT_MS },
+      )
+      const { exitCode, stdout } = await probe.wait()
+      if (exitCode !== 0) {
+        return 'unknown'
+      }
+      if (stdout?.trim() === 'survivors') {
+        return 'survivors'
+      }
+      return stdout?.trim() === 'none' ? 'none' : 'unknown'
+    }
+    catch {
+      return 'unknown'
+    }
+  }
+
+  /**
+   * After a fallback kill, say whether the tree actually died — and refuse to claim it did.
+   *
+   * `commands.kill` SIGKILLs the wrapper only, leaving the wrapped command reparented to init
+   * and running. Resolving as though the tree had been reaped is what `killTurn` reads as a
+   * confirmed kill, after which it starts the next attempt in the same checkout (codex review,
+   * PR #260, round 16). Only an *observed* survivor throws — a probe that could not run has
+   * measured nothing, and failing every kill against an unreachable sandbox is not what it
+   * learned. `killTurn` catches, re-reads `status()`, and reports the kill unconfirmed.
+   */
+  async function confirmReaped(id: string, pid: number): Promise<void> {
+    const survivors = await sessionSurvivors(pid)
+    console.warn(`sandbox-e2b: kill of '${id}' fell back to e2b's own kill; session ${survivors}`)
+    if (survivors === 'survivors') {
+      throw new Error(`kill of '${id}' left processes running in its session`)
+    }
+  }
+
+  /**
+   * Reap a wrapper's whole session, or walk its tree when it does not own one.
    *
    * `journalledCommand` wraps the argv in a shell so `$?` can be journalled, so the pid e2b
    * tracks is that shell. `commands.kill` sends `SIGKILL`, which a shell can neither trap nor
@@ -211,11 +325,22 @@ export function createWrapperTable(
    * workflow then reads `no_exit_record`, settles the run failed, and retries into a checkout
    * a live agent is still writing to (codex review, PR #260).
    *
-   * A process-group kill is not the way out: the same measurement shows every e2b command
-   * shares PGID/SID `511`, so `kill -- -<pgid>` takes down the killing command and the rest
-   * of the sandbox with it. Walking the tree children-first is scoped to exactly this
-   * command — and children-first matters, because a parent killed before its children leaves
-   * them reparented to init and out of reach.
+   * A session kill reaps that in one signal, and it does not take the reaper with it:
+   * `pkill -KILL -s <sid>` against a `setsid` wrapper printed `reaper survived` and left the
+   * session empty, because the reaper runs in envd's session and the victim in its own
+   * (`scripts/spike-e2b-session.ts`).
+   *
+   * The condition is the hazard. Wrappers started before the session wrapping existed are
+   * still running in sandboxes this code connects to, and they share session **511** with
+   * envd itself — `pkill -KILL -s 511` would kill envd and destroy the sandbox. So the target
+   * is asked, in the sandbox and at kill time, whether it is genuinely its own session leader
+   * (`sid === pid`), and only then reaped by session; a legacy wrapper answers `511 != <pid>`
+   * and gets the post-order `pgrep -P` walk it has always had. The test can only be satisfied
+   * by a session leader, so the one pid it would license a session kill on is 511 itself —
+   * which is never a pid this is handed, since it is the target of a wrapper e2b listed.
+   *
+   * Children-first in the walk still matters: a parent killed before its children leaves them
+   * reparented to init and out of reach.
    *
    * Awaited to completion, not merely started. e2b returns from a background command as soon
    * as it starts, and two callers here — `materializationExit` and the meta-write failure
@@ -223,11 +348,9 @@ export function createWrapperTable(
    * would race a process tree that is still being killed in the same checkout (codex and
    * cubic reviews, PR #260).
    */
-  async function killTree(pid: number): Promise<void> {
-    const reap = `reap() { for c in $(pgrep -P "$1" 2>/dev/null); do reap "$c"; done;`
-      + ` kill -KILL "$1" 2>/dev/null || true; }; reap ${pid}`
+  async function killTree(pid: number): Promise<KillOutcome> {
     try {
-      const walk = await sandbox.commands.run(reap, { background: true, timeoutMs: KILL_WALK_TIMEOUT_MS })
+      const walk = await sandbox.commands.run(reapCommand(pid), { background: true, timeoutMs: KILL_WALK_TIMEOUT_MS })
       const { exitCode } = await walk.wait()
       if (exitCode !== 0) {
       // The walk ends in `|| true`, so anything but `0` means it did not run to the end —
@@ -236,15 +359,37 @@ export function createWrapperTable(
       // arrive here as a success and skip the fallback (cubic review, PR #260).
         throw new Error(`kill walk exited ${String(exitCode)}`)
       }
+      return 'reaped'
     }
     catch (cause) {
     // The walk could not start, or did not finish. Fall back to what e2b offers directly —
     // it leaves the child running, but a shell that is gone writes no exit record either
-    // way, and doing nothing here would leave both alive.
+    // way, and doing nothing here would leave both alive. Reported as `'fallback'` rather
+    // than resolved like a completed reap, because those are different states of the
+    // sandbox and the caller has to be able to act on which one it got.
       console.warn(`sandbox-e2b: the kill walk for pid ${pid} did not complete: ${String(cause)}`)
       await sandbox.commands.kill(pid).catch(() => false)
+      return 'fallback'
     }
   }
 
-  return { livenessOf, listedWrapper, recoveredProcesses, recoveredCommand, killTree }
+  /** Reap by session where that is safe, and by the tree walk where it is not. */
+  function reapCommand(pid: number): string {
+    const target = String(pid)
+    return `reap() { for c in $(pgrep -P "$1" 2>/dev/null); do reap "$c"; done;`
+      + ` kill -KILL "$1" 2>/dev/null || true; }`
+      + ` ; sid=$(ps -o sid= -p ${target} 2>/dev/null | tr -d ' ')`
+      + ` ; if [ "$sid" = "${target}" ] ; then pkill -KILL -s ${target} 2>/dev/null || true`
+      + ` ; else reap ${target} ; fi`
+  }
+
+  return {
+    livenessOf,
+    listedWrapper,
+    recoveredProcesses,
+    recoveredCommand,
+    sessionSurvivors,
+    confirmReaped,
+    killTree,
+  }
 }

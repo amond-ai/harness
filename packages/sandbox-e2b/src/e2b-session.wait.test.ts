@@ -43,6 +43,77 @@ describe('createE2bSession', () => {
       expect(await wait).toEqual({ code: 0, timedOut: false })
     })
 
+    it('keeps waiting on a forged exit whose session still has survivors', async () => {
+      // The path that matters: `awaitTurn` settles a turn through `waitForExit`, not through
+      // `status()`, so #266's forgery — detach a child, kill the wrapper, write `<id>.exit` —
+      // resolves the workflow's own wait unless it is gated here too. The wrapper is gone from
+      // e2b's table and the exit record is there; the session is the only thing left that says
+      // the turn's work is still running.
+      const fake = fakeSandbox()
+      const handle = await session(fake, ['run-1'], {
+        pollIntervalMs: 1,
+        monotonicNowMs: leapingClock(5_000),
+      }).exec(['claude'])
+      endProcess(fake, 'run-1', '0')
+      fake.sessions.add(2054)
+
+      const wait = handle.waitForExit()
+      expect(await Promise.race([
+        wait.then(() => 'settled', () => 'rejected'),
+        new Promise(resolve => setTimeout(resolve, 40, 'still waiting')),
+      ])).toBe('still waiting')
+
+      // and settles on that same record once the session is empty: a survivor delays the
+      // verdict, it does not replace it.
+      fake.sessions.delete(2054)
+      expect(await wait).toEqual({ code: 0, timedOut: false })
+    })
+
+    it('ends a bounded wait as a timeout, not as an exit, while the session is alive', async () => {
+      // `SandboxWaitTimeoutError` is the honest ending for a survivor: "still running, wait
+      // longer or kill it". Resolving the forged code instead would report the attempt
+      // finished and free the checkout for the next one.
+      const fake = fakeSandbox()
+      const handle = await session(fake, ['run-1'], { pollIntervalMs: 1 }).exec(['claude'])
+      endProcess(fake, 'run-1', '0')
+      fake.sessions.add(2054)
+
+      await expect(handle.waitForExit({ timeout: 30 }))
+        .rejects
+        .toBeInstanceOf(SandboxWaitTimeoutError)
+    })
+
+    it('does not report no_exit_record while that session still has survivors', async () => {
+      // The kill path. `killTurn` waits after signalling and reads `SandboxNoExitRecordError`
+      // as "it is already gone" — but a fallback kill SIGKILLs the wrapper alone, so no `$?`
+      // is ever recorded while the reparented child keeps running (codex, PR #260 round 16).
+      const fake = fakeSandbox()
+      const handle = await session(fake, ['run-1'], { pollIntervalMs: 1 }).exec(['claude'])
+      fake.live.clear()
+      fake.sessions.add(2054)
+
+      const rejection = await handle.waitForExit({ timeout: 30 }).catch((error: unknown) => error)
+
+      expect(rejection).toBeInstanceOf(SandboxWaitTimeoutError)
+      expect(rejection).not.toBeInstanceOf(SandboxNoExitRecordError)
+    })
+
+    it('asks the session at most once per liveness probe, not once per poll', async () => {
+      // The gate sits in a loop that re-reads every `pollIntervalMs`, and a survivor keeps it
+      // there for the rest of the wait. One command per poll would be hundreds of remote round
+      // trips a second against a sandbox whose turn is already in trouble.
+      const fake = fakeSandbox()
+      const handle = await session(fake, ['run-1'], { pollIntervalMs: 1 }).exec(['claude'])
+      endProcess(fake, 'run-1', '0')
+      fake.sessions.add(2054)
+
+      await expect(handle.waitForExit({ timeout: 200 }))
+        .rejects
+        .toBeInstanceOf(SandboxWaitTimeoutError)
+      expect(fake.calls.read).toBeGreaterThan(20)
+      expect(fake.ran.filter(command => command.cmd.startsWith('pgrep -s'))).toHaveLength(1)
+    })
+
     it('rejects rather than resolving when the wait ends before the process does', async () => {
       // A resolved ProcessExit means the process exited. Callers use `catch` as their
       // timeout path, so resolving here would report a live turn as a confirmed kill.
@@ -239,6 +310,64 @@ describe('createE2bSession', () => {
 
       fake.live.clear()
       expect(await active.getProcess(started.id)).toBeNull()
+    })
+
+    it('refuses to call a turn exited while its own session still has survivors', async () => {
+      // The forgery this closes (#266): detach a child, kill the wrapper, write an exit file.
+      // e2b lists only what it started, so the wrapper is gone from the one table this
+      // backend trusts and the exit record is there — which read as `exited` while the
+      // detached child kept working in the checkout. The wrapper leads a session of its own,
+      // and `pgrep -s <sid>` sees the child that outlived it (`scripts/spike-e2b-session.ts`).
+      const fake = fakeSandbox()
+      const handle = await session(fake).exec(['claude'])
+      endProcess(fake, 'run-1', '0')
+      fake.sessions.add(2054)
+
+      expect((await handle.status()).state).toBe('running')
+
+      // and settles once that session is empty, so a survivor delays the verdict, not ends it.
+      fake.sessions.delete(2054)
+      expect((await handle.status()).state).toBe('exited')
+    })
+
+    it('refuses no_exit_record for the same session, which is how a kill is confirmed', async () => {
+      // `confirmDead` in `run-workflow.ts` judges a kill by `status()`, and `'error'` is not
+      // `'running'` — so a wrapper SIGKILLed by the fallback path reported a confirmed kill
+      // while its reparented child ran on (codex review, PR #260, round 16). The survivor
+      // check therefore gates the whole terminal verdict, not only `exited`.
+      const fake = fakeSandbox()
+      const handle = await session(fake).exec(['claude'])
+      fake.live.clear()
+      fake.sessions.add(2054)
+
+      expect((await handle.status()).state).toBe('running')
+    })
+
+    it('stays running when the session probe itself fails, rather than settling on silence', async () => {
+      // Same asymmetry as a failed `commands.list()`: a probe that could not run has not
+      // observed an empty session, and treating it as one is what ends an attempt early.
+      const fake = fakeSandbox()
+      const handle = await session(fake).exec(['claude'])
+      endProcess(fake, 'run-1', '0')
+      fake.sandbox.commands.run = async () => {
+        throw new Error('transient rpc failure')
+      }
+
+      expect((await handle.status()).state).toBe('running')
+    })
+
+    it('never asks about the session of a process that never recorded a pid', async () => {
+      // `pgrep -s 0` means *the caller's own session*, so asking it about a process known
+      // only by its journal files would report a survivor for every one of them, forever.
+      const fake = fakeSandbox()
+      const active = session(fake, ['run-1'])
+      await active.exec(['claude'])
+      endProcess(fake, 'run-1', '0')
+      fake.files.delete(`${ROOT}/run-1.meta.json`)
+      const before = fake.ran.length
+
+      expect((await (await active.getProcess('run-1'))!.status()).state).toBe('exited')
+      expect(fake.ran).toHaveLength(before)
     })
 
     it('keeps a still-live process running even when it journalled an exit for itself', async () => {
