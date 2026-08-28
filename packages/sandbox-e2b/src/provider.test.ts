@@ -1,6 +1,7 @@
 import type { E2bSandboxLike } from './e2b-session'
 import type { E2bSandboxApi } from './provider'
 import { describe, expect, it } from 'bun:test'
+import { encode, fakeSandbox, ROOT } from './e2b-session.fixtures'
 import { createE2bProvider } from './provider'
 
 function stubSandbox(sandboxId: string, killed: string[] = []): E2bSandboxLike {
@@ -28,6 +29,11 @@ function stubSandbox(sandboxId: string, killed: string[] = []): E2bSandboxLike {
       return true
     },
   }
+}
+
+/** A loser for `Promise.race`, so a test can assert something arrived *before* a deadline. */
+function after<T>(ms: number, value: T): Promise<T> {
+  return new Promise(resolve => setTimeout(resolve, ms, value))
 }
 
 interface Calls {
@@ -297,6 +303,43 @@ describe('createE2bProvider', () => {
     const endpoint = await createE2bProvider({ api }).portEndpoint('run-42', 3001)
 
     expect(endpoint.headers).toBeUndefined()
+  })
+
+  it('forwards the follow polling intervals to the sessions it opens', async () => {
+    // `E2bProviderOptions` accepts both — it extends the session's options — so a deployment
+    // that tunes the tail's cadence has every reason to expect them to arrive. They were not
+    // in the forwarded object, which left the defaults in place and the tuning silently inert
+    // for everyone who did not bypass the provider (codex review, PR #280).
+    const fake = fakeSandbox()
+    const provider = createE2bProvider({
+      api: {
+        create: async () => fake.sandbox,
+        connect: async () => fake.sandbox,
+        list: async () => [],
+      },
+      journalRoot: ROOT,
+      newProcessId: () => 'run-1',
+      followIntervalMs: 5,
+      followLivenessIntervalMs: 5,
+    })
+
+    const handle = await provider.session('run-a').exec(['claude'])
+    fake.files.set(`${ROOT}/run-1.out`, encode('starting\n'))
+    const reader = (await handle.logs({ replay: true, follow: true })).getReader()
+    expect((await reader.read()).value?.type).toBe('stdout')
+
+    // The poll interval, measured on the gap it paces: at the 1s default nothing arrives
+    // inside this window.
+    fake.files.set(`${ROOT}/run-1.out`, encode('starting\nmore\n'))
+    const served = reader.read().then(result => result.value?.type)
+    expect(await Promise.race([served, after(150, 'slow')])).toBe('stdout')
+
+    // And the liveness interval, on the probe it paces: the first probe has already been
+    // spent, so a wrapper that dies now is only noticed once that interval comes round —
+    // 5s away at the default, whatever the poll interval is.
+    fake.live.delete(2054)
+    const ended = reader.read().then(result => result.value?.type)
+    expect(await Promise.race([ended, after(150, 'slow')])).toBe('terminal')
   })
 
   it('forwards the sandbox environment and lifetime to create', async () => {

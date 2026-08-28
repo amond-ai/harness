@@ -15,7 +15,6 @@
  */
 import type {
   ProcessExit,
-  ProcessLogEvent,
   ProcessStatus,
   SandboxCommand,
   SandboxExecOptions,
@@ -29,13 +28,21 @@ import { createE2bFiles } from './e2b-files'
 import { isProcessId, journalledCommand, journalPaths, serializeJournalMeta } from './journal'
 import { createJournalIo } from './journal-io'
 import { createLifetimeRenewer } from './lifetime'
-import { decodeCursor, encodeCursor, replayPositioned } from './log-replay'
+import { createProcessLogs } from './log-reads'
 import { createWrapperTable, livenessFrom } from './wrapper-table'
 
 export type { E2bCommandHandle, E2bFileRead, E2bSandboxLike } from './e2b-surface'
 
 const META_SUFFIX = '.meta.json'
 const DEFAULT_POLL_MS = 250
+/**
+ * How long a following `logs()` waits after a poll that found nothing new.
+ *
+ * A second, not `DEFAULT_POLL_MS`: every poll transfers the whole journal file, and the caller
+ * this exists for — the AI SDK bridge's startup banner, via `@pleaseai/harness-sandbox` — is
+ * bounded by the harness's own readiness timeout of two minutes rather than by this cadence.
+ */
+const DEFAULT_FOLLOW_MS = 1_000
 
 /**
  * How often a wait probes liveness and renews the sandbox's lifetime.
@@ -57,6 +64,22 @@ export interface E2bSessionOptions {
   now?: () => string
   /** How often `waitForExit` re-reads the exit file. */
   pollIntervalMs?: number
+  /**
+   * How often a following `logs()` re-reads the journal.
+   *
+   * Its own interval rather than {@link pollIntervalMs}, because the two loops read different
+   * things: the wait re-reads a four-byte exit file, a tail re-transfers the whole journal —
+   * e2b has no byte-range read. Defaults to {@link DEFAULT_FOLLOW_MS}.
+   */
+  followIntervalMs?: number
+  /**
+   * The shortest gap between two liveness probes inside a following `logs()`.
+   *
+   * Slower than {@link followIntervalMs} because the probe is two remote calls rather than a
+   * file read, and defaulting to the same `LIVENESS_PROBE_INTERVAL_MS` the wait loop spends on
+   * the identical question. Injected so a test can reach the verdict without spending it.
+   */
+  followLivenessIntervalMs?: number
   /**
    * e2b's per-command budget, in milliseconds. `0` — the default here — disables it.
    *
@@ -87,6 +110,8 @@ export function createE2bSession(
   const newProcessId = options.newProcessId ?? (() => crypto.randomUUID())
   const now = options.now ?? (() => new Date().toISOString())
   const pollMs = options.pollIntervalMs ?? DEFAULT_POLL_MS
+  const followMs = options.followIntervalMs ?? DEFAULT_FOLLOW_MS
+  const followLivenessMs = options.followLivenessIntervalMs ?? LIVENESS_PROBE_INTERVAL_MS
   const elapsedMs = options.monotonicNowMs ?? (() => Date.now())
   const commandTimeoutMs = options.commandTimeoutMs ?? 0
   // Trailing slashes stripped the way `journalPaths` strips them, so the prefix
@@ -95,7 +120,7 @@ export function createE2bSession(
 
   const journal = createJournalIo(sandbox, root)
   const { entries: journalEntries, metaMatching, readExitCode, readListedMeta } = journal
-  const { readMeta, readSliceFrom, streamFile } = journal
+  const { readEndOffset, readMeta, readSliceFrom, streamFile } = journal
   const table = createWrapperTable(sandbox, root, now)
   const { killTree, listedWrapper, livenessOf, recoveredCommand, recoveredProcesses } = table
   const { confirmReaped, sessionSurvivors } = table
@@ -212,86 +237,26 @@ export function createE2bSession(
   function handleFor(meta: JournalMeta): SandboxProcessHandle {
     const paths = journalPaths(root, meta.id)
 
-    /**
-     * `replayTurn`'s read: the transcript entire, and how the turn ended.
-     *
-     * Emitted chunk by chunk rather than as one event per stream. `replayTurn` folds into a
-     * bounded window precisely "so the full transcript never exists in memory (AC-016)",
-     * and `processStderr` drains stdout to keep only stderr's bounded tail — both written
-     * against a stream. Handing them one `Uint8Array` per stream defeats the guarantee they
-     * were built on and puts a noisy turn's whole transcript in a 128MB isolate (codex
-     * review, PR #260).
-     *
-     * stdout runs to completion before stderr starts, because `demuxProcessEvents` splits
-     * on the event tag and the exit record is read first — it is four bytes, and reading it
-     * up front keeps the terminal event's exit code from depending on what the transcript
-     * did to the clock.
-     */
-    async function* wholeTranscript(): AsyncGenerator<ProcessLogEvent> {
-      const exitCode = await readExitCode(paths)
-      let stdout = 0
-      for await (const chunk of streamFile(paths.stdout, 'fail')) {
-        stdout += chunk.length
-        yield { type: 'stdout', cursor: encodeCursor(stdout, 0), timestamp: now(), data: chunk }
-      }
-      let stderr = 0
-      for await (const chunk of streamFile(paths.stderr, 'fail')) {
-        stderr += chunk.length
-        yield { type: 'stderr', cursor: encodeCursor(stdout, stderr), timestamp: now(), data: chunk }
-      }
-      if (exitCode !== undefined) {
-        yield {
-          type: 'terminal',
-          state: 'exited',
-          cursor: encodeCursor(stdout, stderr),
-          timestamp: now(),
-          exit: { code: exitCode, timedOut: false },
-        }
-      }
-    }
-
-    /** The watchdog's read: what arrived since last time, and nothing before it. */
-    async function incrementSince(since: string): Promise<readonly ProcessLogEvent[]> {
-      const from = decodeCursor(since)
-      const [stdout, stderr] = await Promise.all([
-        readSliceFrom(paths.stdout, from.stdout),
-        readSliceFrom(paths.stderr, from.stderr),
-      ])
-      return replayPositioned({ stdout, stderr }, now())
-    }
-
     return {
       id: meta.id,
       status: () => statusOf(meta),
-      logs: async (logOptions) => {
-        if (logOptions?.since !== undefined) {
-          const events = await incrementSince(logOptions.since)
-          return new ReadableStream({
-            start(controller) {
-              for (const event of events) {
-                controller.enqueue(event)
-              }
-              controller.close()
-            },
-          })
-        }
-        // Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside
-        // the stream, which is the thing being avoided.
-        const events = wholeTranscript()
-        return new ReadableStream({
-          async pull(controller) {
-            const { done, value } = await events.next()
-            if (done) {
-              controller.close()
-              return
-            }
-            controller.enqueue(value)
-          },
-          async cancel(reason) {
-            await events.return(reason)
-          },
-        })
-      },
+      logs: createProcessLogs({
+        paths,
+        readExitCode: () => readExitCode(paths),
+        readSliceFrom,
+        readEndOffset,
+        streamFile,
+        // The same verdict `waitForExit` ends on, composed here rather than re-derived: gone
+        // from e2b's table *and* no survivor in the wrapper's own session. A follow read that
+        // trusted the journal alone would end on an exit the turn can write for itself, and
+        // never end at all when a killed wrapper writes none (code review, PR #280).
+        isGone: async () =>
+          await livenessOf(meta.id) === 'gone' && await sessionSurvivors(meta.pid) === 'none',
+        now,
+        elapsedMs,
+        followIntervalMs: followMs,
+        livenessIntervalMs: followLivenessMs,
+      }),
       waitForExit: options => waitForExit(meta, options),
       kill: async () => {
         const listed = await listedWrapper(meta.id)

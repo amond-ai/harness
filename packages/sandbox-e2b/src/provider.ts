@@ -169,6 +169,8 @@ export function createE2bProvider(options: E2bProviderOptions): SandboxProvider 
         monotonicNowMs: options.monotonicNowMs,
         sandboxTimeoutMs: options.timeoutMs,
         commandTimeoutMs: options.commandTimeoutMs,
+        followIntervalMs: options.followIntervalMs,
+        followLivenessIntervalMs: options.followLivenessIntervalMs,
       }
       const created = lazySession({
         open: async () => createE2bSession(await acquire(sandboxId), sessionOptions),

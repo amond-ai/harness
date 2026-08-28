@@ -39,6 +39,8 @@ export interface JournalIo {
   entries: () => Promise<{ name: string }[]>
   readListedMeta: (processId: string) => Promise<JournalMeta | undefined>
   readSliceFrom: (path: string, offset: number) => Promise<JournalSlice>
+  /** Where a journal file currently ends — never a silent `0` for a read that failed. */
+  readEndOffset: (path: string) => Promise<number>
   streamFile: (path: string, partial?: PartialRead) => AsyncGenerator<Uint8Array>
   readExitCode: (paths: JournalPaths) => Promise<number | undefined>
   readMeta: (processId: string) => Promise<JournalMeta | undefined>
@@ -157,6 +159,57 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
       at += chunk.length
     }
     return { data, total: Math.max(total, offset) }
+  }
+
+  /**
+   * Where a journal file ends, for a follower positioning itself at the live tail.
+   *
+   * Deliberately not `readSliceFrom(path, 0).total`: {@link streamFile} treats a file it
+   * cannot open as silence, which is right for a stream the wrapper has not written to yet
+   * and wrong for positioning. A transient `files.read` failure would answer `0`, the tail
+   * would start at the beginning, and the next successful poll would serve the whole
+   * retained transcript to a subscriber that asked for only what comes next — the exact
+   * double-count `replay` exists to separate (codex review, PR #280).
+   *
+   * Absence is established by asking `exists`, the way `journalEntries` establishes the
+   * root's, rather than by inspecting an error whose shape is not part of the structural
+   * slice this backend takes from the SDK. A probe that itself fails counts as "may exist",
+   * which keeps the safe direction: fail the subscription rather than silently replay.
+   */
+  async function readEndOffset(path: string): Promise<number> {
+    let reader: ReadableStreamDefaultReader<Uint8Array>
+    try {
+      reader = (await sandbox.files.read(path, { format: 'stream' })).getReader()
+    }
+    catch (cause) {
+      if (await isMissing(path)) {
+        return 0
+      }
+      throw cause
+    }
+    try {
+      let total = 0
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) {
+          return total
+        }
+        total += value?.length ?? 0
+      }
+    }
+    finally {
+      await reader.cancel().catch(() => {})
+    }
+  }
+
+  /** Whether the path is definitively not there; a probe that fails answers `false`. */
+  async function isMissing(path: string): Promise<boolean> {
+    try {
+      return !await sandbox.files.exists(path)
+    }
+    catch {
+      return false
+    }
   }
 
   /**
@@ -284,6 +337,7 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
     entries: journalEntries,
     readListedMeta,
     readSliceFrom,
+    readEndOffset,
     streamFile,
     readExitCode,
     readMeta,
