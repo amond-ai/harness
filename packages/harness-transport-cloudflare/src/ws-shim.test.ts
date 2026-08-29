@@ -1,4 +1,4 @@
-import { describe, expect, it, spyOn } from 'bun:test'
+import { describe, expect, it, vi } from 'vitest'
 import { toWsLike } from './ws-shim'
 
 /** The half of `WebSocket` the shim consumes, plus the hooks a test needs to drive it. */
@@ -183,7 +183,7 @@ describe('toWsLike buffering', () => {
     await tick()
     const oversized = 'x'.repeat(8 * 1024 * 1024 + 1)
 
-    const encode = spyOn(TextEncoder.prototype, 'encode')
+    const encode = vi.spyOn(TextEncoder.prototype, 'encode')
     let encodes = -1
     try {
       fake.emit('message', { data: oversized })

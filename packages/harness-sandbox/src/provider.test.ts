@@ -1,5 +1,5 @@
 import type { HarnessV1SandboxProvider } from '@ai-sdk/harness'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { createHarnessSandboxProvider } from './provider'
 import { fakeSandboxProvider } from './sandbox.fixtures'
 

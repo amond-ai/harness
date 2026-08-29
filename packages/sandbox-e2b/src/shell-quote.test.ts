@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { quoteArg, quoteArgv, unquoteArgv, unquoteFirstArg } from './shell-quote'
 
 describe('quoteArg', () => {

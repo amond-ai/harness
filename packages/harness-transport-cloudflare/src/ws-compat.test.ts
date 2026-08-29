@@ -1,5 +1,5 @@
 import type { WsLike } from './ws-shim'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { createWebSocketClass, SANDBOX_ID_PARAM } from './ws-compat'
 
 function stubSocket() {

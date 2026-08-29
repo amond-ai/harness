@@ -7,7 +7,7 @@
  * there, so being an ordinary `Error` with a recognisable message is not enough: the class
  * itself has to survive the trip and stay distinguishable from its sibling.
  */
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from './types'
 
 describe('SandboxWaitTimeoutError', () => {

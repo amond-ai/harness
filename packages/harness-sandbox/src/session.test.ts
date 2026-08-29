@@ -1,5 +1,5 @@
 import type { HarnessV1NetworkSandboxSession } from '@ai-sdk/harness'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { fakeSandboxProvider } from './sandbox.fixtures'
 import { createHarnessSandboxSession } from './session'
 

@@ -1,5 +1,5 @@
 import type { ProcessLogEvent } from '@pleaseai/sandbox-contract'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { createProcessSurface, splitProcessStreams } from './process'
 import {
   exitedEvent,

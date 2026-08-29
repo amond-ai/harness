@@ -7,7 +7,7 @@
  */
 import type { E2bSandboxLike } from './e2b-session'
 import type { Fake } from './e2b-session.fixtures'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { decode, encode, fakeSandbox, ROOT, session, streamOf } from './e2b-session.fixtures'
 import { decodeCursor } from './log-replay'
 

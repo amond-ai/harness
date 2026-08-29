@@ -1,6 +1,6 @@
 import type { E2bSandboxLike } from './e2b-session'
 import type { E2bSandboxApi } from './provider'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { encode, fakeSandbox, ROOT } from './e2b-session.fixtures'
 import { createE2bProvider } from './provider'
 

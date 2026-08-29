@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 
 /**
  * Read as source, because `ws.ts` cannot be imported outside a Worker build — it resolves

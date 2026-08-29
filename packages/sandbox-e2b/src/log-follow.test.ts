@@ -9,7 +9,7 @@
  * `bridge exited before becoming ready` (`scripts/spike-e2b-follow.ts`: the stream closed at
  * 1489ms against a process that ran to 16680ms).
  */
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { decode, encode, endProcess, fakeSandbox, ROOT, session, streamOf } from './e2b-session.fixtures'
 
 /** Read one event, so a test can write into the journal *while* the stream is open. */

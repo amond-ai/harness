@@ -1,5 +1,5 @@
 import type { DialFetch } from './direct-connect'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { createDirectSocketOpener } from './direct-connect'
 
 function upgraded() {

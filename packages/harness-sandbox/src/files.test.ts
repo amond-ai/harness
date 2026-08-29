@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'bun:test'
+import { Buffer } from 'node:buffer'
+import { describe, expect, it } from 'vitest'
 import { createFileSurface } from './files'
 import { fakeSandboxProvider } from './sandbox.fixtures'
 
@@ -174,7 +175,15 @@ describe('writes', () => {
     const { files, state } = surface()
     await files.writeBinaryFile({ path: '/big', content: bytes })
 
-    expect(state.files('sbx').get('/big')).toEqual(bytes)
+    // Same predicate as `toEqual` — same type, same length, same bytes — computed without
+    // vitest's structural deep-equal, which walks a typed array element by element: measured
+    // ~3.1s on this fixture against ~2ms for the byte compare, and past 20s once `turbo run
+    // test` puts the workspaces under concurrent load. The size is the point of the test, so
+    // the fixture cannot shrink; only the way it is compared can.
+    const written = state.files('sbx').get('/big')
+    expect(written).toBeInstanceOf(Uint8Array)
+    expect(written!.length).toBe(bytes.length)
+    expect(Buffer.from(written!).equals(Buffer.from(bytes))).toBe(true)
   })
 
   it('writes text as text', async () => {

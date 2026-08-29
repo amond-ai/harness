@@ -4,7 +4,7 @@
  * the same surface. That one asks what the translation produces; this one asks what it
  * refuses to start, and what it stops once started.
  */
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { createFileSurface } from './files'
 import { fakeSandboxProvider } from './sandbox.fixtures'
 

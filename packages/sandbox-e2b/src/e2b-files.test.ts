@@ -1,5 +1,5 @@
 import type { E2bSandboxLike } from './e2b-surface'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { createE2bFiles } from './e2b-files'
 
 function fakeE2b(bytes = new Uint8Array([0xFF, 0x00, 0x41])) {

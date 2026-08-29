@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { journalledCommand, journalledScriptIn, journalPaths, parseJournalMeta, serializeJournalMeta, SESSION_OPEN } from './journal'
 import { quoteArg, quoteArgv, unquoteArgv } from './shell-quote'
 

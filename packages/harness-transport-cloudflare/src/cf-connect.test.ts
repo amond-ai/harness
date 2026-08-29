@@ -1,5 +1,5 @@
 import type { WsConnectSandbox } from './cf-connect'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { createBridgeSocketOpener } from './cf-connect'
 
 function fakeSandbox(reply: (request: Request, port: number) => Response) {

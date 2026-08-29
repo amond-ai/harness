@@ -8,7 +8,7 @@
  * kill being best-effort in both of the shapes a failure can take.
  */
 import type { ProcessLogEvent } from '@pleaseai/sandbox-contract'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { createProcessSurface } from './process'
 import { fakeSandboxProvider, FIXTURE_CWD, processSurface, stdoutEvent } from './sandbox.fixtures'
 

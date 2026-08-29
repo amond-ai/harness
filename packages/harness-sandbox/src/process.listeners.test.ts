@@ -11,7 +11,7 @@
  * signal that dropped a listener itself is not holding one either.
  */
 import type { ProcessLogEvent } from '@pleaseai/sandbox-contract'
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { createProcessSurface } from './process'
 import { fakeSandboxProvider, FIXTURE_CWD } from './sandbox.fixtures'
 
