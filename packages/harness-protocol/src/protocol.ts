@@ -159,6 +159,18 @@ export type InboundMessage = z.infer<typeof inboundMessageSchema>
  * SDK it runs (`session-artifacts.ts`).
  */
 export const sessionArtifactsSchema = z.object({
+  /**
+   * The session the turn ran as — what a later attempt passes back as `start.resume`.
+   *
+   * Beside the transcript path rather than derived from it: the Worker restores the file by the
+   * path the host named and resumes by the id the host named, and reading the id out of the
+   * filename would make the `<sessionId>.jsonl` convention a Worker-side assumption about a
+   * CLI implementation detail this schema exists to keep on the host's side.
+   *
+   * Absent for the same reason the path is: under `persistSession: false` there is no session
+   * to resume, and a host that never reached `system`/`init` has no id to report.
+   */
+  sessionId: z.string().optional(),
   /** Absent under `persistSession: false`, where the SDK writes no session file at all. */
   sessionTranscriptPath: z.string().optional(),
   journalPath: z.string(),
@@ -199,6 +211,15 @@ export type BridgeErrorPhase = z.infer<typeof bridgeErrorPhaseSchema>
 
 export const turnHostErrorSchema = harnessV1ErrorPartSchema.extend({
   phase: bridgeErrorPhaseSchema.optional(),
+  /**
+   * The same artifacts `finish` reports, on the ending that is *not* a finish.
+   *
+   * A run-phase `error` is the ordinary way a turn fails, and by then `system`/`init` has long
+   * since named a session — so the attempt a client retries after one needs exactly these paths.
+   * Absent from a `start`- or `init`-phase error, which happened before there was a session to
+   * name, and from a host older than this field.
+   */
+  sessionArtifacts: sessionArtifactsSchema.optional(),
 })
 
 export type TurnHostError = z.infer<typeof turnHostErrorSchema>

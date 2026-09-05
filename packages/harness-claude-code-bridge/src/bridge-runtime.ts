@@ -349,6 +349,15 @@ export interface BridgeTurn {
     error: unknown
     message?: string
     phase?: BridgeErrorPhase
+    /**
+     * Where this turn's two durable files stand, when the caller knows.
+     *
+     * On an `error` as well as on `finish`, because a run-phase failure is the
+     * ordinary way a turn ends badly and the client that retries it needs the
+     * session it should resume. Passed through verbatim; the bridge does not
+     * inspect or build it.
+     */
+    sessionArtifacts?: Record<string, unknown>
   }) => void
 
   /** Absolute path of this turn's journal, reported in `finish`. */
@@ -728,6 +737,7 @@ export async function runBridge<TStart extends { type: 'start' }>(
     error: unknown
     message?: string
     phase?: BridgeErrorPhase
+    sessionArtifacts?: Record<string, unknown>
   }): void => {
     writeErrorToStderr({
       message: input.message ?? 'bridge error',
@@ -737,6 +747,11 @@ export async function runBridge<TStart extends { type: 'start' }>(
       type: 'error',
       phase: input.phase ?? 'run',
       error: serialiseError(input.error),
+      // Omitted rather than sent as `undefined` when the caller knows none:
+      // an `error` from before the session exists says nothing about it.
+      ...(input.sessionArtifacts === undefined
+        ? {}
+        : { sessionArtifacts: input.sessionArtifacts }),
     })
   }
 

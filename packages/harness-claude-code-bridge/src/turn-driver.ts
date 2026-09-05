@@ -451,6 +451,53 @@ async function runTurn(
   const childEnv
     = start.env !== undefined ? { ...procEnv, ...start.env } : procEnv
 
+  // Reported on `finish` as `sessionArtifacts` / `stopped`. `session_id` and
+  // `cwd` come off `system`/`init`; the Worker takes the paths as given.
+  //
+  // Declared here rather than beside the loop that fills them because the
+  // error paths below report them too, and one of those — the interrupt
+  // escalation — is installed before the loop runs.
+  let sessionId: string | undefined
+  let sessionCwd = workdir
+  let terminalReason: string | undefined
+
+  /*
+   * The two files this turn leaves behind, as they stand right now.
+   *
+   * Reported on every terminal frame this host can send, not only on `finish`.
+   * A run-phase `error` is the ordinary way a turn fails, and by then
+   * `system`/`init` has long since named a session — so a client that retries
+   * needs exactly these paths, and a frame that withheld them would make a
+   * failed attempt the one case whose session cannot be preserved.
+   *
+   * Both paths are reported as the child would see them. The transcript is
+   * resolved against `childEnv`, not the host's environment, because a
+   * `start.env.CLAUDE_CONFIG_DIR` moves the CLI's `projects/` tree; and it is
+   * omitted under `persistSession: false`, where the SDK writes no session
+   * file at all and any path would name a transcript that does not exist.
+   */
+  const sessionArtifacts = (): {
+    sessionId?: string
+    sessionTranscriptPath?: string
+    journalPath: string
+  } => ({
+    /*
+     * The id itself, not just the file named after it: the Worker resumes
+     * with `start.resume`, and reading the id back out of the path would put
+     * the `<sessionId>.jsonl` convention on the Worker's side of the split
+     * this whole field exists to keep on the host's. Reported whenever the
+     * turn learned one, including under `persistSession: false` — the id is
+     * what the turn ran as either way, and a caller that means to resume
+     * needs the transcript below as well.
+     */
+    sessionId,
+    sessionTranscriptPath:
+      sessionId === undefined || start.persistSession === false
+        ? undefined
+        : sessionTranscriptPath({ cwd: sessionCwd, sessionId, env: childEnv }),
+    journalPath: turn.journalPath,
+  })
+
   const q = query({
     prompt: queryInput.input,
     options: {
@@ -597,18 +644,13 @@ async function runTurn(
         type: 'error',
         phase: 'run',
         error: `no result within ${graceMs}ms of interrupt (${reason})`,
+        sessionArtifacts: sessionArtifacts(),
       })
       abortCtl.abort()
       void turn.flush().finally(() => exitProcess(1))
     }, graceMs)
     escalation.unref?.()
   })
-
-  // Reported on `finish` as `sessionArtifacts` / `stopped`. `session_id` and
-  // `cwd` come off `system`/`init`; the Worker takes the paths as given.
-  let sessionId: string | undefined
-  let sessionCwd = workdir
-  let terminalReason: string | undefined
 
   let turnUsage: Record<string, unknown> | undefined
   let totalCostUsd: number | undefined
@@ -627,6 +669,7 @@ async function runTurn(
       error: normalized,
       message: 'claude-code terminal error',
       phase: 'run',
+      sessionArtifacts: sessionArtifacts(),
     })
     queryInput.close()
     abortCtl.abort()
@@ -787,6 +830,7 @@ async function runTurn(
         error: err,
         message: 'claude-code turn failed',
         phase: 'run',
+        sessionArtifacts: sessionArtifacts(),
       })
     }
     return
@@ -818,24 +862,7 @@ async function runTurn(
     finishReason: { unified: 'stop', raw: 'stop' },
     totalUsage: turnUsage ?? streamEventState.stepUsage ?? defaultUsage(),
     stopped,
-    /*
-     * Both paths are reported as the child would see them. The transcript is
-     * resolved against `childEnv`, not the host's environment, because a
-     * `start.env.CLAUDE_CONFIG_DIR` moves the CLI's `projects/` tree; and it is
-     * omitted under `persistSession: false`, where the SDK writes no session
-     * file at all and any path would name a transcript that does not exist.
-     */
-    sessionArtifacts: {
-      sessionTranscriptPath:
-        sessionId === undefined || start.persistSession === false
-          ? undefined
-          : sessionTranscriptPath({
-              cwd: sessionCwd,
-              sessionId,
-              env: childEnv,
-            }),
-      journalPath: turn.journalPath,
-    },
+    sessionArtifacts: sessionArtifacts(),
     ...(totalCostUsd !== undefined
       ? { harnessMetadata: { 'claude-code': { costUsd: totalCostUsd } } }
       : {}),

@@ -124,6 +124,26 @@ Each is a separate commit in this repository and is intended to go upstream.
     a client can prove its `start` was taken without waiting for the query's
     first message, which a cold `query()` can delay past any sensible bound.
 
+19. `feat(turn-host): report the session id on finish` — `sessionArtifacts`
+    carried the session *file*'s path but not the id the turn ran as, so a
+    client that wanted to resume had to parse `<sessionId>.jsonl` out of the
+    path — putting a CLI naming convention on the Worker's side of the split
+    that field exists to keep on the host's. The id now rides beside the path
+    (`sessionArtifactsSchema.sessionId` in `@pleaseai/harness-protocol`).
+
+20. `feat(turn-host): report the session artifacts on a run-phase error too` —
+    only `finish` named them, so the ordinary way a turn fails — the SDK
+    throwing, a terminal error frame, an interrupt the query never answered —
+    left the client with no session to resume, which is exactly the ending a
+    retry follows. The three run-phase `error` emits now carry the same
+    `sessionArtifacts` `finish` does (`turnHostErrorSchema.sessionArtifacts` in
+    `@pleaseai/harness-protocol`), built by one `sessionArtifacts()` helper
+    that also feeds `finish`; `emitError` in `bridge-runtime.ts` forwards an
+    optional `sessionArtifacts` verbatim and omits the key when the caller
+    knows none. The `sessionId`/`sessionCwd` declarations moved above the
+    interrupt handler, which is installed before the message loop that fills
+    them.
+
 Upstream behaviour deliberately dropped: the `pnpm install` bootstrap inside the
 sandbox (the image ships the dependencies) and `BRIDGE_REPLAY_FROM_DISK` as the
 gate on disk-first journaling (it is unconditional here; the env var still

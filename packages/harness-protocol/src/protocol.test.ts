@@ -56,9 +56,14 @@ describe('the turn host\'s outbound union', () => {
     finishReason: { unified: 'stop', raw: 'stop' },
     totalUsage: usage,
     stopped: 'interrupted',
-    sessionArtifacts: { journalPath: '/state/event-log.ndjson' },
+    sessionArtifacts: { sessionId: 'sess-1', journalPath: '/state/event-log.ndjson' },
   }
-  const failed = { type: 'error', error: 'boom', phase: 'run' }
+  const failed = {
+    type: 'error',
+    error: 'boom',
+    phase: 'run',
+    sessionArtifacts: { sessionId: 'sess-1', journalPath: '/state/event-log.ndjson' },
+  }
 
   /*
    * The regression this extension exists for. A plain `z.object` strips undeclared keys, so
@@ -76,16 +81,24 @@ describe('the turn host\'s outbound union', () => {
     const upstreamError = harnessV1BridgeOutboundMessageSchema.safeParse(failed)
     expect(upstreamError.success).toBe(true)
     expect(upstreamError.data).not.toHaveProperty('phase')
+    expect(upstreamError.data).not.toHaveProperty('sessionArtifacts')
   })
 
   it('keeps the fields this host adds to finish and error', () => {
     const parsedFinish = turnHostOutboundMessageSchema.parse(finish)
     expect(parsedFinish).toMatchObject({
       stopped: 'interrupted',
-      sessionArtifacts: { journalPath: '/state/event-log.ndjson' },
+      // The session id rides with the path: a resuming client sends it as `start.resume`
+      // rather than parsing it back out of the `<sessionId>.jsonl` filename.
+      sessionArtifacts: { sessionId: 'sess-1', journalPath: '/state/event-log.ndjson' },
     })
 
-    expect(turnHostOutboundMessageSchema.parse(failed)).toMatchObject({ phase: 'run' })
+    // A run-phase error carries the session too: it is the ordinary retry trigger, and the
+    // attempt that retries it resumes what this one left.
+    expect(turnHostOutboundMessageSchema.parse(failed)).toMatchObject({
+      phase: 'run',
+      sessionArtifacts: { sessionId: 'sess-1', journalPath: '/state/event-log.ndjson' },
+    })
   })
 
   it('still accepts every frame the upstream union carries', () => {

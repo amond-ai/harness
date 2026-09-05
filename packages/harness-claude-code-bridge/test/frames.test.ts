@@ -93,14 +93,49 @@ it('reports the session transcript and journal paths on finish', async () => {
   const finish = await client.waitFor(frame => frame.type === 'finish')
 
   const artifacts = finish.sessionArtifacts as {
+    sessionId: string
     sessionTranscriptPath: string
     journalPath: string
   }
   expect(artifacts.sessionTranscriptPath).toMatch(
     /\/projects\/-workspace-repo\/sess-1\.jsonl$/,
   )
+  // The id itself, not only the file named after it: a resuming client sends
+  // it as `start.resume` rather than parsing it back out of the path.
+  expect(artifacts.sessionId).toBe('sess-1')
   expect(artifacts.journalPath).toBe(host.journalPath)
   expect(finish.stopped).toBe('completed')
+  client.close()
+})
+
+/*
+ * A run-phase `error` is how a turn ordinarily fails, and `system`/`init` has
+ * already named a session by then — so the client that retries the attempt is
+ * told which session to resume, exactly as a `finish` would.
+ */
+it('reports the session artifacts on a run-phase error too', async () => {
+  // A `result` the CLI did not call a success is the ordinary run-phase failure.
+  const query = createFakeQuery([
+    initMessage(),
+    resultMessage({ subtype: 'error_during_execution', errors: ['the model went away'] }),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  const failure = await client.waitFor(frame => frame.type === 'error')
+
+  expect(failure.phase).toBe('run')
+  const artifacts = failure.sessionArtifacts as {
+    sessionId: string
+    sessionTranscriptPath: string
+    journalPath: string
+  }
+  expect(artifacts.sessionId).toBe('sess-1')
+  expect(artifacts.sessionTranscriptPath).toMatch(
+    /\/projects\/-workspace-repo\/sess-1\.jsonl$/,
+  )
+  expect(artifacts.journalPath).toBe(host.journalPath)
   client.close()
 })
 
