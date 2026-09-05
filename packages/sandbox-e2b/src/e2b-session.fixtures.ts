@@ -50,9 +50,10 @@ export interface Fake {
    * The backend asks with `pgrep -s <sid>`, which the fake answers from this set the way the
    * sandbox answers it from its process table: a wrapper that led a session and left a
    * detached child behind is still *in* that session, however thoroughly e2b has forgotten
-   * the wrapper itself (`scripts/spike-e2b-session.ts`). Left entirely to the test rather
-   * than derived from the reap command: the whole question is what is running that the fake's
-   * own process table — like e2b's — never knew about.
+   * the wrapper itself (`scripts/spike-e2b-session.ts`). Left to the test rather than derived
+   * from the tree reap: the whole question is what is running that the fake's own process
+   * table — like e2b's — never knew about. The one command that does empty a session here is
+   * the standalone `pkill -s`, which signals every member of it by definition.
    */
   sessions: Set<number>
 }
@@ -88,14 +89,33 @@ function fakeCommands(state: FakeState): E2bSandboxLike['commands'] {
       // A background command's effects have *not* landed when e2b's `run` resolves — it
       // returns as soon as the command starts. Modelled by holding the reap until the handle
       // is waited on, which is what makes a caller that awaits only the start observable.
-      // Both branches of the reap command name the pid the same way, and the fake cannot
-      // evaluate the `sid === pid` test that chooses between them — but it does not need to:
-      // either branch leaves the tree dead, which is what the fake models.
+      /*
+       * The reap script's two branches are not interchangeable, so the fake evaluates the
+       * gate the sandbox would. `sid=$(ps -o sid= -p <pid>)` answers with the pid only while
+       * that pid is alive and leads its own session — `setsid --wait` makes every wrapper one
+       * — so a target still in the fake's process table takes the `pkill -s` branch and
+       * empties the session; a target already gone answers nothing, falls to `reap <pid>`,
+       * and that walk finds no children of a dead pid and signals nothing at all. Modelling
+       * both as "the tree dies" is what let a reap that reached nothing read as a success.
+       */
       const reaped = /^reap\(\) \{.*; else reap (\d+) ; fi$/.exec(cmd)
+      // The session reap on its own, for a leader that can no longer answer the gate.
+      const session = /^pkill -[A-Z0-9]+ -s (\d+) /.exec(cmd)
       const reap = (): void => {
-        if (reaped) {
-          state.live.delete(Number(reaped[1]))
+        if (session) {
+          const sid = Number(session[1])
+          state.sessions.delete(sid)
+          state.live.delete(sid)
+          return
         }
+        if (!reaped) {
+          return
+        }
+        const target = Number(reaped[1])
+        if (!state.live.has(target)) {
+          return // dead leader: the gate fails and the walk has nothing to walk
+        }
+        state.live.delete(target)
       }
       // The session probe, answered from the fake's own sessions rather than by exit code —
       // the backend deliberately reads the answer out of stdout so that "found nothing" and

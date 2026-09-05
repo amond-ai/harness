@@ -184,6 +184,16 @@ export interface SandboxProcessHandle {
    * {@link WaitForExitOptions} for why the caller's `catch` is load-bearing here.
    */
   waitForExit: (options?: WaitForExitOptions) => Promise<ProcessExit>
+  /**
+   * Signal the process. Without `signal` the backend sends whatever it terminates with
+   * (`@cloudflare/sandbox`: SIGTERM; the e2b backend: a SIGKILL walk of the tree). `2` (SIGINT)
+   * asks the process to finish on its own terms instead: the `claude` CLI answers it by ending
+   * the turn and printing its `result`, which SIGTERM never yields. A backend that cannot
+   * deliver a named signal must neither do nothing silently nor substitute a harsher one — a
+   * SIGKILL sent where SIGINT was asked for ends the turn without the `result` the interrupt
+   * exists to collect. It reports the non-delivery (a log the sandbox surfaces is enough) and
+   * leaves the caller's bounded wait to time out and escalate to the default kill.
+   */
   kill: (signal?: number) => Promise<void>
 }
 

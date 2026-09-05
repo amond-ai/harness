@@ -25,6 +25,7 @@ import type { E2bSandboxLike } from './e2b-surface'
 import type { JournalMeta } from './journal'
 import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@pleaseai/sandbox-contract'
 import { createE2bFiles } from './e2b-files'
+import { createKillPath } from './e2b-kill'
 import { isProcessId, journalledCommand, journalPaths, serializeJournalMeta } from './journal'
 import { createJournalIo } from './journal-io'
 import { createLifetimeRenewer } from './lifetime'
@@ -123,7 +124,14 @@ export function createE2bSession(
   const { readEndOffset, readMeta, readSliceFrom, streamFile } = journal
   const table = createWrapperTable(sandbox, root, now)
   const { killTree, listedWrapper, livenessOf, recoveredCommand, recoveredProcesses } = table
-  const { confirmReaped, sessionSurvivors } = table
+  const { confirmReaped, killSession, sessionSurvivors } = table
+  const { forgetExecPid, killProcess, rememberExecPid, sessionPid } = createKillPath({
+    confirmReaped,
+    killSession,
+    killTree,
+    listedWrapper,
+    sessionSurvivors,
+  })
   const renewSandboxLifetime = createLifetimeRenewer(sandbox, {
     lifetime: options.sandboxTimeoutMs,
     floorMs: LIVENESS_PROBE_INTERVAL_MS,
@@ -202,8 +210,10 @@ export function createE2bSession(
       cwd: meta.cwd,
       startedAt: meta.startedAt,
     }
-    const exited = (code: number): ProcessStatus =>
-      ({ ...base, state: 'exited', exit: { code, timedOut: false }, endedAt: now() })
+    const exited = (code: number): ProcessStatus => {
+      forgetExecPid(meta.id)
+      return { ...base, state: 'exited', exit: { code, timedOut: false }, endedAt: now() }
+    }
 
     if (livenessFrom(listed) !== 'gone') {
       return { ...base, state: 'running' }
@@ -216,7 +226,7 @@ export function createE2bSession(
     // 3's asymmetry. What this does and does not bind is argued at `sessionSurvivors`; the
     // short of it is that the session id comes from `meta.pid`, so a turn that rewrites or
     // deletes its meta is outside the guard's reach and one that only forges an exit is not.
-    if (await sessionSurvivors(meta.pid) !== 'none') {
+    if (await sessionSurvivors(sessionPid(meta)) !== 'none') {
       return { ...base, state: 'running' }
     }
     const settled = code ?? await readExitCode(paths)
@@ -226,6 +236,7 @@ export function createE2bSession(
     // Gone from e2b's table and still no exit file on a second read: the wrapper died before
     // recording `$?`, which is a failure the run must see rather than a turn that quietly
     // never ends.
+    forgetExecPid(meta.id)
     return {
       ...base,
       state: 'error',
@@ -251,24 +262,14 @@ export function createE2bSession(
         // trusted the journal alone would end on an exit the turn can write for itself, and
         // never end at all when a killed wrapper writes none (code review, PR #280).
         isGone: async () =>
-          await livenessOf(meta.id) === 'gone' && await sessionSurvivors(meta.pid) === 'none',
+          await livenessOf(meta.id) === 'gone' && await sessionSurvivors(sessionPid(meta)) === 'none',
         now,
         elapsedMs,
         followIntervalMs: followMs,
         livenessIntervalMs: followLivenessMs,
       }),
       waitForExit: options => waitForExit(meta, options),
-      kill: async () => {
-        const listed = await listedWrapper(meta.id)
-        if (listed?.pid === undefined) {
-          // e2b is running nothing for this process, or could not say. Either way there is
-          // no trustworthy pid to aim at, and the journal's is the turn's to choose.
-          return
-        }
-        if (await killTree(listed.pid) === 'fallback') {
-          await confirmReaped(meta.id, listed.pid)
-        }
-      },
+      kill: signal => killProcess(meta, signal),
     }
   }
 
@@ -337,8 +338,9 @@ export function createE2bSession(
         // turn still writing to the checkout is precisely what must not settle. Short-circuited
         // behind the liveness verdict and inside the interval block, so it costs at most one
         // command per `LIVENESS_PROBE_INTERVAL_MS` and never one per poll.
-        if (await livenessOf(meta.id) === 'gone' && await sessionSurvivors(meta.pid) === 'none') {
+        if (await livenessOf(meta.id) === 'gone' && await sessionSurvivors(sessionPid(meta)) === 'none') {
           const settled = await readExitCode(paths)
+          forgetExecPid(meta.id)
           if (settled !== undefined) {
             return { code: settled, timedOut: false }
           }
@@ -371,6 +373,9 @@ export function createE2bSession(
         envs: execOptions?.env,
         timeoutMs: commandTimeoutMs,
       })
+      // Remembered before anything can fail: from here on this session can aim a kill at the
+      // process even when e2b stops listing its wrapper, and `getProcess` inherits that.
+      rememberExecPid(id, started.pid)
       const meta: JournalMeta = {
         id,
         pid: started.pid,

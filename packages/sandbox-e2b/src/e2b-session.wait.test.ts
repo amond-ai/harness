@@ -359,15 +359,20 @@ describe('createE2bSession', () => {
     it('never asks about the session of a process that never recorded a pid', async () => {
       // `pgrep -s 0` means *the caller's own session*, so asking it about a process known
       // only by its journal files would report a survivor for every one of them, forever.
+      // Read through a session that never started it, which is the state that really has no
+      // pid: one that did keeps the exec-time pid in memory (see the next test).
       const fake = fakeSandbox()
-      const active = session(fake, ['run-1'])
-      await active.exec(['claude'])
+      await session(fake, ['run-1']).exec(['claude'])
       endProcess(fake, 'run-1', '0')
       fake.files.delete(`${ROOT}/run-1.meta.json`)
+      const restarted = session(fake, ['run-1'])
       const before = fake.ran.length
 
-      expect((await (await active.getProcess('run-1'))!.status()).state).toBe('exited')
+      expect((await (await restarted.getProcess('run-1'))!.status()).state).toBe('exited')
       expect(fake.ran).toHaveLength(before)
+      expect(fake.ran.map(run => run.cmd)).not.toContainEqual(
+        expect.stringContaining('pgrep -s 0'),
+      )
     })
 
     it('keeps a still-live process running even when it journalled an exit for itself', async () => {

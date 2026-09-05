@@ -45,15 +45,36 @@ const SESSION_PROBE_TIMEOUT_MS = 15_000
 export type SessionSurvivors = 'survivors' | 'none' | 'unknown'
 
 /**
- * Whether {@link WrapperTable.killTree} reaped the tree or fell back to e2b's own kill.
+ * How {@link WrapperTable.killTree} ended: the walk reaped the tree, e2b's own kill stood in
+ * for it, or nothing was signalled at all.
  *
- * Returned rather than only logged, because the two are not the same event and the caller
- * acts on the difference: `commands.kill` SIGKILLs the wrapper, which cannot propagate it, so
- * a fallback leaves the wrapped command reparented to init and running. Resolving identically
- * for both is how an unconfirmed kill came to be reported as a confirmed one (codex review,
- * PR #260, round 16).
+ * Returned rather than only logged, because the three are not the same event and the caller
+ * acts on the difference. `commands.kill` SIGKILLs the wrapper, which cannot propagate it, so
+ * a `'fallback'` leaves the wrapped command reparented to init and running. Resolving
+ * identically for that and a reap is how an unconfirmed kill came to be reported as a
+ * confirmed one (codex review, PR #260, round 16).
+ *
+ * `'walk-failed'` is the third state, and the reason it exists: e2b's kill is SIGKILL-only,
+ * so it cannot stand in for a *gentler* signal. A failed walk during the SIGINT stage that
+ * fell back would hard-kill the wrapper and end the turn with no `result` — the exact outcome
+ * the interrupt stage exists to avoid — so the requested signal is kept, nothing is sent, and
+ * the caller is told the tree's liveness is untouched and unknown.
  */
-export type KillOutcome = 'reaped' | 'fallback'
+export type KillOutcome = 'reaped' | 'fallback' | 'walk-failed'
+
+/** POSIX numbers `kill -<name>` spells by name; anything else is passed as its number. */
+const SIGNAL_NAMES: Readonly<Record<number, string>> = { 2: 'INT', 9: 'KILL', 15: 'TERM' }
+
+/** The one signal e2b's own `commands.kill` sends, and so the only one it can stand in for. */
+const SIGKILL = 9
+
+/** What `kill -…` and `pkill -…` are given for a contract signal; unset means the SIGKILL reap. */
+export function signalFlag(signal: number | undefined): string {
+  if (signal === undefined) {
+    return 'KILL'
+  }
+  return SIGNAL_NAMES[signal] ?? String(signal)
+}
 
 /**
  * What e2b's process table says about one journal wrapper.
@@ -83,8 +104,11 @@ export interface WrapperTable {
   recoveredProcesses: () => Promise<Map<string, JournalMeta>>
   recoveredCommand: (commandLine: string) => SandboxCommand
   sessionSurvivors: (sid: number) => Promise<SessionSurvivors>
-  confirmReaped: (id: string, pid: number) => Promise<void>
-  killTree: (pid: number) => Promise<KillOutcome>
+  confirmReaped: (id: string, pid: number, via: string) => Promise<void>
+  /** Reap the tree under `pid`; `signal` (a contract number) replaces the default SIGKILL. */
+  killTree: (pid: number, signal?: number) => Promise<KillOutcome>
+  /** Signal a whole session by id, for a leader that is already gone. */
+  killSession: (sid: number, signal?: number) => Promise<KillOutcome>
 }
 
 export function createWrapperTable(
@@ -307,9 +331,9 @@ export function createWrapperTable(
    * measured nothing, and failing every kill against an unreachable sandbox is not what it
    * learned. `killTurn` catches, re-reads `status()`, and reports the kill unconfirmed.
    */
-  async function confirmReaped(id: string, pid: number): Promise<void> {
+  async function confirmReaped(id: string, pid: number, via: string): Promise<void> {
     const survivors = await sessionSurvivors(pid)
-    console.warn(`sandbox-e2b: kill of '${id}' fell back to e2b's own kill; session ${survivors}`)
+    console.warn(`sandbox-e2b: kill of '${id}' went through ${via}; session ${survivors}`)
     if (survivors === 'survivors') {
       throw new Error(`kill of '${id}' left processes running in its session`)
     }
@@ -348,9 +372,31 @@ export function createWrapperTable(
    * would race a process tree that is still being killed in the same checkout (codex and
    * cubic reviews, PR #260).
    */
-  async function killTree(pid: number): Promise<KillOutcome> {
+  async function killTree(pid: number, signal?: number): Promise<KillOutcome> {
+    return await runReap(reapCommand(pid, signal), pid, signal)
+  }
+
+  /**
+   * Reap a session whose leader is already dead — the state {@link killTree} cannot serve.
+   *
+   * `reapCommand`'s `pkill -s` branch is gated on the target still answering `ps -o sid=` with
+   * its own pid, and a dead leader answers nothing: the gate fails, the walk finds no children
+   * of a dead pid, `kill` returns ESRCH into `|| true`, and the whole script exits `0` — a
+   * reported reap that signalled nothing while the reparented `claude` runs on in that
+   * session. That gate is a safety check about *which* pid may be session-reaped, and here the
+   * caller has already made that judgement by other means: the pid is one this isolate
+   * captured from `commands.run` for a `setsid --wait` wrapper (so it led its own session),
+   * and it is only offered here while `sessionSurvivors` still reports members in it. A
+   * session id is only reusable once its last member is gone, so an inhabited session under
+   * that pid is still the wrapper's own.
+   */
+  async function killSession(sid: number, signal?: number): Promise<KillOutcome> {
+    return await runReap(sessionReapCommand(sid, signal), sid, signal)
+  }
+
+  async function runReap(command: string, pid: number, signal?: number): Promise<KillOutcome> {
     try {
-      const walk = await sandbox.commands.run(reapCommand(pid), { background: true, timeoutMs: KILL_WALK_TIMEOUT_MS })
+      const walk = await sandbox.commands.run(command, { background: true, timeoutMs: KILL_WALK_TIMEOUT_MS })
       const { exitCode } = await walk.wait()
       if (exitCode !== 0) {
       // The walk ends in `|| true`, so anything but `0` means it did not run to the end —
@@ -362,25 +408,48 @@ export function createWrapperTable(
       return 'reaped'
     }
     catch (cause) {
-    // The walk could not start, or did not finish. Fall back to what e2b offers directly —
-    // it leaves the child running, but a shell that is gone writes no exit record either
-    // way, and doing nothing here would leave both alive. Reported as `'fallback'` rather
-    // than resolved like a completed reap, because those are different states of the
-    // sandbox and the caller has to be able to act on which one it got.
       console.warn(`sandbox-e2b: the kill walk for pid ${pid} did not complete: ${String(cause)}`)
+      // e2b's own kill is SIGKILL and nothing else ("It uses SIGKILL" — its `index.d.ts`), so
+      // it can only stand in for the signal that was asked for when that signal *was* SIGKILL.
+      // Substituting it for a SIGINT would cut the turn with no `result` — precisely what the
+      // interrupt stage is for — so a gentler request is left unsent and reported as such.
+      if (signal !== undefined && signal !== SIGKILL) {
+        console.warn(
+          `sandbox-e2b: pid ${pid} was not signalled; e2b's kill is SIGKILL-only and`
+          + ` the requested ${signalFlag(signal)} was not substituted`,
+        )
+        return 'walk-failed'
+      }
+      // Fall back to what e2b offers directly — it leaves the child running, but a shell that
+      // is gone writes no exit record either way, and doing nothing here would leave both
+      // alive. Reported as `'fallback'` rather than resolved like a completed reap, because
+      // those are different states of the sandbox and the caller has to act on which it got.
       await sandbox.commands.kill(pid).catch(() => false)
       return 'fallback'
     }
   }
 
-  /** Reap by session where that is safe, and by the tree walk where it is not. */
-  function reapCommand(pid: number): string {
+  /**
+   * Reap by session where that is safe, and by the tree walk where it is not.
+   *
+   * The signal is the contract's number, spelled the way `kill`/`pkill` take it. Without one
+   * this is the SIGKILL reap it has always been; with SIGINT the same walk asks each process
+   * to finish instead — children first still, so a `claude` turn's own children hear it before
+   * the turn does — and the caller's bounded wait decides whether that was honoured.
+   */
+  function reapCommand(pid: number, signal?: number): string {
     const target = String(pid)
+    const sig = signalFlag(signal)
     return `reap() { for c in $(pgrep -P "$1" 2>/dev/null); do reap "$c"; done;`
-      + ` kill -KILL "$1" 2>/dev/null || true; }`
+      + ` kill -${sig} "$1" 2>/dev/null || true; }`
       + ` ; sid=$(ps -o sid= -p ${target} 2>/dev/null | tr -d ' ')`
-      + ` ; if [ "$sid" = "${target}" ] ; then pkill -KILL -s ${target} 2>/dev/null || true`
+      + ` ; if [ "$sid" = "${target}" ] ; then pkill -${sig} -s ${target} 2>/dev/null || true`
       + ` ; else reap ${target} ; fi`
+  }
+
+  /** The session reap on its own, for a leader that can no longer answer the `sid` test. */
+  function sessionReapCommand(sid: number, signal?: number): string {
+    return `pkill -${signalFlag(signal)} -s ${String(sid)} 2>/dev/null || true`
   }
 
   return {
@@ -391,5 +460,6 @@ export function createWrapperTable(
     sessionSurvivors,
     confirmReaped,
     killTree,
+    killSession,
   }
 }

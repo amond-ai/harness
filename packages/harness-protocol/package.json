@@ -1,0 +1,29 @@
+{
+  "name": "@pleaseai/harness-protocol",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The bridge wire protocol the turn host and its Worker client both speak — vendored from @ai-sdk/harness, extended with the fields this deployment adds",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.5.2"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "4.0.8",
+    "@pleaseai/eslint-config": "^0.0.4",
+    "bun-types": "^1.4.0",
+    "eslint": "^10.7.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}
