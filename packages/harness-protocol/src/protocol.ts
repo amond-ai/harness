@@ -11,7 +11,14 @@
 
 import { z } from 'zod/v4'
 import { startMessageSchema as claudeCodeStartMessageSchema } from './claude-code-bridge-protocol'
-import { harnessV1BridgeInboundCommandSchemas } from './harness-v1/harness-v1-bridge-protocol'
+import {
+  harnessV1BridgeInboundCommandSchemas,
+  harnessV1BridgeOutboundMessageSchema,
+} from './harness-v1/harness-v1-bridge-protocol'
+import {
+  harnessV1ErrorPartSchema,
+  harnessV1FinishPartSchema,
+} from './harness-v1/harness-v1-stream-part'
 
 export {
   bridgeReadySchema,
@@ -143,3 +150,84 @@ export const inboundMessageSchema = z.discriminatedUnion('type', [
 ])
 
 export type InboundMessage = z.infer<typeof inboundMessageSchema>
+
+/**
+ * Where a turn's two durable artifacts ended up, as the host resolved them.
+ *
+ * The Worker never reconstructs `~/.claude/projects/<encoded-cwd>` itself: that encoding is a
+ * CLI implementation detail, and the host is the process pinned to the same CLI patch as the
+ * SDK it runs (`session-artifacts.ts`).
+ */
+export const sessionArtifactsSchema = z.object({
+  /** Absent under `persistSession: false`, where the SDK writes no session file at all. */
+  sessionTranscriptPath: z.string().optional(),
+  journalPath: z.string(),
+})
+
+export type SessionArtifacts = z.infer<typeof sessionArtifactsSchema>
+
+/** How the turn ended, as the host judged it from the SDK's `terminal_reason`. */
+export const stoppedReasonSchema = z.enum(['completed', 'interrupted', 'deferred'])
+
+export type StoppedReason = z.infer<typeof stoppedReasonSchema>
+
+/**
+ * `finish`, with the two fields this host adds — and the reason this extension exists at all.
+ *
+ * The vendored `harnessV1FinishPartSchema` is a plain `z.object`, and a plain `z.object`
+ * **strips** keys it does not declare. So a Worker that validated the host's `finish` against
+ * the upstream union would parse it successfully and receive it with `stopped` and
+ * `sessionArtifacts` silently deleted — the two fields the attempt outcome is decided from.
+ * Measured, not inferred: `safeParse` of a `finish` carrying both answers `success: true` with
+ * neither present in `data`.
+ *
+ * Extended here rather than in the Worker for the reason `startMessageSchema` is: the host
+ * emits these frames and the Worker validates them, so one definition serves both ends of one
+ * wire.
+ */
+export const turnHostFinishSchema = harnessV1FinishPartSchema.extend({
+  stopped: stoppedReasonSchema.optional(),
+  sessionArtifacts: sessionArtifactsSchema.optional(),
+})
+
+export type TurnHostFinish = z.infer<typeof turnHostFinishSchema>
+
+/** Which stage of the turn an `error` came from — stripped by the upstream schema, as above. */
+export const bridgeErrorPhaseSchema = z.enum(['start', 'init', 'run'])
+
+export type BridgeErrorPhase = z.infer<typeof bridgeErrorPhaseSchema>
+
+export const turnHostErrorSchema = harnessV1ErrorPartSchema.extend({
+  phase: bridgeErrorPhaseSchema.optional(),
+})
+
+export type TurnHostError = z.infer<typeof turnHostErrorSchema>
+
+/**
+ * The host's acknowledgement that a `start` was taken: sent the moment the bridge enters
+ * `running`, before `query()` produces anything, so a client can tell "the turn is starting" from
+ * "the model has not spoken yet". Journaled like every other frame, so it carries a `seq`.
+ */
+export const turnHostStartedSchema = z.object({ type: z.literal('bridge-started') })
+
+export type TurnHostStarted = z.infer<typeof turnHostStartedSchema>
+
+/**
+ * Every frame this host can send, with `finish` and `error` in their extended form, plus
+ * `bridge-started`.
+ *
+ * Built by substitution rather than by `.extend()` on the union — a discriminated union has no
+ * such method — so the two replaced members are removed by `type` and the extended ones added
+ * back. A member added upstream therefore arrives here automatically; only the two this host
+ * extends are named.
+ */
+export const turnHostOutboundMessageSchema = z.discriminatedUnion('type', [
+  ...harnessV1BridgeOutboundMessageSchema.options.filter(
+    option => !['finish', 'error'].includes(option.shape.type.value as string),
+  ),
+  turnHostFinishSchema,
+  turnHostErrorSchema,
+  turnHostStartedSchema,
+] as unknown as [z.ZodObject, ...z.ZodObject[]])
+
+export type TurnHostOutboundMessage = z.infer<typeof turnHostOutboundMessageSchema>

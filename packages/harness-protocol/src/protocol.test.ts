@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { inboundMessageSchema, startMessageSchema } from './protocol'
+import { harnessV1BridgeOutboundMessageSchema } from './harness-v1/harness-v1-bridge-protocol'
+import { inboundMessageSchema, startMessageSchema, turnHostOutboundMessageSchema } from './protocol'
 
 describe('the turn host\'s start schema', () => {
   it('accepts a start carrying nothing but a prompt', () => {
@@ -45,5 +46,55 @@ describe('the inbound union', () => {
       type: 'interrupt',
       reason: 'whenever',
     }).success).toBe(false)
+  })
+})
+
+describe('the turn host\'s outbound union', () => {
+  const usage = { inputTokens: {}, outputTokens: {} }
+  const finish = {
+    type: 'finish',
+    finishReason: { unified: 'stop', raw: 'stop' },
+    totalUsage: usage,
+    stopped: 'interrupted',
+    sessionArtifacts: { journalPath: '/state/event-log.ndjson' },
+  }
+  const failed = { type: 'error', error: 'boom', phase: 'run' }
+
+  /*
+   * The regression this extension exists for. A plain `z.object` strips undeclared keys, so
+   * validating the host's own frames against the upstream union *succeeds* and hands back a
+   * `finish` with no `stopped` and an `error` with no `phase` — the fields the attempt outcome
+   * is read from. A silent deletion, not a rejection, which is why it needs a test rather than
+   * a type.
+   */
+  it('shows what the upstream union would silently drop', () => {
+    const upstreamFinish = harnessV1BridgeOutboundMessageSchema.safeParse(finish)
+    expect(upstreamFinish.success).toBe(true)
+    expect(upstreamFinish.data).not.toHaveProperty('stopped')
+    expect(upstreamFinish.data).not.toHaveProperty('sessionArtifacts')
+
+    const upstreamError = harnessV1BridgeOutboundMessageSchema.safeParse(failed)
+    expect(upstreamError.success).toBe(true)
+    expect(upstreamError.data).not.toHaveProperty('phase')
+  })
+
+  it('keeps the fields this host adds to finish and error', () => {
+    const parsedFinish = turnHostOutboundMessageSchema.parse(finish)
+    expect(parsedFinish).toMatchObject({
+      stopped: 'interrupted',
+      sessionArtifacts: { journalPath: '/state/event-log.ndjson' },
+    })
+
+    expect(turnHostOutboundMessageSchema.parse(failed)).toMatchObject({ phase: 'run' })
+  })
+
+  it('still accepts every frame the upstream union carries', () => {
+    for (const frame of [
+      { type: 'bridge-hello', state: 'waiting', lastSeq: 0 },
+      { type: 'raw', rawValue: { type: 'assistant' } },
+      { type: 'sandbox-log', source: 'claude-code', stream: 'stderr', line: 'x' },
+    ]) {
+      expect(turnHostOutboundMessageSchema.safeParse(frame).success).toBe(true)
+    }
   })
 })

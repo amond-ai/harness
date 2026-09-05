@@ -42,6 +42,21 @@ it('emits every non-stream_event SDK message as a journaled raw frame', async ()
   expect(journal.filter(frame => frame.type === 'raw')).toHaveLength(3)
 })
 
+it('acknowledges a start before the query has said anything', async () => {
+  const query = createFakeQuery([initMessage(), resultMessage()])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const types = client.frames.map(frame => frame.type)
+  expect(types.indexOf('bridge-started')).toBeGreaterThan(types.indexOf('bridge-hello'))
+  expect(types.indexOf('bridge-started')).toBeLessThan(types.indexOf('raw'))
+  expect(client.frames.find(frame => frame.type === 'bridge-started')?.seq).toEqual(expect.any(Number))
+  expect((await host.readJournal()).some(frame => frame.type === 'bridge-started')).toBe(true)
+})
+
 it('keeps stream_event-derived frames out of the journal and out of a replay', async () => {
   const query = createFakeQuery([
     initMessage(),

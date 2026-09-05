@@ -119,6 +119,11 @@ Each is a separate commit in this repository and is intended to go upstream.
     of a hand-copied list, so `auto` reaches the SDK as `auto` rather than
     falling through to the harness branch as `default`.
 
+18. `feat(turn-host): acknowledge a start before the query speaks` — the bridge
+    emits a journaled `bridge-started` frame the moment it enters `running`, so
+    a client can prove its `start` was taken without waiting for the query's
+    first message, which a cold `query()` can delay past any sensible bound.
+
 Upstream behaviour deliberately dropped: the `pnpm install` bootstrap inside the
 sandbox (the image ships the dependencies) and `BRIDGE_REPLAY_FROM_DISK` as the
 gate on disk-first journaling (it is unconditional here; the env var still

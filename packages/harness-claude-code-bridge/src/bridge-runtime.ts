@@ -868,6 +868,10 @@ export async function runBridge<TStart extends { type: 'start' }>(
         )
         turnAbort = new AbortController()
         currentTurnState = 'running'
+        // Acknowledged now, not by the query's first message: a cold `query()` can take longer
+        // to say anything than a client is willing to wait for proof that its `start` was
+        // taken, and a client that gave up would leave this turn running with nobody attached.
+        emit({ type: 'bridge-started' })
         void writeStartConfig(msg)
         void writeBridgeMeta('running')
         const startDebug = (msg as { debug?: BridgeDebugConfig }).debug

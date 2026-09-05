@@ -1,5 +1,5 @@
 import type { Host } from './harness'
-import { harnessV1BridgeOutboundMessageSchema } from '@pleaseai/harness-protocol'
+import { harnessV1BridgeOutboundMessageSchema, turnHostOutboundMessageSchema } from '@pleaseai/harness-protocol'
 import { afterEach, expect, it } from 'vitest'
 import {
   connect,
@@ -31,18 +31,26 @@ it('emits only frames the upstream outbound schema accepts', async () => {
   // The host adds `seq` to every event, and `stopped`/`sessionArtifacts` to
   // `finish`. The vendored schemas are plain `z.object`s, so those pass — a
   // failure here is a frame whose *shape* upstream would reject.
-  const rejected = client.frames
-    .map(frame => ({
-      frame,
-      result: harnessV1BridgeOutboundMessageSchema.safeParse(frame),
-    }))
-    .filter(({ result }) => !result.success)
-    .map(({ frame, result }) => ({
-      type: frame.type,
-      issues: result.error?.issues,
-    }))
-
-  expect(rejected).toEqual([])
+  // `bridge-started` is the one frame upstream does not know (UPSTREAM.md patch 18): it is
+  // added, not reshaped, so it is checked only against the Worker's union below.
+  const upstreamFrames = client.frames.filter(frame => frame.type !== 'bridge-started')
+  expect(rejectedBy(harnessV1BridgeOutboundMessageSchema, upstreamFrames)).toEqual([])
+  expect(client.frames.some(frame => frame.type === 'bridge-started')).toBe(true)
+  // And the same frames against the union the Worker actually validates with, which keeps
+  // the added fields instead of stripping them (`protocol.ts`). Checked here as well as
+  // upstream because this is the only test that runs a real host: a frame the Worker's
+  // schema rejects is a turn it cannot read the outcome of.
+  expect(rejectedBy(turnHostOutboundMessageSchema, client.frames)).toEqual([])
   expect(client.frames.length).toBeGreaterThan(0)
   client.close()
 })
+
+function rejectedBy(
+  schema: { safeParse: (value: unknown) => { success: boolean, error?: { issues: unknown } } },
+  frames: Array<Record<string, unknown> & { type: string }>,
+): Array<{ type: string, issues: unknown }> {
+  return frames
+    .map(frame => ({ frame, result: schema.safeParse(frame) }))
+    .filter(({ result }) => !result.success)
+    .map(({ frame, result }) => ({ type: frame.type, issues: result.error?.issues }))
+}
