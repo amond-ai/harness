@@ -18,15 +18,15 @@
     "test:coverage": "bun --bun vitest run --coverage"
   },
   "dependencies": {
-    "@cloudflare/sandbox": "0.13.0-next.724.1"
+    "@cloudflare/sandbox": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260825.1",
-    "@pleaseai/eslint-config": "^0.0.4",
-    "@vitest/coverage-istanbul": "^4.1.10",
-    "bun-types": "^1.4.0",
-    "eslint": "^10.7.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "@cloudflare/workers-types": "catalog:workers-v5",
+    "@pleaseai/eslint-config": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
+    "bun-types": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

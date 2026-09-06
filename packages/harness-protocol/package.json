@@ -16,14 +16,14 @@
     "test": "bun --bun vitest run"
   },
   "dependencies": {
-    "zod": "^4.5.2"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@ai-sdk/provider": "4.0.8",
-    "@pleaseai/eslint-config": "^0.0.4",
-    "bun-types": "^1.4.0",
-    "eslint": "^10.7.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.10"
+    "@pleaseai/eslint-config": "catalog:",
+    "bun-types": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
