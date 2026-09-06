@@ -144,6 +144,23 @@ Each is a separate commit in this repository and is intended to go upstream.
     interrupt handler, which is installed before the message loop that fills
     them.
 
+21. `feat(turn-host): answer a denied request and name the deferred one` — layer 3
+    of the ADR's D6 had no way to say *no* and no way to say *what* a deferral
+    is waiting on. Two additions, one at each end of the wire. `start` gains
+    `deniedRequests` (`deniedRequestSchema` in `@pleaseai/harness-protocol`),
+    which the `PreToolUse` evaluator consumes one-shot **ahead of**
+    `approvedRequests` and the defer rule: without it a human's refusal replays
+    into the same `deferTools` pattern that deferred the call and defers
+    forever, so the agent never hears the answer. A call on both lists is a
+    contradiction the Worker should never send; it is denied, and the
+    contradicting approval is consumed with the denial so an identical retry
+    cannot be allowed by the entry the denial skipped. And `finish` gains
+    `deferredToolUse` (`turnHostFinishSchema`), read off the SDK `result`'s
+    `deferred_tool_use` beside the `terminal_reason` that already decided
+    `stopped: 'deferred'` — `stopped` says a decision is owed, this says which
+    request it is owed about, and an answer authorizes one request rather than
+    the tool.
+
 Upstream behaviour deliberately dropped: the `pnpm install` bootstrap inside the
 sandbox (the image ships the dependencies) and `BRIDGE_REPLAY_FROM_DISK` as the
 gate on disk-first journaling (it is unconditional here; the env var still

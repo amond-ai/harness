@@ -2,7 +2,7 @@ import type { Options } from '@anthropic-ai/claude-agent-sdk'
 import type { Host } from './harness'
 import { sdkPermissionModeSchema } from '@pleaseai/harness-protocol'
 import { afterEach, expect, it } from 'vitest'
-import { DENY_BY_RUN_POLICY_MESSAGE } from '../src/permission-policy'
+import { DENIED_BY_REVIEWER_MESSAGE, DENY_BY_RUN_POLICY_MESSAGE } from '../src/permission-policy'
 import { connect, createFakeQuery, initMessage, startHost } from './harness'
 
 let host: Host | undefined
@@ -120,4 +120,58 @@ it('evaluates approvedRequests, then refuseTools, then deferTools', async () => 
     tool_input: { command: 'ls' },
   })
   expect(second.hookSpecificOutput?.permissionDecision).toBe('defer')
+})
+
+it('denies a contradicted call and voids the approval that contradicted it', async () => {
+  const options = await startAndCaptureOptions({
+    permissionMode: 'bypassPermissions',
+    deferTools: ['Bash'],
+    // The same call on both lists — a contradiction the Worker should never send. Denying is
+    // the only reading of it that cannot turn a mistake into an unauthorized tool call.
+    approvedRequests: [{ id: 'req-1', name: 'Bash', input: { command: 'ls' } }],
+    deniedRequests: [
+      { id: 'req-1', name: 'Bash', input: { command: 'ls' }, reason: 'not this one' },
+    ],
+  })
+
+  const denied = await callPreToolUse(options, {
+    tool_name: 'Bash',
+    tool_input: { command: 'ls' },
+  })
+  expect(denied.hookSpecificOutput?.permissionDecision).toBe('deny')
+  expect(denied.hookSpecificOutput?.permissionDecisionReason).toBe(
+    'not this one (request req-1)',
+  )
+
+  // Both entries are consumed, not just the denial. An agent told "no" is free to try the same
+  // call again, and a surviving approval would let that retry through on the half of the
+  // contradiction the first evaluation skipped — so the retry falls back to the defer rule that
+  // asked the question in the first place.
+  const second = await callPreToolUse(options, {
+    tool_name: 'Bash',
+    tool_input: { command: 'ls' },
+  })
+  expect(second.hookSpecificOutput?.permissionDecision).toBe('defer')
+})
+
+it('denies with a default reason when the human gave none', async () => {
+  const options = await startAndCaptureOptions({
+    permissionMode: 'bypassPermissions',
+    deferTools: ['Bash'],
+    deniedRequests: [{ id: 'req-2', name: 'Bash', input: { command: 'ls' } }],
+  })
+
+  const denied = await callPreToolUse(options, {
+    tool_name: 'Bash',
+    tool_input: { command: 'ls' },
+  })
+  expect(denied.hookSpecificOutput?.permissionDecisionReason).toBe(
+    `${DENIED_BY_REVIEWER_MESSAGE} (request req-2)`,
+  )
+})
+
+it('resumes the session the start named, as the SDK option', async () => {
+  const options = await startAndCaptureOptions({ sessionId: 'sess-worker-1' })
+
+  expect(options.sessionId).toBe('sess-worker-1')
 })

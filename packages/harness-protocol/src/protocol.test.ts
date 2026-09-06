@@ -101,6 +101,38 @@ describe('the turn host\'s outbound union', () => {
     })
   })
 
+  /*
+   * The deferral's own field, on the same footing and for the same reason: `stopped` says a
+   * decision is owed, and only this says which request it is owed about — so a client parsing
+   * through the upstream union would be told to wait for an answer it cannot ask for.
+   */
+  it('keeps the deferred call on a deferred finish', () => {
+    const deferred = {
+      ...finish,
+      stopped: 'deferred',
+      deferredToolUse: { id: 'call-9', name: 'Bash', input: { command: 'gh pr merge' } },
+    }
+
+    expect(harnessV1BridgeOutboundMessageSchema.parse(deferred)).not.toHaveProperty('deferredToolUse')
+    expect(turnHostOutboundMessageSchema.parse(deferred)).toMatchObject({
+      stopped: 'deferred',
+      deferredToolUse: { id: 'call-9', name: 'Bash', input: { command: 'gh pr merge' } },
+    })
+  })
+
+  /** The one-shot answers a resumed turn replays; `reason` is the human's own words. */
+  it('accepts approved and denied requests on a start', () => {
+    expect(startMessageSchema.safeParse({
+      type: 'start',
+      prompt: 'do the thing',
+      resume: 'sess-1',
+      approvedRequests: [{ id: 'call-9', name: 'Bash', input: { command: 'ls' } }],
+      deniedRequests: [
+        { id: 'call-8', name: 'Bash', input: { command: 'rm -rf /' }, reason: 'no' },
+      ],
+    }).success).toBe(true)
+  })
+
   it('still accepts every frame the upstream union carries', () => {
     for (const frame of [
       { type: 'bridge-hello', state: 'waiting', lastSeq: 0 },

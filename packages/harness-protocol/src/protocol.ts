@@ -68,6 +68,26 @@ export const approvedRequestSchema = z.object({
 
 export type ApprovedRequest = z.infer<typeof approvedRequestSchema>
 
+/**
+ * One request a human refused, replayed into the resumed turn.
+ *
+ * The counterpart of {@link approvedRequestSchema}, and it exists for the ending the ADR calls
+ * out: a deferral a human answered *no* to must be heard by the agent, not deferred a second
+ * time. The `PreToolUse` hook denies a call whose tool name matches `name` and whose input
+ * deep-equals `input`, once, and it checks this list before the approvals and before the defer
+ * rule — so a call that was both approved and denied is denied, which is the safe reading of a
+ * contradiction the Worker should never send.
+ */
+export const deniedRequestSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  input: z.record(z.string(), z.unknown()),
+  /** The human's own words, or the synthesized reason for a timeout; shown to the agent. */
+  reason: z.string().optional(),
+})
+
+export type DeniedRequest = z.infer<typeof deniedRequestSchema>
+
 export const startMessageSchema = claudeCodeStartMessageSchema.extend({
   /*
    * Upstream declares `thinking` without `.optional()`, so its schema refuses
@@ -118,6 +138,12 @@ export const startMessageSchema = claudeCodeStartMessageSchema.extend({
   refuseTools: z.array(toolPatternSchema).optional(),
   deferTools: z.array(toolPatternSchema).optional(),
   approvedRequests: z.array(approvedRequestSchema).optional(),
+  /**
+   * One-shot denials, replayed for the same reason the approvals are and checked ahead of them:
+   * without this the resumed call matches the same `deferTools` pattern that deferred it and
+   * defers forever, so a human's "no" would be indistinguishable from no answer at all.
+   */
+  deniedRequests: z.array(deniedRequestSchema).optional(),
   approvalPolicy: z.enum(['deny', 'forward']).optional(),
 
   /**
@@ -197,9 +223,28 @@ export type StoppedReason = z.infer<typeof stoppedReasonSchema>
  * emits these frames and the Worker validates them, so one definition serves both ends of one
  * wire.
  */
+/**
+ * The call a `stopped: 'deferred'` turn stopped on — the SDK's `deferred_tool_use`, verbatim.
+ *
+ * Carried on `finish` because `stopped` alone says only *that* a decision is owed, not what it
+ * is owed about, and the whole of layer 3 is that the answer authorizes **one request**: the
+ * Worker posts this id out of band, matches the human's answer against it, and replays the
+ * request as an `approvedRequests` / `deniedRequests` entry on the next `start`. Absent from
+ * every other ending, and absent from a `deferred` one only if the host is older than this
+ * field — which the Worker reads as protocol drift rather than as a deferral it can act on.
+ */
+export const deferredToolUseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  input: z.record(z.string(), z.unknown()),
+})
+
+export type DeferredToolUse = z.infer<typeof deferredToolUseSchema>
+
 export const turnHostFinishSchema = harnessV1FinishPartSchema.extend({
   stopped: stoppedReasonSchema.optional(),
   sessionArtifacts: sessionArtifactsSchema.optional(),
+  deferredToolUse: deferredToolUseSchema.optional(),
 })
 
 export type TurnHostFinish = z.infer<typeof turnHostFinishSchema>

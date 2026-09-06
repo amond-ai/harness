@@ -426,6 +426,7 @@ async function runTurn(
     refuseTools: start.refuseTools,
     deferTools: start.deferTools,
     approvedRequests: start.approvedRequests,
+    deniedRequests: start.deniedRequests,
   })
   const permissionOptions = createPermissionOptions({
     start,
@@ -460,6 +461,14 @@ async function runTurn(
   let sessionId: string | undefined
   let sessionCwd = workdir
   let terminalReason: string | undefined
+  /*
+   * The call a deferred turn stopped on, lifted off the SDK's `result` and reported on `finish`.
+   *
+   * `stopped: 'deferred'` says a decision is owed; this says what it is owed about, and the
+   * whole of D6 layer 3 is that an answer authorizes one request rather than the tool. Read
+   * here, beside `terminal_reason`, because both come off the same message.
+   */
+  let deferredToolUse: Record<string, unknown> | undefined
 
   /*
    * The two files this turn leaves behind, as they stand right now.
@@ -716,8 +725,12 @@ async function runTurn(
       }
 
       if (type === 'result') {
-        terminalReason = (msg as ClaudeMessage & { terminal_reason?: string })
-          .terminal_reason
+        const result = msg as ClaudeMessage & {
+          terminal_reason?: string
+          deferred_tool_use?: Record<string, unknown>
+        }
+        terminalReason = result.terminal_reason
+        deferredToolUse = result.deferred_tool_use
       }
 
       if (type !== 'stream_event') {
@@ -863,6 +876,12 @@ async function runTurn(
     totalUsage: turnUsage ?? streamEventState.stepUsage ?? defaultUsage(),
     stopped,
     sessionArtifacts: sessionArtifacts(),
+    // Only on the ending it describes, and only when the SDK named one: the key is omitted
+    // rather than sent as `undefined`, so a `finish` that carries it is proof of a deferral the
+    // Worker can act on.
+    ...(stopped === 'deferred' && deferredToolUse !== undefined
+      ? { deferredToolUse }
+      : {}),
     ...(totalCostUsd !== undefined
       ? { harnessMetadata: { 'claude-code': { costUsd: totalCostUsd } } }
       : {}),

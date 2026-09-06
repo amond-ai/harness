@@ -108,6 +108,31 @@ it('reports the session transcript and journal paths on finish', async () => {
   client.close()
 })
 
+it('names the deferred call on a finish that stopped for one', async () => {
+  const query = createFakeQuery([
+    initMessage(),
+    resultMessage({
+      terminal_reason: 'tool_deferred',
+      deferred_tool_use: { id: 'call-9', name: 'Bash', input: { command: 'gh pr merge' } },
+    }),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  const finish = await client.waitFor(frame => frame.type === 'finish')
+
+  // `stopped` says a decision is owed; `deferredToolUse` says which request it is owed about,
+  // which is what makes an answer authorize one request rather than the tool.
+  expect(finish.stopped).toBe('deferred')
+  expect(finish.deferredToolUse).toEqual({
+    id: 'call-9',
+    name: 'Bash',
+    input: { command: 'gh pr merge' },
+  })
+  client.close()
+})
+
 /*
  * A run-phase `error` is how a turn ordinarily fails, and `system`/`init` has
  * already named a session by then — so the client that retries the attempt is
