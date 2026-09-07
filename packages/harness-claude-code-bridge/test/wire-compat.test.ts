@@ -45,6 +45,29 @@ it('emits only frames the upstream outbound schema accepts', async () => {
   client.close()
 })
 
+it('emits an interrupted finish both schemas still accept', async () => {
+  // The echoed `interruptedBy` is one more added field, so it gets the same check the others
+  // do: upstream must not *reject* the frame, and the Worker's union must keep the value.
+  const query = createFakeQuery([initMessage()])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(
+    frame => frame.type === 'raw'
+      && (frame.rawValue as { type: string }).type === 'system',
+  )
+  client.send({ type: 'interrupt', reason: 'budget' })
+  const finish = await client.waitFor(frame => frame.type === 'finish')
+
+  const upstreamFrames = client.frames.filter(frame => frame.type !== 'bridge-started')
+  expect(rejectedBy(harnessV1BridgeOutboundMessageSchema, upstreamFrames)).toEqual([])
+  expect(rejectedBy(turnHostOutboundMessageSchema, client.frames)).toEqual([])
+  expect(turnHostOutboundMessageSchema.parse(finish))
+    .toMatchObject({ stopped: 'interrupted', interruptedBy: 'budget' })
+  client.close()
+})
+
 function rejectedBy(
   schema: { safeParse: (value: unknown) => { success: boolean, error?: { issues: unknown } } },
   frames: Array<Record<string, unknown> & { type: string }>,

@@ -31,7 +31,20 @@ export interface FakeQuery {
  * called with. `interrupt()` ends the script the way the real SDK does — with
  * a `result` carrying `terminal_reason: 'aborted_streaming'`.
  */
-export function createFakeQuery(script: Array<Record<string, unknown>> = []): FakeQuery {
+export interface FakeQueryOptions {
+  /**
+   * What `interrupt()` answers with, the way the real SDK does — by default the
+   * `aborted_streaming` success result. A record is merged into that one, so a test can make
+   * the wind-down land on an error-shaped `result` instead; `false` models the query that never
+   * answers at all, which is the case the host's escalation timer exists for.
+   */
+  resultOnInterrupt?: false | Record<string, unknown>
+}
+
+export function createFakeQuery(
+  script: Array<Record<string, unknown>> = [],
+  behaviour: FakeQueryOptions = {},
+): FakeQuery {
   const queued: Array<Record<string, unknown>> = [...script]
   let waiter: ((result: IteratorResult<SDKMessage>) => void) | undefined
   let ended = false
@@ -83,7 +96,9 @@ export function createFakeQuery(script: Array<Record<string, unknown>> = []): Fa
       next: () => iterator.next(),
       interrupt: () => {
         interruptCount++
-        push(resultMessage({ terminal_reason: 'aborted_streaming' }))
+        if (behaviour.resultOnInterrupt !== false) {
+          push(resultMessage({ terminal_reason: 'aborted_streaming', ...behaviour.resultOnInterrupt }))
+        }
         return Promise.resolve(undefined)
       },
     }

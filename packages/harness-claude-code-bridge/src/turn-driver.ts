@@ -10,7 +10,7 @@
 
 import type { Options, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { SdkPermissionMode, StartMessage } from '@pleaseai/harness-protocol'
-import type { BridgeEvent, BridgeTurn, Experimental_BridgeUserMessage, Experimental_BridgeUserMessageQueue } from './bridge-runtime'
+import type { BridgeEvent, BridgeTurn, Experimental_BridgeUserMessage, Experimental_BridgeUserMessageQueue, InterruptReason } from './bridge-runtime'
 import type { ClaudeMessage } from './create-emit-stream-event'
 import { randomUUID } from 'node:crypto'
 import { exit, env as procEnv } from 'node:process'
@@ -639,12 +639,17 @@ async function runTurn(
    * own SIGTERM path takes over from a known state.
    */
   let interruptRequested = false
+  // Remembered rather than only acted on: the ending this host reports echoes the reason back,
+  // because the Worker's own memory of the stop it asked for does not survive a step that never
+  // committed — and without the echo the ending reads as an unnamed timeout (#388).
+  let interruptReason: InterruptReason | undefined
   let escalation: ReturnType<typeof setTimeout> | undefined
   turn.onInterrupt((reason) => {
     if (interruptRequested) {
       return
     }
     interruptRequested = true
+    interruptReason = reason
     void Promise.resolve(q.interrupt()).catch((err) => {
       turn.emitWarning({ message: `interrupt (${reason}) failed: ${String(err)}` })
     })
@@ -654,6 +659,7 @@ async function runTurn(
         phase: 'run',
         error: `no result within ${graceMs}ms of interrupt (${reason})`,
         sessionArtifacts: sessionArtifacts(),
+        interruptedBy: reason,
       })
       abortCtl.abort()
       void turn.flush().finally(() => exitProcess(1))
@@ -679,6 +685,10 @@ async function runTurn(
       message: 'claude-code terminal error',
       phase: 'run',
       sessionArtifacts: sessionArtifacts(),
+      // A terminal error that lands during the wind-down is the interrupt's ending as much as
+      // the escalation is — a `result` that failed, an auth or retry failure — so it names the
+      // stop too, and omits the key on every failure no stop preceded.
+      ...(interruptReason === undefined ? {} : { interruptedBy: interruptReason }),
     })
     queryInput.close()
     abortCtl.abort()
@@ -844,6 +854,9 @@ async function runTurn(
         message: 'claude-code turn failed',
         phase: 'run',
         sessionArtifacts: sessionArtifacts(),
+        // Only when a stop was asked for: a query that failed during the wind-down is the
+        // interrupt's ending too, and the key is omitted on every other failure.
+        ...(interruptReason === undefined ? {} : { interruptedBy: interruptReason }),
       })
     }
     return
@@ -881,6 +894,11 @@ async function runTurn(
     // Worker can act on.
     ...(stopped === 'deferred' && deferredToolUse !== undefined
       ? { deferredToolUse }
+      : {}),
+    // Likewise only on the ending it describes: an SDK abort the Worker never asked for also
+    // stops the turn early, and it names no reason because there is none to name.
+    ...(stopped === 'interrupted' && interruptReason !== undefined
+      ? { interruptedBy: interruptReason }
       : {}),
     ...(totalCostUsd !== undefined
       ? { harnessMetadata: { 'claude-code': { costUsd: totalCostUsd } } }

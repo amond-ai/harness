@@ -156,13 +156,24 @@ export const startMessageSchema = claudeCodeStartMessageSchema.extend({
 export type StartMessage = z.infer<typeof startMessageSchema>
 
 /**
+ * Why the client is stopping the turn — named on the `interrupt` command, and echoed back on
+ * the ending the host answers it with (`turnHostFinishSchema` / `turnHostErrorSchema`).
+ *
+ * Shared by both directions on purpose: the client's memory of what it asked for is not
+ * durable, so the host's echo is what a re-entered round reads the cause from.
+ */
+export const interruptReasonSchema = z.enum(['watchdog', 'budget', 'operator'])
+
+export type InterruptReason = z.infer<typeof interruptReasonSchema>
+
+/**
  * End the running turn early but keep it a turn: the host calls
  * `Query.interrupt()`, so the SDK still produces a `result` and the bridge
  * still emits `finish`. `abort` tears the process down instead.
  */
 export const interruptInboundSchema = z.object({
   type: z.literal('interrupt'),
-  reason: z.enum(['watchdog', 'budget', 'operator']),
+  reason: interruptReasonSchema,
 })
 
 export const inboundCommandSchemas = [
@@ -210,7 +221,7 @@ export const stoppedReasonSchema = z.enum(['completed', 'interrupted', 'deferred
 export type StoppedReason = z.infer<typeof stoppedReasonSchema>
 
 /**
- * `finish`, with the two fields this host adds — and the reason this extension exists at all.
+ * `finish`, with the fields this host adds — and the reason this extension exists at all.
  *
  * The vendored `harnessV1FinishPartSchema` is a plain `z.object`, and a plain `z.object`
  * **strips** keys it does not declare. So a Worker that validated the host's `finish` against
@@ -245,6 +256,21 @@ export const turnHostFinishSchema = harnessV1FinishPartSchema.extend({
   stopped: stoppedReasonSchema.optional(),
   sessionArtifacts: sessionArtifactsSchema.optional(),
   deferredToolUse: deferredToolUseSchema.optional(),
+  /**
+   * The interrupt this host acted on, echoed back to the client that asked for it.
+   *
+   * Present only beside `stopped: 'interrupted'`, and only when that stop was a client
+   * `interrupt`: an SDK abort nobody asked for ends the turn early too, and it carries none
+   * because there is no reason to name. Absent from a host older than this field — the client
+   * then falls back to its own memory of the stop it sent, and to inference where that memory
+   * did not survive.
+   *
+   * A value outside the enum degrades to "no echo" rather than failing the frame: a host newer
+   * than this client can name a fourth reason, and refusing the whole `finish` over a field the
+   * client only reads as a hint would cost it `stopped` and `sessionArtifacts` too — an
+   * unreadable ending is far worse than an unnamed one.
+   */
+  interruptedBy: interruptReasonSchema.optional().catch(undefined),
 })
 
 export type TurnHostFinish = z.infer<typeof turnHostFinishSchema>
@@ -265,6 +291,17 @@ export const turnHostErrorSchema = harnessV1ErrorPartSchema.extend({
    * name, and from a host older than this field.
    */
   sessionArtifacts: sessionArtifactsSchema.optional(),
+  /**
+   * The interrupt this host was answering when the error happened.
+   *
+   * Present only on a run-phase `error` emitted after an `interrupt` was received — the host's
+   * own escalation when no result arrived inside the grace, or a query failure during the
+   * wind-down. Without it that frame is indistinguishable from a turn that failed on its own,
+   * so a client reading one from a host older than this field leaves it the failure it looks
+   * like rather than guessing. A value outside the enum degrades to "no echo" for the reason
+   * `finish`'s does: the frame is worth more than the hint.
+   */
+  interruptedBy: interruptReasonSchema.optional().catch(undefined),
 })
 
 export type TurnHostError = z.infer<typeof turnHostErrorSchema>

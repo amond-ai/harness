@@ -253,8 +253,15 @@ const ENV_TRUTHY = new Set(['1', 'true', 'yes', 'on'])
  */
 export type BridgeErrorPhase = 'start' | 'init' | 'run'
 
-/** Why the Worker is stopping the turn. Carried on the `interrupt` command. */
-export type InterruptReason = 'watchdog' | 'budget' | 'operator'
+/**
+ * Why the Worker is stopping the turn. Carried on the `interrupt` command.
+ *
+ * Listed as values as well as a type because the inbound frame is a cast, not a parse: the
+ * runtime validates the reason against this list before handing it to the turn.
+ */
+export const INTERRUPT_REASONS = ['watchdog', 'budget', 'operator'] as const
+
+export type InterruptReason = typeof INTERRUPT_REASONS[number]
 
 /** Per-frame emission options. */
 export interface BridgeEmitOptions {
@@ -358,6 +365,13 @@ export interface BridgeTurn {
      * inspect or build it.
      */
     sessionArtifacts?: Record<string, unknown>
+    /**
+     * The interrupt this error is the ending of, when the caller was answering one.
+     *
+     * Forwarded verbatim like `sessionArtifacts`, and omitted when the caller names none: an
+     * error that no stop preceded says nothing about one.
+     */
+    interruptedBy?: InterruptReason
   }) => void
 
   /** Absolute path of this turn's journal, reported in `finish`. */
@@ -738,6 +752,7 @@ export async function runBridge<TStart extends { type: 'start' }>(
     message?: string
     phase?: BridgeErrorPhase
     sessionArtifacts?: Record<string, unknown>
+    interruptedBy?: InterruptReason
   }): void => {
     writeErrorToStderr({
       message: input.message ?? 'bridge error',
@@ -752,6 +767,9 @@ export async function runBridge<TStart extends { type: 'start' }>(
       ...(input.sessionArtifacts === undefined
         ? {}
         : { sessionArtifacts: input.sessionArtifacts }),
+      ...(input.interruptedBy === undefined
+        ? {}
+        : { interruptedBy: input.interruptedBy }),
     })
   }
 
@@ -1019,6 +1037,17 @@ export async function runBridge<TStart extends { type: 'start' }>(
             type: 'error',
             phase: 'run',
             error: 'no running turn to interrupt',
+          })
+          return
+        }
+        // The inbound frame is a cast, so the reason arrives unchecked. A value the adapter has
+        // no meaning for is refused on the sending socket alone and the turn is left alone:
+        // interrupting on it would stop a turn under a name the ending then has to echo back.
+        if (!(INTERRUPT_REASONS as readonly string[]).includes(msg.reason)) {
+          sendControl(ws, {
+            type: 'error',
+            phase: 'run',
+            error: `unknown interrupt reason '${String(msg.reason)}'`,
           })
           return
         }

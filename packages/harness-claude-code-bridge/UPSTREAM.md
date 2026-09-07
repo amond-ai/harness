@@ -165,3 +165,19 @@ Upstream behaviour deliberately dropped: the `pnpm install` bootstrap inside the
 sandbox (the image ships the dependencies) and `BRIDGE_REPLAY_FROM_DISK` as the
 gate on disk-first journaling (it is unconditional here; the env var still
 selects reload-on-start).
+
+22. `feat(turn-host): echo the interrupt reason on the ending it caused` — the
+    host answered an `interrupt` with a `finish { stopped: 'interrupted' }`, or
+    with a run-phase `error` when it escalated, and neither said *which* stop it
+    was answering. The Worker's own memory of the reason it sent is not durable
+    — a Workflow step that never commits loses it — so a re-entered round read
+    the first as an unnamed timeout and the second as a turn that failed on its
+    own, and a budget stop that lost its cause started another attempt with a
+    fresh budget (#388, the #358 shape). The reason the `turn.onInterrupt`
+    handler receives is now remembered and echoed as `interruptedBy`
+    (`turnHostFinishSchema` / `turnHostErrorSchema` in
+    `@pleaseai/harness-protocol`): on `finish` only beside
+    `stopped: 'interrupted'`, so an SDK abort nobody asked for still names none;
+    on the escalation `error` and on a query failure during the wind-down.
+    `emitError` in `bridge-runtime.ts` forwards it the way it forwards
+    `sessionArtifacts`, omitting the key when the caller knows none.

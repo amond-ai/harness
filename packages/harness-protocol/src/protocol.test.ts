@@ -120,6 +120,47 @@ describe('the turn host\'s outbound union', () => {
     })
   })
 
+  /*
+   * The interrupt the host acted on, echoed back. The client's own memory of the stop it sent
+   * is not durable — it dies with an uncommitted step — so this echo is what a re-entered round
+   * reads the cause from, on the `finish` that answered the stop and on the run-phase `error`
+   * the host escalated it into.
+   */
+  it('keeps the interrupt the host answered on finish and on a run-phase error', () => {
+    const interrupted = { ...finish, interruptedBy: 'budget' }
+    expect(harnessV1BridgeOutboundMessageSchema.parse(interrupted)).not.toHaveProperty('interruptedBy')
+    expect(turnHostOutboundMessageSchema.parse(interrupted))
+      .toMatchObject({ stopped: 'interrupted', interruptedBy: 'budget' })
+
+    expect(turnHostOutboundMessageSchema.parse({ ...failed, interruptedBy: 'watchdog' }))
+      .toMatchObject({ phase: 'run', interruptedBy: 'watchdog' })
+  })
+
+  /*
+   * A reason outside the enum reads as *no* echo rather than failing the frame.
+   *
+   * The opposite of the `interrupt` command's contract on purpose, and the asymmetry is the
+   * point: inbound, an unknown reason is a client bug and is refused before the turn is touched;
+   * outbound, it is a host newer than this client, and rejecting the frame would take `stopped`
+   * and `sessionArtifacts` down with a field the client only reads as a hint. An unnamed ending
+   * still settles; an unreadable one does not.
+   */
+  it('degrades an unknown echoed reason to no echo, and accepts an ending that names none', () => {
+    const parsed = turnHostOutboundMessageSchema.parse({ ...finish, interruptedBy: 'the-operator' })
+    expect(parsed).toMatchObject({ stopped: 'interrupted', sessionArtifacts: { sessionId: 'sess-1' } })
+    expect(parsed.interruptedBy).toBeUndefined()
+
+    expect(turnHostOutboundMessageSchema.parse({ ...failed, interruptedBy: 'the-operator' }).interruptedBy)
+      .toBeUndefined()
+    expect(turnHostOutboundMessageSchema.parse(finish)).not.toHaveProperty('interruptedBy')
+    expect(turnHostOutboundMessageSchema.parse(failed)).not.toHaveProperty('interruptedBy')
+  })
+
+  /** Inbound is the strict direction: an unknown reason there is a client bug, and refused. */
+  it('still rejects an unknown reason on the interrupt command', () => {
+    expect(inboundMessageSchema.safeParse({ type: 'interrupt', reason: 'user' }).success).toBe(false)
+  })
+
   /** The one-shot answers a resumed turn replays; `reason` is the human's own words. */
   it('accepts approved and denied requests on a start', () => {
     expect(startMessageSchema.safeParse({

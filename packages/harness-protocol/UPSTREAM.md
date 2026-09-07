@@ -50,6 +50,14 @@ compile time and reaches neither the turn host's bundle nor the sandbox image.
    `interruptGraceMs`, and the `interrupt` inbound command. The outbound union,
    `bridge-ready`, and the shared inbound commands are the vendored ones.
 
+3. `feat(harness-protocol): echo the interrupt reason on the ending it caused` —
+   the `interrupt` command's `reason` is now `interruptReasonSchema`, and both
+   `turnHostFinishSchema` and `turnHostErrorSchema` carry it back as an optional
+   `interruptedBy`. The client's memory of the stop it asked for is not durable
+   (an uncommitted Workflow step loses it), so without the echo a re-entered
+   round reads a `finish { stopped: 'interrupted' }` as an unnamed timeout and
+   the host's escalation as a turn that merely failed (#388).
+
 One upstream field is deliberately not taken as-is: `claude-code-bridge-protocol.ts`
 declares `thinking` without `.optional()`, so its schema refuses every `start`
 that omits it. `src/protocol.ts` reuses `.shape.thinking` and makes it optional

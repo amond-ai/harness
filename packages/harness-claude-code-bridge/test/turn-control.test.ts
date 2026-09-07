@@ -38,6 +38,71 @@ it('interrupts the query and finishes the turn as interrupted', async () => {
 
   expect(query.interruptCount).toBe(1)
   expect(finish.stopped).toBe('interrupted')
+  // Echoed back, because the Worker's own record of the stop it asked for is not durable (#388).
+  expect(finish.interruptedBy).toBe('watchdog')
+})
+
+it('names the interrupt on the run-phase error it escalated into', async () => {
+  // Nothing after `init`, and an `interrupt()` that yields no `result` either: the only way this
+  // turn ends is the host's own escalation, once the grace runs out.
+  const query = createFakeQuery([initMessage()], { resultOnInterrupt: false })
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing', interruptGraceMs: 10 })
+  await client.waitFor(
+    frame => frame.type === 'raw'
+      && (frame.rawValue as { type: string }).type === 'system',
+  )
+
+  client.send({ type: 'interrupt', reason: 'budget' })
+  const error = await client.waitFor(frame => frame.type === 'error')
+
+  expect(error.phase).toBe('run')
+  expect(error.interruptedBy).toBe('budget')
+})
+
+it('names the interrupt on a terminal error that landed during the wind-down', async () => {
+  // The third run-phase error site: the interrupt was answered, but with a `result` that
+  // failed rather than the graceful one — an auth or retry failure landing mid-wind-down. That
+  // is the interrupt's ending as much as the escalation is, so it names the stop too.
+  const query = createFakeQuery([initMessage()], {
+    resultOnInterrupt: { subtype: 'error_during_execution', result: 'the model went away' },
+  })
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(
+    frame => frame.type === 'raw'
+      && (frame.rawValue as { type: string }).type === 'system',
+  )
+
+  client.send({ type: 'interrupt', reason: 'watchdog' })
+  const error = await client.waitFor(frame => frame.type === 'error')
+
+  expect(error.phase).toBe('run')
+  // The terminal-error path's own text, not the escalation's `no result within …`.
+  expect(error.error).toBe('the model went away')
+  expect(error.interruptedBy).toBe('watchdog')
+  expect(client.frames.some(frame => frame.type === 'finish')).toBe(false)
+})
+
+it('leaves an SDK-side abort no one asked for without a reason to name', async () => {
+  // The same `terminal_reason` an interrupt produces, arriving on its own: the turn stopped
+  // early, so `stopped` says `interrupted` — but no stop was requested, so nothing named one.
+  const query = createFakeQuery([
+    initMessage(),
+    resultMessage({ terminal_reason: 'aborted_streaming' }),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  const finish = await client.waitFor(frame => frame.type === 'finish')
+
+  expect(finish.stopped).toBe('interrupted')
+  expect(finish).not.toHaveProperty('interruptedBy')
 })
 
 it('answers an interrupt with no running turn on that socket alone', async () => {
@@ -53,6 +118,31 @@ it('answers an interrupt with no running turn on that socket alone', async () =>
   // A control frame, not an event: it consumes no `seq` and is not journaled.
   expect(error.seq).toBeUndefined()
   expect(await host.readJournal()).toHaveLength(0)
+})
+
+it('refuses an interrupt reason it has no meaning for, leaving the turn running', async () => {
+  // The reason is a cast on the wire, and it comes back out on the ending the host echoes — so
+  // a value the host cannot name is refused on the sending socket rather than stopping a turn
+  // under a name it would then have to report.
+  const query = createFakeQuery([initMessage()])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(
+    frame => frame.type === 'raw'
+      && (frame.rawValue as { type: string }).type === 'system',
+  )
+
+  client.send({ type: 'interrupt', reason: 'user' })
+  const error = await client.waitFor(frame => frame.type === 'error')
+
+  expect(error.phase).toBe('run')
+  expect(error.error).toContain('unknown interrupt reason')
+  // A control frame on this socket alone: no `seq`, and the turn was never touched.
+  expect(error.seq).toBeUndefined()
+  expect(query.interruptCount).toBe(0)
+  expect(client.frames.some(frame => frame.type === 'finish')).toBe(false)
 })
 
 it('fails a routed turn whose command is missing from slash_commands', async () => {
