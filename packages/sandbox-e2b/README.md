@@ -16,6 +16,39 @@ const session = provider.session(sandboxIdForRun(runId))
 In `apps/cf-orchestrator` you do not construct it directly — set `SANDBOX_BACKEND=e2b` and
 the `E2B_API_KEY` secret, and `sandboxProvider(env)` builds this instead of the Cloudflare one.
 
+## The template
+
+The provider's default template is e2b's prebuilt `claude` image, which ships the CLI and
+nothing else of ours. The `sdk` turn driver execs `/opt/turn-host/bridge.mjs` — a bundle only
+`docker/Dockerfile` bakes — so on the stock template it is simply not there, and
+`sandboxProvider` refuses that pairing rather than starting a turn host that cannot run
+(#385).
+
+The template that does carry it is `pleaseworks`, built from the Dockerfile's `e2b-sandbox`
+stage. CI publishes that stage to `ghcr.io/chatbot-pf/pleaseworks-e2b` on every push to main;
+`scripts/build-template.ts` turns the published image into the e2b alias, and
+`scripts/check-template.ts` boots the alias and asks it the four things a turn depends on.
+
+```sh
+# The image is private, so e2b's builder needs a GHCR login of its own.
+infisical run --silent -- env GHCR_USERNAME=<login> GHCR_TOKEN=<read:packages token> \
+  bun packages/sandbox-e2b/scripts/build-template.ts
+infisical run --silent -- bun packages/sandbox-e2b/scripts/check-template.ts
+```
+
+| Variable | Default | Read by |
+| --- | --- | --- |
+| `E2B_API_KEY` | *(required)* | both scripts, through the SDK |
+| `E2B_TEMPLATE_IMAGE` | `ghcr.io/chatbot-pf/pleaseworks-e2b:latest` | build |
+| `E2B_TEMPLATE_ALIAS` | `pleaseworks` | build |
+| `E2B_TEMPLATE_CPU` / `E2B_TEMPLATE_MEMORY_MB` | `2` / `4096` | build |
+| `GHCR_USERNAME` / `GHCR_TOKEN` | *(both required)* | build |
+| `E2B_TEMPLATE` | `pleaseworks` | check |
+
+The alias is what `E2B_TEMPLATE` in `apps/cf-orchestrator/wrangler.jsonc` must name: a Worker
+pointed at a template this script never built boots e2b's stock image instead. The parsing
+lives in `src/template-config.ts` rather than in the script, so it is testable without the SDK.
+
 ## The per-command timeout is disabled on purpose
 
 e2b's `CommandStartOpts.timeoutMs` defaults to **60 seconds**, and it applies to background
@@ -114,6 +147,7 @@ so this is extra information, not a behaviour change.
 | `log-follow.ts` | The tail: polls the journal until the process exits or the caller aborts |
 | `shell-quote.ts` | Restores argv safety at e2b's string-only command boundary |
 | `e2b-api.ts` | The only file that touches the real e2b SDK |
+| `template-config.ts` | What `scripts/build-template.ts` needs, read off the environment |
 
 Everything except `e2b-api.ts` takes e2b as a structural interface, so the whole backend is
 testable against a fake with no network (`bun test`).
