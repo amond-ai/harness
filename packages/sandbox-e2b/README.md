@@ -25,24 +25,48 @@ nothing else of ours. The `sdk` turn driver execs `/opt/turn-host/bridge.mjs` �
 (#385).
 
 The template that does carry it is `pleaseworks`, built from the Dockerfile's `e2b-sandbox`
-stage. CI publishes that stage to `ghcr.io/chatbot-pf/pleaseworks-e2b` on every push to main;
-`scripts/build-template.ts` turns the published image into the e2b alias, and
-`scripts/check-template.ts` boots the alias and asks it the four things a turn depends on.
+stage. CI (`.github/workflows/docker-sandbox.yml`, `build-push`) publishes that stage to
+`ghcr.io/chatbot-pf/pleaseworks-e2b` on pushes to main that touch the image inputs (the
+workflow's `paths`), naming the immutable `sha-` tag it just pushed as a job output.
+
+The `e2b-template` job then rebuilds the alias in three steps — **candidate → probe →
+promote** — because no rollback exists for an alias:
+
+1. build `pleaseworks-candidate` from that `sha-` tag (`scripts/build-template.ts`),
+2. boot it and assert the four things a turn depends on (`scripts/check-template.ts`),
+3. rebuild the live `pleaseworks` alias *from the candidate* (`E2B_TEMPLATE_FROM`), which
+   pulls nothing from a registry, and probe it once more.
+
+So the live alias is only ever repointed at a template that has already run a turn's
+dependencies, and a failed build, a failed probe, or a cancelled run leaves it untouched.
+
+The job runs on `main` only: a `workflow_dispatch` from a branch still publishes the image
+under its `sha-` tag, but the alias a deployed Worker boots is not repointed from an unmerged
+ref, and `build-push` says so. The rebuild also needs the `E2B_API_KEY` repository secret;
+without it the image is still published and the job reports itself skipped, leaving the alias
+on whatever image it was last built from.
+
+Build it by hand only when CI cannot — the same two scripts, from a machine that holds the key:
 
 ```sh
 # The image is private, so e2b's builder needs a GHCR login of its own.
 infisical run --silent -- env GHCR_USERNAME=<login> GHCR_TOKEN=<read:packages token> \
-  bun packages/sandbox-e2b/scripts/build-template.ts
-infisical run --silent -- bun packages/sandbox-e2b/scripts/check-template.ts
+  E2B_TEMPLATE_ALIAS=pleaseworks-candidate bun packages/sandbox-e2b/scripts/build-template.ts
+infisical run --silent -- env E2B_TEMPLATE=pleaseworks-candidate \
+  bun packages/sandbox-e2b/scripts/check-template.ts
+# Promote only once the candidate has passed.
+infisical run --silent -- env E2B_TEMPLATE_ALIAS=pleaseworks \
+  E2B_TEMPLATE_FROM=pleaseworks-candidate bun packages/sandbox-e2b/scripts/build-template.ts
 ```
 
 | Variable | Default | Read by |
 | --- | --- | --- |
 | `E2B_API_KEY` | *(required)* | both scripts, through the SDK |
-| `E2B_TEMPLATE_IMAGE` | `ghcr.io/chatbot-pf/pleaseworks-e2b:latest` | build |
+| `E2B_TEMPLATE_IMAGE` | `ghcr.io/chatbot-pf/pleaseworks-e2b:latest` (CI passes the `sha-` tag) | build, from an image |
+| `E2B_TEMPLATE_FROM` | *(unset)* — set it to build from that template alias instead of an image, needing no GHCR credentials | build |
 | `E2B_TEMPLATE_ALIAS` | `pleaseworks` | build |
 | `E2B_TEMPLATE_CPU` / `E2B_TEMPLATE_MEMORY_MB` | `2` / `4096` | build |
-| `GHCR_USERNAME` / `GHCR_TOKEN` | *(both required)* | build |
+| `GHCR_USERNAME` / `GHCR_TOKEN` | *(both required unless `E2B_TEMPLATE_FROM` is set)* | build |
 | `E2B_TEMPLATE` | `pleaseworks` | check |
 
 The alias is what `E2B_TEMPLATE` in `apps/cf-orchestrator/wrangler.jsonc` must name: a Worker

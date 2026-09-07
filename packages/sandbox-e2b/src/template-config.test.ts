@@ -11,11 +11,14 @@ const REQUIRED = {
 describe('resolveTemplateBuildConfig', () => {
   it('defaults to the CI-published image and the alias the Worker names', () => {
     expect(resolveTemplateBuildConfig({ ...REQUIRED })).toEqual({
-      image: 'ghcr.io/chatbot-pf/pleaseworks-e2b:latest',
+      source: {
+        kind: 'image',
+        image: 'ghcr.io/chatbot-pf/pleaseworks-e2b:latest',
+        registry: { username: 'amondnet', password: 'ghp-token' },
+      },
       alias: 'pleaseworks',
       cpuCount: 2,
       memoryMB: 4096,
-      registry: { username: 'amondnet', password: 'ghp-token' },
     })
   })
 
@@ -27,11 +30,31 @@ describe('resolveTemplateBuildConfig', () => {
       E2B_TEMPLATE_CPU: '4',
       E2B_TEMPLATE_MEMORY_MB: '8192',
     })).toEqual({
-      image: 'ghcr.io/chatbot-pf/pleaseworks-e2b:abc1234',
+      source: {
+        kind: 'image',
+        image: 'ghcr.io/chatbot-pf/pleaseworks-e2b:abc1234',
+        registry: { username: 'amondnet', password: 'ghp-token' },
+      },
       alias: 'pleaseworks-preview',
       cpuCount: 4,
       memoryMB: 8192,
-      registry: { username: 'amondnet', password: 'ghp-token' },
+    })
+  })
+
+  // The promote half of candidate → probe → promote: nothing is pulled, so requiring the
+  // registry credentials there would only be a refusal with no build behind it.
+  it('builds from a template alias without any GHCR credentials', () => {
+    expect(resolveTemplateBuildConfig({
+      E2B_API_KEY: 'e2b-key',
+      E2B_TEMPLATE_FROM: 'pleaseworks-candidate',
+      E2B_TEMPLATE_ALIAS: 'pleaseworks',
+      E2B_TEMPLATE_CPU: '4',
+      E2B_TEMPLATE_MEMORY_MB: '8192',
+    })).toEqual({
+      source: { kind: 'template', name: 'pleaseworks-candidate' },
+      alias: 'pleaseworks',
+      cpuCount: 4,
+      memoryMB: 8192,
     })
   })
 

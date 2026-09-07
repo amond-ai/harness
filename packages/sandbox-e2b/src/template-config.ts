@@ -5,6 +5,11 @@
  * Split from `scripts/build-template.ts` so the parsing is reachable without the e2b SDK
  * and without a network: the script is a thin caller, this is where the decisions are.
  *
+ * A build has two sources. Normally it is a published image, which is private and therefore
+ * needs GHCR credentials. With `E2B_TEMPLATE_FROM` it is another *template* instead — the
+ * promote half of CI's candidate → probe → promote (#389), which repoints the live alias at a
+ * template that already booted, and which pulls nothing from a registry.
+ *
  * Every failure here is a message naming the variable, because the alternative shapes are
  * all worse than a refusal — an unset `GHCR_TOKEN` reaches e2b as an anonymous pull of a
  * *private* image and comes back as a build failure with no hint of which credential was
@@ -18,30 +23,41 @@ const DEFAULT_ALIAS = 'pleaseworks'
 const DEFAULT_CPU_COUNT = 2
 const DEFAULT_MEMORY_MB = 4096
 
+/**
+ * Where the build starts from: a published image, which is private and so carries the
+ * credentials a pull needs, or an existing template alias, which pulls nothing at all.
+ */
+export type TemplateBuildSource
+  = | { kind: 'image', image: string, registry: { username: string, password: string } }
+    | { kind: 'template', name: string }
+
 export interface TemplateBuildConfig {
-  /** The published image the template is built from. */
-  image: string
+  source: TemplateBuildSource
   /** The template name a Worker names in `E2B_TEMPLATE`. */
   alias: string
   cpuCount: number
   memoryMB: number
-  /** GHCR credentials — the image is private, so an anonymous pull cannot resolve it. */
-  registry: { username: string, password: string }
 }
 
 export function resolveTemplateBuildConfig(env: Record<string, string | undefined>): TemplateBuildConfig {
   // Not returned: the e2b SDK reads it off the environment itself. Checked here anyway, so a
   // missing key is a refusal before the image is pulled rather than an auth error after it.
   required(env, 'E2B_API_KEY')
+  const from = env.E2B_TEMPLATE_FROM?.trim()
   return {
-    image: env.E2B_TEMPLATE_IMAGE?.trim() || DEFAULT_IMAGE,
+    source: from
+      ? { kind: 'template', name: from }
+      : {
+          kind: 'image',
+          image: env.E2B_TEMPLATE_IMAGE?.trim() || DEFAULT_IMAGE,
+          registry: {
+            username: required(env, 'GHCR_USERNAME'),
+            password: required(env, 'GHCR_TOKEN'),
+          },
+        },
     alias: env.E2B_TEMPLATE_ALIAS?.trim() || DEFAULT_ALIAS,
     cpuCount: positiveInt(env.E2B_TEMPLATE_CPU, 'E2B_TEMPLATE_CPU', DEFAULT_CPU_COUNT),
     memoryMB: positiveInt(env.E2B_TEMPLATE_MEMORY_MB, 'E2B_TEMPLATE_MEMORY_MB', DEFAULT_MEMORY_MB),
-    registry: {
-      username: required(env, 'GHCR_USERNAME'),
-      password: required(env, 'GHCR_TOKEN'),
-    },
   }
 }
 

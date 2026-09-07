@@ -7,17 +7,20 @@
  * `ghcr.io/chatbot-pf/pleaseworks-e2b`, and this script turns it into a template alias.
  *
  * ```sh
+ * # From the published image. Private, so e2b's builder needs a GHCR login of its own.
  * infisical run --silent -- env GHCR_USERNAME=<login> GHCR_TOKEN=<read:packages token> \
- *   bun packages/sandbox-e2b/scripts/build-template.ts
+ *   E2B_TEMPLATE_ALIAS=pleaseworks-candidate bun packages/sandbox-e2b/scripts/build-template.ts
+ *
+ * # Promote: repoint the live alias at a candidate that has already booted. No registry.
+ * infisical run --silent -- env E2B_TEMPLATE_ALIAS=pleaseworks \
+ *   E2B_TEMPLATE_FROM=pleaseworks-candidate bun packages/sandbox-e2b/scripts/build-template.ts
  * ```
  *
  * The alias it prints is what `E2B_TEMPLATE` in `apps/cf-orchestrator/wrangler.jsonc` must
  * name — a Worker pointed at a template this script never built boots e2b's stock image
  * and the turn host is simply not there.
  *
- * `GHCR_USERNAME`/`GHCR_TOKEN` are required because the image is private: e2b pulls it
- * from its own builder, not from a machine that is already `docker login`ed. Everything
- * else has a default — see `resolveTemplateBuildConfig`.
+ * Everything has a default — see `resolveTemplateBuildConfig`.
  */
 import process from 'node:process'
 import { defaultBuildLogger, Template } from 'e2b'
@@ -25,10 +28,13 @@ import { resolveTemplateBuildConfig } from '../src/template-config'
 
 const config = resolveTemplateBuildConfig(process.env)
 
-const template = Template().fromImage(config.image, {
-  username: config.registry.username,
-  password: config.registry.password,
-})
+const { source } = config
+const template = source.kind === 'template'
+  ? Template().fromTemplate(source.name)
+  : Template().fromImage(source.image, {
+      username: source.registry.username,
+      password: source.registry.password,
+    })
 
 await Template.build(template, config.alias, {
   cpuCount: config.cpuCount,
@@ -36,4 +42,5 @@ await Template.build(template, config.alias, {
   onBuildLogs: defaultBuildLogger(),
 })
 
-console.log(`built e2b template alias=${config.alias} image=${config.image}`)
+const from = source.kind === 'template' ? `template:${source.name}` : source.image
+console.log(`built e2b template alias=${config.alias} from=${from}`)
