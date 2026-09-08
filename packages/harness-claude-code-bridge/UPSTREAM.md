@@ -21,10 +21,11 @@ patches below are not upstream yet.
 | `src/tool-filtering.ts` | `@ai-sdk/harness-claude-code/src/bridge/tool-filtering.ts` |
 | `src/claude-skills-option.ts` | `@ai-sdk/harness-claude-code/src/bridge/claude-skills-option.ts` |
 | `src/claude-code-system-prompt.ts` | `@ai-sdk/harness-claude-code/src/bridge/claude-code-system-prompt.ts` |
-| `src/json-schema-to-zod.ts` | `@ai-sdk/harness-claude-code/src/bridge/json-schema-to-zod.ts` |
 | `src/bridge-runtime.ts` | `@ai-sdk/harness/src/bridge/index.ts` |
 | `src/harness-bridge-capability-unsupported-error.ts` | `@ai-sdk/harness/src/bridge/harness-bridge-capability-unsupported-error.ts` |
 | `src/main.ts` | — (new; upstream's entry is `bridge/index.ts` itself) |
+| `src/permission-policy.ts` | — (new; the run's permission posture as a `PreToolUse` hook plus a `canUseTool` fallback, and the matcher that replays a human's approval) |
+| `src/session-artifacts.ts` | — (new; the paths of a turn's two durable artifacts — the CLI's session jsonl and the journal — including the CLI's project-directory encoding) |
 
 The wire protocol upstream keeps in `@ai-sdk/harness` and
 `claude-code-bridge-protocol.ts` lives in
