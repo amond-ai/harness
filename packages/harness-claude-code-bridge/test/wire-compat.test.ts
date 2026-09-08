@@ -1,5 +1,5 @@
 import type { Host } from './harness'
-import { harnessV1BridgeOutboundMessageSchema, turnHostOutboundMessageSchema } from '@pleaseai/harness-protocol'
+import { harnessV1BridgeOutboundMessageSchema, turnHostOutboundMessageSchema } from '@amond-ai/harness-protocol'
 import { afterEach, expect, it } from 'vitest'
 import {
   connect,

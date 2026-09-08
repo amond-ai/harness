@@ -1,4 +1,4 @@
-import type { ProcessLogEvent } from '@pleaseai/sandbox-contract'
+import type { ProcessLogEvent } from '@amond-ai/sandbox'
 import { describe, expect, it } from 'vitest'
 import { createProcessSurface, splitProcessStreams } from './process'
 import {

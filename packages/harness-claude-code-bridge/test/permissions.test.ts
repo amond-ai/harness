@@ -1,6 +1,6 @@
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
 import type { Host } from './harness'
-import { sdkPermissionModeSchema } from '@pleaseai/harness-protocol'
+import { sdkPermissionModeSchema } from '@amond-ai/harness-protocol'
 import { afterEach, expect, it } from 'vitest'
 import { DENIED_BY_REVIEWER_MESSAGE, DENY_BY_RUN_POLICY_MESSAGE } from '../src/permission-policy'
 import { connect, createFakeQuery, initMessage, startHost } from './harness'

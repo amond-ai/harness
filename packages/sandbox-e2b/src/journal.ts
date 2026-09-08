@@ -12,7 +12,7 @@
  * `ProcessLogEvent` is tagged per stream and `demuxProcessEvents` splits on that tag: the
  * NDJSON turn output must not be polluted by whatever the CLI writes to stderr.
  */
-import type { SandboxCommand } from '@pleaseai/sandbox-contract'
+import type { SandboxCommand } from '@amond-ai/sandbox'
 import { quoteArg, quoteArgv, unquotedIndexOf, unquoteFirstArg } from './shell-quote'
 
 /**

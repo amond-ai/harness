@@ -31,9 +31,8 @@
  * the real cause. The `wsConnect` path never sees this because `cf-connect.ts` rebuilds its
  * request as `http://localhost:<port>…` for its own reasons.
  */
-import type { BridgeEndpoint } from './cf-connect'
-import type { WsLike } from './ws-shim'
-import { acceptUpgrade, upgradeHeaders } from './upgrade'
+import type { BridgeEndpoint, WsLike } from '@amond-ai/harness-transport'
+import { acceptUpgrade, upgradeHeaders } from '@amond-ai/harness-transport'
 
 /**
  * The one thing this module needs of `fetch`, taken as an argument so the opener is

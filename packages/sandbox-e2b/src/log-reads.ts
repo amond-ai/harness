@@ -13,9 +13,9 @@
  * | --- | --- | --- |
  * | whole transcript | `replayTurn`, after the turn | the journal's current EOF |
  * | positioned (`since`) | the liveness watchdog, per sample | the slice is served |
- * | following (`follow`) | `@pleaseai/harness-sandbox`, live | the process exits or the caller aborts |
+ * | following (`follow`) | `@amond-ai/harness-sandbox`, live | the process exits or the caller aborts |
  */
-import type { ProcessLogEvent, ProcessLogsOptions } from '@pleaseai/sandbox-contract'
+import type { ProcessLogEvent, ProcessLogsOptions } from '@amond-ai/sandbox'
 import type { JournalPaths } from './journal'
 import type { PartialRead } from './journal-io'
 import type { JournalTail } from './log-follow'

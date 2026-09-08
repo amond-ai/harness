@@ -9,7 +9,7 @@
  * **Why a tail is needed at all.** The Cloudflare backend's `logs()` follows natively, and
  * this one answered `follow` with a snapshot until 2026-08-27 — invisible to the orchestrator,
  * which reads a turn's transcript *after* it exits, where a snapshot and a tail cannot be told
- * apart. `@pleaseai/harness-sandbox` opens `{ follow: true, replay: true }` on the AI SDK
+ * apart. `@amond-ai/harness-sandbox` opens `{ follow: true, replay: true }` on the AI SDK
  * bridge and the harness reads that stream as a liveness channel: `waitForBridgeReady` takes
  * end-of-stream as `bridge exited before becoming ready`. Measured with
  * `scripts/spike-e2b-follow.ts` — the stream closed at 1489ms against a process that ran to
@@ -50,7 +50,7 @@
  * (e2b's table, then `pgrep -s`) rather than a file read — {@link JournalTail.livenessIntervalMs},
  * mirroring what `waitForExit` spends on the same question.
  */
-import type { ProcessLogEvent } from '@pleaseai/sandbox-contract'
+import type { ProcessLogEvent } from '@amond-ai/sandbox'
 import type { JournalSlice } from './log-replay'
 import { encodeCursor, replayPositioned } from './log-replay'
 

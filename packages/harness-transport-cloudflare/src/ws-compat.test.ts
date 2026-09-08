@@ -1,4 +1,4 @@
-import type { WsLike } from './ws-shim'
+import type { WsLike } from '@amond-ai/harness-transport'
 import { describe, expect, it } from 'vitest'
 import { createWebSocketClass, SANDBOX_ID_PARAM } from './ws-compat'
 

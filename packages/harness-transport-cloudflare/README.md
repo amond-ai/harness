@@ -1,7 +1,13 @@
-# @pleaseai/harness-cf-transport
+# @amond-ai/harness-transport-cloudflare
 
 Opens the [AI SDK harness](https://ai-sdk.dev/docs/ai-sdk-harnesses) bridge socket over a
 Cloudflare Sandbox, so `@ai-sdk/harness-claude-code` never reaches for the `ws` package.
+
+The socket *shape* and the standard-`WebSocket` opener live in `@amond-ai/harness-transport`, which
+runs anywhere. This package is only what Cloudflare needs on top: a Sandbox's bridge port is
+private, so it cannot be dialed by URL at all — it is reached through
+`Sandbox.wsConnect(request, port)`, which means a `Request`, which means headers, which the
+standard constructor cannot send.
 
 ## Why
 
@@ -21,7 +27,8 @@ private rather than publishing it with `exposePort`.
 | Export | Purpose |
 | --- | --- |
 | `createBridgeSocketOpener(sandbox)` | `HarnessV1PortEndpoint` → an open, `ws`-shaped socket |
-| `toWsLike(socket)` | a platform `WebSocket` wearing the `ws` API the harness drives |
+| `createDirectSocketOpener(fetch)` | the same, dialed straight over a `fetch` upgrade |
+| `createWebSocketClass(…)` | a `WebSocket`-shaped class for code that constructs one itself |
 
 Two details are load-bearing, both read off the adapter rather than assumed: the bridge
 credential travels in the URL's **query string** (`agent_bridge_token`), and an accepted

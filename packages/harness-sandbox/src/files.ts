@@ -52,7 +52,7 @@
  * the caller to drain or release as it chooses.
  */
 import type { HarnessV1NetworkSandboxSession } from '@ai-sdk/harness'
-import type { SandboxSession } from '@pleaseai/sandbox-contract'
+import type { SandboxSession } from '@amond-ai/sandbox'
 import { bestEffort, nowAborted } from './best-effort'
 
 /** The file half of the harness session — everything below `run`/`spawn`. */

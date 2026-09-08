@@ -6,7 +6,7 @@
  * still has running, and every trust decision in this backend resolves to preferring the
  * second over the first.
  */
-import type { SandboxCommand } from '@pleaseai/sandbox-contract'
+import type { SandboxCommand } from '@amond-ai/sandbox'
 import type { E2bSandboxLike } from './e2b-surface'
 import type { JournalMeta } from './journal'
 import { ARGV_CLOSE, ARGV_OPEN, isProcessId, journalledScriptIn, STDOUT_SUFFIX } from './journal'

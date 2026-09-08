@@ -5,7 +5,7 @@
  * share one rule — the journal is writable by the turn, so nothing in it is believed on its
  * own — which is why they are one file. The fake sandbox is `e2b-session.fixtures.ts`.
  */
-import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@pleaseai/sandbox-contract'
+import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@amond-ai/sandbox'
 import { describe, expect, it } from 'vitest'
 import { decode, encode, endProcess, fakeSandbox, leapingClock, ROOT, session } from './e2b-session.fixtures'
 

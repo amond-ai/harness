@@ -1,4 +1,4 @@
-import type { StartMessage } from '@pleaseai/harness-protocol'
+import type { StartMessage } from '@amond-ai/harness-protocol'
 
 type BuiltinToolFiltering = StartMessage['builtinToolFiltering']
 

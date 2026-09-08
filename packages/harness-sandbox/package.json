@@ -1,9 +1,9 @@
 {
-  "name": "@pleaseai/harness-sandbox",
+  "name": "@amond-ai/harness-sandbox",
   "type": "module",
   "version": "0.1.0",
   "private": true,
-  "description": "The AI SDK harness's HarnessV1SandboxProvider, written once over @pleaseai/sandbox-contract so every backend behind that contract gets one",
+  "description": "The AI SDK harness's HarnessV1SandboxProvider, written once over @amond-ai/sandbox so every backend behind that contract gets one",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@ai-sdk/harness": "catalog:",
-    "@pleaseai/sandbox-contract": "workspace:*"
+    "@amond-ai/sandbox": "workspace:*"
   },
   "devDependencies": {
     "@pleaseai/eslint-config": "catalog:",

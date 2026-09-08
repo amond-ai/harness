@@ -18,7 +18,7 @@
  * side channel of exit codes and truncation notices, and a bounded stderr tail.
  */
 import type { HarnessV1NetworkSandboxSession } from '@ai-sdk/harness'
-import type { ProcessLogEvent, SandboxProcessHandle, SandboxSession } from '@pleaseai/sandbox-contract'
+import type { ProcessLogEvent, SandboxProcessHandle, SandboxSession } from '@amond-ai/sandbox'
 import { bestEffort, nowAborted } from './best-effort'
 
 /** The process half of the harness session. */

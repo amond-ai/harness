@@ -29,7 +29,7 @@ patches below are not upstream yet.
 
 The wire protocol upstream keeps in `@ai-sdk/harness` and
 `claude-code-bridge-protocol.ts` lives in
-[`@pleaseai/harness-protocol`](../harness-protocol) instead, because phase 2's
+[`@amond-ai/harness-protocol`](../harness-protocol) instead, because phase 2's
 Worker client needs the same schemas. Its own `UPSTREAM.md` records what was
 vendored there.
 
@@ -130,7 +130,7 @@ Each is a separate commit in this repository and is intended to go upstream.
     client that wanted to resume had to parse `<sessionId>.jsonl` out of the
     path — putting a CLI naming convention on the Worker's side of the split
     that field exists to keep on the host's. The id now rides beside the path
-    (`sessionArtifactsSchema.sessionId` in `@pleaseai/harness-protocol`).
+    (`sessionArtifactsSchema.sessionId` in `@amond-ai/harness-protocol`).
 
 20. `feat(turn-host): report the session artifacts on a run-phase error too` —
     only `finish` named them, so the ordinary way a turn fails — the SDK
@@ -138,7 +138,7 @@ Each is a separate commit in this repository and is intended to go upstream.
     left the client with no session to resume, which is exactly the ending a
     retry follows. The three run-phase `error` emits now carry the same
     `sessionArtifacts` `finish` does (`turnHostErrorSchema.sessionArtifacts` in
-    `@pleaseai/harness-protocol`), built by one `sessionArtifacts()` helper
+    `@amond-ai/harness-protocol`), built by one `sessionArtifacts()` helper
     that also feeds `finish`; `emitError` in `bridge-runtime.ts` forwards an
     optional `sessionArtifacts` verbatim and omits the key when the caller
     knows none. The `sessionId`/`sessionCwd` declarations moved above the
@@ -148,7 +148,7 @@ Each is a separate commit in this repository and is intended to go upstream.
 21. `feat(turn-host): answer a denied request and name the deferred one` — layer 3
     of the ADR's D6 had no way to say *no* and no way to say *what* a deferral
     is waiting on. Two additions, one at each end of the wire. `start` gains
-    `deniedRequests` (`deniedRequestSchema` in `@pleaseai/harness-protocol`),
+    `deniedRequests` (`deniedRequestSchema` in `@amond-ai/harness-protocol`),
     which the `PreToolUse` evaluator consumes one-shot **ahead of**
     `approvedRequests` and the defer rule: without it a human's refusal replays
     into the same `deferTools` pattern that deferred the call and defers
@@ -177,7 +177,7 @@ selects reload-on-start).
     fresh budget (#388, the #358 shape). The reason the `turn.onInterrupt`
     handler receives is now remembered and echoed as `interruptedBy`
     (`turnHostFinishSchema` / `turnHostErrorSchema` in
-    `@pleaseai/harness-protocol`): on `finish` only beside
+    `@amond-ai/harness-protocol`): on `finish` only beside
     `stopped: 'interrupted'`, so an SDK abort nobody asked for still names none;
     on the escalation `error` and on a query failure during the wind-down.
     `emitError` in `bridge-runtime.ts` forwards it the way it forwards

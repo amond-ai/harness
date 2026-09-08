@@ -1,7 +1,7 @@
 /**
  * The contract's file surface, over e2b.
  *
- * `@pleaseai/sandbox-contract` declares files in Cloudflare's shape — positional path,
+ * `@amond-ai/sandbox` declares files in Cloudflare's shape — positional path,
  * encoding-selected overloads — because that keeps the incumbent backend free of any mapping
  * layer. e2b's is different in every one of those respects, so this is where the difference
  * is paid, exactly as the contract's own note says it should be.
@@ -15,7 +15,7 @@
  *   That is a real memory cost the Cloudflare backend does not pay, and it is why the
  *   streaming *read* is passed straight through instead of being collected the same way.
  */
-import type { SandboxFileContent, SandboxFiles, SandboxFileStream } from '@pleaseai/sandbox-contract'
+import type { SandboxFileContent, SandboxFiles, SandboxFileStream } from '@amond-ai/sandbox'
 import type { E2bSandboxLike } from './e2b-surface'
 
 function decode(bytes: Uint8Array, encoding: string | undefined): SandboxFileContent {

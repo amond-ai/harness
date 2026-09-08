@@ -6,7 +6,7 @@
 # in a sandbox. So it is asserted at build time instead.
 #
 # Bump procedure: change the CLI pin in docker/config.toml, then the SDK pin in
-# packages/turn-host/package.json to the same patch. Regenerate the root lockfile
+# packages/harness-claude-code-host/package.json to the same patch. Regenerate the root lockfile
 # with `bun install`; docker/build-turn-host.sh regenerates the runtime lockfile it
 # ships in the image.
 set -euo pipefail
@@ -54,7 +54,7 @@ if [ "${cli_release}" != "${cli_line}" ] || [ "${sdk_release}" != "${sdk_line}" 
   echo "ERROR: claude CLI ${cli_version} is not paired with Agent SDK ${sdk_version}" >&2
   echo "       expected CLI ${cli_line}.<n> with Agent SDK ${sdk_line}.<n> at the same <n>;" >&2
   echo "       got CLI ${cli_release}.${cli_patch} and SDK ${sdk_release}.${sdk_patch}" >&2
-  echo "       pin packages/turn-host/package.json to ${sdk_line}.${cli_patch}" >&2
+  echo "       pin packages/harness-claude-code-host/package.json to ${sdk_line}.${cli_patch}" >&2
   exit 1
 fi
 

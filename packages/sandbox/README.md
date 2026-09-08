@@ -1,4 +1,4 @@
-# @pleaseai/sandbox-contract
+# @amond-ai/sandbox
 
 The sandbox surface the orchestrator runs against — **owned here, not borrowed**.
 
@@ -49,7 +49,7 @@ build time if upstream ever diverges — rather than at the first replay in prod
 run workflow reads a turn's transcript **after** the process exits. The Cloudflare container
 retains that natively. A backend where it does not — e2b drops a process from
 `commands.list()` the moment it exits and `commands.connect(pid)` then throws — has to
-reproduce the durability itself. See [`@pleaseai/sandbox-e2b`](../sandbox-e2b) for what that
+reproduce the durability itself. See [`@amond-ai/sandbox-e2b`](../sandbox-e2b) for what that
 costs, and research note 027 for the measurements.
 
 **A wait that ends before the process does must reject.** `waitForExit` resolving a synthetic
@@ -76,6 +76,6 @@ exists to avoid.
 | Backend | Package | Notes |
 | --- | --- | --- |
 | `cloudflare` | `apps/cf-orchestrator/src/run/sandbox-cloudflare.ts` | Wraps `getSandbox` — no mapping |
-| `e2b` | [`@pleaseai/sandbox-e2b`](../sandbox-e2b) | Journals transcripts and exit status to the sandbox filesystem |
+| `e2b` | [`@amond-ai/sandbox-e2b`](../sandbox-e2b) | Journals transcripts and exit status to the sandbox filesystem |
 
 `SANDBOX_BACKEND` selects between them; see `apps/cf-orchestrator/src/run/sandbox-provider.ts`.

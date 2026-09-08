@@ -142,7 +142,7 @@ export function createKillPath(deps: KillPathDeps): KillPath {
    * `result` the interrupt exists to collect. There is nothing to confirm then — the caller's
    * bounded wait times out and escalates, and that escalation is the kill that may fall back.
    * It is logged rather than swallowed so that timeout is diagnosable from the sandbox's own
-   * output (`SandboxProcessHandle.kill` in `@pleaseai/sandbox-contract` says a backend that
+   * output (`SandboxProcessHandle.kill` in `@amond-ai/sandbox` says a backend that
    * cannot deliver a named signal must say so rather than silently do nothing).
    */
   async function settleKill(

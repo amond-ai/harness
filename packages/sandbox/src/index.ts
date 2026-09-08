@@ -1,4 +1,4 @@
-// @pleaseai/sandbox-contract
+// @amond-ai/sandbox
 //
 // The sandbox surface `apps/cf-orchestrator` runs against, owned here rather than imported
 // from any one vendor's SDK. See `./types.ts` for why the Cloudflare shapes are copied

@@ -268,7 +268,7 @@ export interface SandboxFiles {
  * a Worker should use, because its bridge port is private and the Worker reaches it by asking
  * the Durable Object to open the socket (`wsConnect`) rather than by resolving a name. So the
  * Cloudflare backend answers with a URL tagged for its own transport, which
- * `@pleaseai/harness-cf-transport` recognises and dials through the binding, while an
+ * `@amond-ai/harness-transport-cloudflare` recognises and dials through the binding, while an
  * untagged URL is dialed directly. Which of the two a backend mints is the backend's
  * business, and no caller has to know.
  */

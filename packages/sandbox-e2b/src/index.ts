@@ -1,6 +1,6 @@
-// @pleaseai/sandbox-e2b
+// @amond-ai/sandbox-e2b
 //
-// An e2b backend for `@pleaseai/sandbox-contract`.
+// An e2b backend for `@amond-ai/sandbox`.
 //
 // e2b forgets a process the moment it exits — no `list()` entry, no `connect(pid)` — while
 // the run workflow reads a turn's transcript after it ends. So this backend journals the

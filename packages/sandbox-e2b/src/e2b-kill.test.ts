@@ -3,7 +3,7 @@
  * signalled nothing reports. Split out of `e2b-session.process.test.ts` alongside the module
  * these drive (`e2b-kill.ts`); that file keeps `exec`/`getProcess` and the journal bookkeeping.
  */
-import { SandboxWaitTimeoutError } from '@pleaseai/sandbox-contract'
+import { SandboxWaitTimeoutError } from '@amond-ai/sandbox'
 import { describe, expect, it, vi } from 'vitest'
 import { decode, encode, endProcess, fakeSandbox, ROOT, session } from './e2b-session.fixtures'
 

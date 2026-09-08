@@ -1,9 +1,9 @@
 {
-  "name": "@pleaseai/sandbox-e2b",
+  "name": "@amond-ai/sandbox-e2b",
   "type": "module",
   "version": "0.1.0",
   "private": true,
-  "description": "An e2b backend for @pleaseai/sandbox-contract — journals process transcripts and exit status to the sandbox filesystem, because e2b forgets a process the moment it exits",
+  "description": "An e2b backend for @amond-ai/sandbox — journals process transcripts and exit status to the sandbox filesystem, because e2b forgets a process the moment it exits",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -16,7 +16,7 @@
     "test": "bun --bun vitest run"
   },
   "dependencies": {
-    "@pleaseai/sandbox-contract": "workspace:*",
+    "@amond-ai/sandbox": "workspace:*",
     "e2b": "catalog:"
   },
   "devDependencies": {

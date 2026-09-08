@@ -21,7 +21,7 @@ import type {
   SandboxProcessHandle,
   SandboxProvider,
   SandboxSession,
-} from '@pleaseai/sandbox-contract'
+} from '@amond-ai/sandbox'
 import type { HarnessProcessSurface } from './process'
 import { createProcessSurface } from './process'
 

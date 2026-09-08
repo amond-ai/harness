@@ -17,7 +17,7 @@
  * is an observation the first live run owes us before this file depends on it.
  */
 
-import type { ApprovedRequest, DeniedRequest } from '@pleaseai/harness-protocol'
+import type { ApprovedRequest, DeniedRequest } from '@amond-ai/harness-protocol'
 
 /** What a denial with no words of its own tells the agent. */
 export const DENIED_BY_REVIEWER_MESSAGE = 'denied by a human reviewer'

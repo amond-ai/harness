@@ -1,9 +1,9 @@
-# @pleaseai/sandbox-e2b
+# @amond-ai/sandbox-e2b
 
-An [e2b](https://e2b.dev) backend for [`@pleaseai/sandbox-contract`](../sandbox-contract).
+An [e2b](https://e2b.dev) backend for [`@amond-ai/sandbox`](../sandbox).
 
 ```ts
-import { createE2bProvider, e2bSandboxApi } from '@pleaseai/sandbox-e2b'
+import { createE2bProvider, e2bSandboxApi } from '@amond-ai/sandbox-e2b'
 
 const provider = createE2bProvider({
   api: e2bSandboxApi({ apiKey: process.env.E2B_API_KEY }),
@@ -108,7 +108,7 @@ into `journalRoot`:
 ```
 
 `logs({ follow: true })` tails those files rather than snapshotting them (`log-follow.ts`),
-because a live consumer exists: `@pleaseai/harness-sandbox` follows the AI SDK bridge, and
+because a live consumer exists: `@amond-ai/harness-sandbox` follows the AI SDK bridge, and
 `@ai-sdk/harness` reads end-of-stream as "the bridge exited". Until 2026-08-27 this backend
 answered `follow` with the same EOF-terminated snapshot every other read used — invisible to
 the orchestrator, which reads a turn *after* it exits, and fatal to the harness, whose bridge

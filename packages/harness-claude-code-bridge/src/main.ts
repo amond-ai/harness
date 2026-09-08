@@ -3,7 +3,7 @@
 // resulting `onStart` to the bridge runtime. Everything the Worker talks to
 // lives behind the WebSocket the runtime binds.
 
-import type { StartMessage } from '@pleaseai/harness-protocol'
+import type { StartMessage } from '@amond-ai/harness-protocol'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import process, { argv, stdout } from 'node:process'

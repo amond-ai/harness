@@ -23,18 +23,12 @@
  * - **`endpoint.headers` are scoped to that URL and must be sent.** The contract says so, and
  *   the adapter passes them to `ws` as request headers.
  */
-import type { WsLike } from './ws-shim'
-import { acceptUpgrade, upgradeHeaders } from './upgrade'
+import type { BridgeEndpoint, WsLike } from '@amond-ai/harness-transport'
+import { acceptUpgrade, upgradeHeaders } from '@amond-ai/harness-transport'
 
 /** The one `@cloudflare/sandbox` method this module needs, structural so tests can stand in. */
 export interface WsConnectSandbox {
   wsConnect: (request: Request, port: number) => Promise<Response>
-}
-
-/** `HarnessV1PortEndpoint` — copied structurally so this package need not depend on the harness. */
-export interface BridgeEndpoint {
-  readonly url: string
-  readonly headers?: Readonly<Record<string, string>>
 }
 
 /**

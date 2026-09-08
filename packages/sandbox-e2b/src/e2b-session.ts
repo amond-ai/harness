@@ -20,10 +20,10 @@ import type {
   SandboxExecOptions,
   SandboxProcessHandle,
   SandboxSession,
-} from '@pleaseai/sandbox-contract'
+} from '@amond-ai/sandbox'
 import type { E2bSandboxLike } from './e2b-surface'
 import type { JournalMeta } from './journal'
-import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@pleaseai/sandbox-contract'
+import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@amond-ai/sandbox'
 import { createE2bFiles } from './e2b-files'
 import { createKillPath } from './e2b-kill'
 import { isProcessId, journalledCommand, journalPaths, serializeJournalMeta } from './journal'
@@ -40,7 +40,7 @@ const DEFAULT_POLL_MS = 250
  * How long a following `logs()` waits after a poll that found nothing new.
  *
  * A second, not `DEFAULT_POLL_MS`: every poll transfers the whole journal file, and the caller
- * this exists for — the AI SDK bridge's startup banner, via `@pleaseai/harness-sandbox` — is
+ * this exists for — the AI SDK bridge's startup banner, via `@amond-ai/harness-sandbox` — is
  * bounded by the harness's own readiness timeout of two minutes rather than by this cadence.
  */
 const DEFAULT_FOLLOW_MS = 1_000

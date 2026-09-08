@@ -1,5 +1,5 @@
 {
-  "name": "@pleaseai/turn-host",
+  "name": "@amond-ai/harness-claude-code-host",
   "type": "module",
   "version": "0.1.0",
   "private": true,
@@ -12,8 +12,8 @@
     "test": "bun --bun vitest run"
   },
   "dependencies": {
+    "@amond-ai/harness-protocol": "workspace:*",
     "@anthropic-ai/claude-agent-sdk": "catalog:sandbox-image",
-    "@pleaseai/harness-protocol": "workspace:*",
     "ws": "catalog:sandbox-image",
     "zod": "catalog:"
   },

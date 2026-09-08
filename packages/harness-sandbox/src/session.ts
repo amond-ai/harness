@@ -23,7 +23,7 @@
  *   type must find nothing there, not a working `stop`.
  */
 import type { HarnessV1NetworkSandboxSession } from '@ai-sdk/harness'
-import type { SandboxProvider } from '@pleaseai/sandbox-contract'
+import type { SandboxProvider } from '@amond-ai/sandbox'
 import { createFileSurface } from './files'
 import { createProcessSurface } from './process'
 

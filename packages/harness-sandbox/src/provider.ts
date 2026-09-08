@@ -2,13 +2,13 @@
  * A {@link HarnessV1SandboxProvider} over any {@link SandboxProvider}.
  *
  * Written once, over the contract, it serves every backend at once — which is what
- * `packages/sandbox-contract/src/types.ts` says of this translation when it explains why the
+ * `packages/sandbox/src/types.ts` says of this translation when it explains why the
  * file surface is declared in Cloudflare's shape rather than the harness's: "the harness's
  * own shape is a further translation, and it belongs in the harness provider — written once,
  * over the contract, for every backend at once." This is that file.
  */
 import type { HarnessV1SandboxProvider } from '@ai-sdk/harness'
-import type { SandboxProvider } from '@pleaseai/sandbox-contract'
+import type { SandboxProvider } from '@amond-ai/sandbox'
 import { bestEffort } from './best-effort'
 import { createHarnessSandboxSession } from './session'
 

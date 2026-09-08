@@ -8,13 +8,13 @@
 // `createTurnDriver`, so a test can drive the whole driver against a scripted
 // fake and `main.ts` stays the one module that loads the real SDK.
 
+import type { SdkPermissionMode, StartMessage } from '@amond-ai/harness-protocol'
 import type { Options, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { SdkPermissionMode, StartMessage } from '@pleaseai/harness-protocol'
 import type { BridgeEvent, BridgeTurn, Experimental_BridgeUserMessage, Experimental_BridgeUserMessageQueue, InterruptReason } from './bridge-runtime'
 import type { ClaudeMessage } from './create-emit-stream-event'
 import { randomUUID } from 'node:crypto'
 import { exit, env as procEnv } from 'node:process'
-import { sdkPermissionModeSchema, startMessageSchema } from '@pleaseai/harness-protocol'
+import { sdkPermissionModeSchema, startMessageSchema } from '@amond-ai/harness-protocol'
 
 import { createClaudeCodeSystemPrompt } from './claude-code-system-prompt'
 import { toClaudeSkillsOption } from './claude-skills-option'

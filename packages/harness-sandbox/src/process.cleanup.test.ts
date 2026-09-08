@@ -7,7 +7,7 @@
  * the call failed. Each of them pins a kill, the original cause surviving that kill, and the
  * kill being best-effort in both of the shapes a failure can take.
  */
-import type { ProcessLogEvent } from '@pleaseai/sandbox-contract'
+import type { ProcessLogEvent } from '@amond-ai/sandbox'
 import { describe, expect, it } from 'vitest'
 import { createProcessSurface } from './process'
 import { fakeSandboxProvider, FIXTURE_CWD, processSurface, stdoutEvent } from './sandbox.fixtures'

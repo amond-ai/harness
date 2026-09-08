@@ -1,7 +1,7 @@
-// @pleaseai/harness-sandbox
+// @amond-ai/harness-sandbox
 //
 // The AI SDK harness's `HarnessV1SandboxProvider`, implemented over
-// `@pleaseai/sandbox-contract`. Written once against the contract, it serves every backend
+// `@amond-ai/sandbox`. Written once against the contract, it serves every backend
 // behind it — Cloudflare, e2b, or one that does not exist yet — with no harness-shaped code
 // in any of them.
 

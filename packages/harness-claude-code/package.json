@@ -1,0 +1,37 @@
+{
+  "name": "@amond-ai/harness-claude-code",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Starts, watches, attaches to and stops one Claude Code turn in a sandbox \u2014 the Worker-side seam both the `claude` CLI exec and the Agent SDK turn host sit behind",
+  "exports": {
+    ".": "./src/index.ts",
+    "./outcome": "./src/outcome.ts",
+    "./permission-mode": "./src/permission-mode.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "bun --bun vitest run",
+    "test:coverage": "bun --bun vitest run --coverage"
+  },
+  "dependencies": {
+    "@ai-sdk/harness": "catalog:",
+    "@amond-ai/harness-protocol": "workspace:*",
+    "@amond-ai/harness-transport": "workspace:*",
+    "@amond-ai/redact": "workspace:*",
+    "@amond-ai/sandbox": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@pleaseai/eslint-config": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
+    "bun-types": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

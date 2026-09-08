@@ -7,11 +7,39 @@
  * checks are the part worth keeping in one place; each of them turns a silent hang into an
  * error that names its cause, and a second copy is a second chance to drop one.
  */
-import type { WsLike } from './ws-shim'
+import type { PlatformSocket, WsLike } from './ws-shim'
 import { toWsLike } from './ws-shim'
 
 /** What a successful WebSocket upgrade answers with. */
 const SWITCHING_PROTOCOLS = 101
+
+/**
+ * The socket an upgrade response carries: the half {@link toWsLike} consumes, plus `accept()`.
+ *
+ * `accept()` is not on the WHATWG `WebSocket` — it is how a runtime that hands the socket back
+ * on a *response* says "I will read frames from this now" (workerd's client-side upgrade). A
+ * runtime whose upgrade produces an already-open socket never reaches this function at all; it
+ * calls {@link toWsLike} directly, as `standard-connect.ts` does.
+ */
+export interface UpgradeSocket extends PlatformSocket {
+  accept: () => void
+}
+
+/**
+ * The upgrade response, described structurally rather than as a `Response`.
+ *
+ * `webSocket` is a runtime extension to the Fetch `Response` — workerd sets it, the WHATWG one
+ * has no such member — so typing this parameter as `Response` would make the package's own
+ * typecheck depend on `@cloudflare/workers-types`. Read off the two members this function uses
+ * instead, both optional, so a plain `Response` (the refusal cases, which is what the tests
+ * construct) satisfies it and a workerd one does too.
+ */
+export interface UpgradeResponse {
+  readonly status: number
+  readonly statusText: string
+  readonly body?: { cancel: () => Promise<unknown> } | null
+  readonly webSocket?: UpgradeSocket | null
+}
 
 /** The two headers this module sets, lower-cased for comparison against an endpoint's own. */
 const UPGRADE_HEADERS = new Set(['upgrade', 'connection'])
@@ -57,12 +85,12 @@ export function upgradeHeaders(headers?: Readonly<Record<string, string>>): Reco
  * unhandled rejection in the Worker — a second failure, reported after the first and naming
  * the wrong call.
  */
-function refuse(response: Response, message: string): never {
+function refuse(response: UpgradeResponse, message: string): never {
   void response.body?.cancel().catch(() => {})
   throw new Error(message)
 }
 
-export function acceptUpgrade(response: Response): WsLike {
+export function acceptUpgrade(response: UpgradeResponse): WsLike {
   if (response.status !== SWITCHING_PROTOCOLS) {
     refuse(
       response,

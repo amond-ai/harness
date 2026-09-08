@@ -19,7 +19,7 @@ import type {
   SandboxPortEndpointOptions,
   SandboxProvider,
   SandboxSession,
-} from '@pleaseai/sandbox-contract'
+} from '@amond-ai/sandbox'
 import type { E2bSandboxLike, E2bSessionOptions } from './e2b-session'
 import { createE2bSession } from './e2b-session'
 
@@ -81,7 +81,7 @@ const DEFAULT_PROTOCOL = 'https'
  * `'ws'` outright would fail the very caller this backend exists to serve, since
  * `@ai-sdk/harness-claude-code` asks for `getPortEndpoint({ port, protocol: 'ws' })` and
  * nothing else, and it is not ours to patch (a wrangler `alias` is why, see
- * `@pleaseai/harness-cf-transport`).
+ * `@amond-ai/harness-transport-cloudflare`).
  *
  * It is the same fact {@link DEFAULT_PROTOCOL} already reasons from — e2b terminates TLS at
  * its own edge — carried from the default to the explicit case. The *kind* is preserved,

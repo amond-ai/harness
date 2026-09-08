@@ -6,7 +6,7 @@
  * cannot create:
  *
  * ```jsonc
- * { "alias": { "ws": "@pleaseai/harness-cf-transport/ws" } }
+ * { "alias": { "ws": "@amond-ai/harness-transport-cloudflare/ws" } }
  * ```
  *
  * Kept apart from {@link createWebSocketClass} because this file is the one part that cannot

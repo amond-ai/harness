@@ -15,7 +15,7 @@
  * terminal events, so re-serving one on every tick would be noise at best and a
  * double-counted exit at worst.
  */
-import type { ProcessLogEvent } from '@pleaseai/sandbox-contract'
+import type { ProcessLogEvent } from '@amond-ai/sandbox'
 
 export function encodeCursor(stdout: number, stderr: number): string {
   return `${stdout}:${stderr}`

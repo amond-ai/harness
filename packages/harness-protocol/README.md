@@ -1,4 +1,4 @@
-# @pleaseai/harness-protocol
+# @amond-ai/harness-protocol
 
 The bridge wire protocol the turn host and its Worker client both speak — the frames that
 cross the sandbox boundary, in one place so a change to the wire is one change.

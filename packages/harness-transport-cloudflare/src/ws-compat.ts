@@ -1,3 +1,4 @@
+import type { BridgeEndpoint, WsLike } from '@amond-ai/harness-transport'
 /**
  * A `WebSocket` that dials a Cloudflare Sandbox, wearing the constructor `ws` exports.
  *
@@ -24,8 +25,6 @@
  * `.mjs` and runs against the real `ws` installed inside the container.
  */
 import type { SandboxOptions } from '@cloudflare/sandbox'
-import type { BridgeEndpoint } from './cf-connect'
-import type { WsLike } from './ws-shim'
 
 /**
  * How the sandbox travels from the provider to here.
