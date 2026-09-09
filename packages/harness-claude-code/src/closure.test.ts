@@ -1,7 +1,7 @@
 /**
  * The seam's dependency closure, asserted rather than remembered.
  *
- * These nine packages are meant to be liftable into a repository of their own, which only holds
+ * These ten packages are meant to be liftable into a repository of their own, which only holds
  * while none of them reaches for anything outside the set: an `apps/*` import, the orchestrator's
  * `agent-core`, the CLI-spawning `sandbox-bridge`, a dashboard schema. Each of those would be
  * invisible until the split, and then it would be a rewrite rather than a move — so the check
@@ -42,6 +42,7 @@ const CLOSED_SET = [
   'harness-sandbox',
   'sandbox',
   'sandbox-e2b',
+  'sandbox-daytona',
   'redact',
 ] as const
 

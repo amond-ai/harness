@@ -1,0 +1,29 @@
+{
+  "name": "@amond-ai/sandbox-daytona",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Daytona backend for @amond-ai/sandbox — one session per process, with the exit code and the transcript read back from Daytona's own toolbox daemon",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@amond-ai/sandbox": "workspace:*",
+    "@daytona/sdk": "catalog:"
+  },
+  "devDependencies": {
+    "@pleaseai/eslint-config": "catalog:",
+    "bun-types": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
