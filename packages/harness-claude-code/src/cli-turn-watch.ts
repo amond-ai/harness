@@ -10,12 +10,14 @@ import type { TurnDriverConfig } from './config'
 import type { LogSample } from './log-sample'
 import type { LiveMirror } from './mirror'
 import type { AttemptResult } from './turn-driver'
+import type { TurnResultScanner } from './turn-result-scan'
 import { describeCause as describe, sanitizeErrorSummary } from '@amond-ai/redact'
 import { SandboxNoExitRecordError } from '@amond-ai/sandbox'
 import { killTurn } from './cli-turn-kill'
-import { readLogSample } from './log-sample'
+import { LOG_READ_TIMEOUT_MS, readLogSample } from './log-sample'
 import { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS } from './mirror'
 import { flushOnInterval } from './turn-mirror-flush'
+import { createTurnResultScanner, withVerdict } from './turn-result-scan'
 import { clampedTurnBudget, nextSampleDelay, turnTimeoutCause } from './watchdog'
 
 /** Distinguishes a watchdog sample tick from the process's own exit in the race below. */
@@ -38,6 +40,11 @@ const TICK = Symbol('watchdog-tick')
  * timeout, either watchdog verdict, an abandoned wait — records the tail written since the last
  * tick. Nothing in that path can reject: the mirror swallows its own put failures, and this step
  * is `NO_RETRIES`, so a mirror that failed a turn would cost the run itself.
+ *
+ * That closing drain is also where the turn's own `result` message is usually seen (#376). The
+ * scan runs on every read this function makes, and the reading it produces is attached to the
+ * result *after* the drain — which is why the drain no longer depends on a mirror being
+ * configured: the loop's judgment must not turn on whether R2 is bound.
  */
 export async function awaitTurn(
   sandbox: SandboxSession,
@@ -50,6 +57,13 @@ export async function awaitTurn(
   if (!process) {
     throw new Error(`sandbox process ${processId} is no longer tracked`)
   }
+  const scanner = createTurnResultScanner()
+  // What a previous entry of this step already published, and the one part of the turn's output
+  // this entry will not be handed again: the first read below starts at the mirror's cursor, so
+  // the result of a turn that ended before a restart is only in there (#376).
+  if (mirror?.resumedFrom !== undefined) {
+    scanner.text(mirror.resumedFrom)
+  }
   // Registered before the first log read, as it was before the mirror split this function: a turn
   // that dies inside that read must not exit with nothing watching for it.
   const exit = process.waitForExit()
@@ -57,17 +71,36 @@ export async function awaitTurn(
   // left the cursor, whichever way the wait ended. It *starts* at the mirror's cursor, which is
   // the seed's when this step was re-entered after a restart: the cursor stored with a snapshot
   // is the cursor of the text in it, so the first read continues rather than repeats.
-  const cursor = { sample: await readLogSample(process, { bytes: 0, cursor: mirror?.cursor }, mirror) }
+  const cursor = {
+    sample: await readLogSample(process, { bytes: 0, cursor: mirror?.cursor }, mirror, LOG_READ_TIMEOUT_MS, scanner.push),
+  }
+  const result = await watchAndDrain({
+    sandbox,
+    process,
+    processId,
+    config,
+    mirror,
+    cursor,
+    exit,
+    startedAtMs: live.startedAtMs,
+    scanner,
+  })
+  return withVerdict(result, scanner.verdict())
+}
+
+/** The watch, with the closing drain and flush every one of its exits has to pass through. */
+async function watchAndDrain(input: WatchTurnInput): Promise<AttemptResult> {
+  const { process, processId, mirror, cursor, scanner } = input
   // Held outside the `try` so the `finally` can read what the wait decided: the closing put's
   // `complete` stamp claims the *turn* is over, and only the result says whether it is.
   let result: AttemptResult | undefined
   try {
-    result = await watchTurn({ sandbox, process, processId, config, mirror, cursor, exit, startedAtMs: live.startedAtMs })
+    result = await watchTurn(input)
     return result
   }
   finally {
+    cursor.sample = await readLogSample(process, cursor.sample, mirror, LOG_READ_TIMEOUT_MS, scanner.push)
     if (mirror !== undefined) {
-      await readLogSample(process, cursor.sample, mirror)
       await boundedFlush(mirror, { final: true, ended: turnEnded(result) }, LIVE_MIRROR_FLUSH_TIMEOUT_MS, processId)
     }
   }
@@ -136,6 +169,8 @@ interface WatchTurnInput {
   mirror: LiveMirror | undefined
   cursor: { sample: LogSample }
   exit: Promise<ProcessExit>
+  /** The turn's own `result` message, scanned out of the same reads liveness is measured on. */
+  scanner: TurnResultScanner
   /** When `start-turn` pinned this turn's start, absent only for a pre-deploy cached result. */
   startedAtMs?: number
 }
@@ -184,7 +219,7 @@ async function watchTurn(input: WatchTurnInput): Promise<AttemptResult> {
     // Bounded (`LOG_READ_TIMEOUT_MS`), because the deadline decision below is only reached once
     // this returns: a log backend that stalled here would hold the turn past its wall-clock budget
     // until the platform's 6-hour step timeout aborted the step, with no kill and no `timedOutBy`.
-    cursor.sample = await readLogSample(process, cursor.sample, mirror)
+    cursor.sample = await readLogSample(process, cursor.sample, mirror, LOG_READ_TIMEOUT_MS, input.scanner.push)
     const now = Date.now()
     if (cursor.sample.bytes > 0) {
       lastLogActivityAt = now

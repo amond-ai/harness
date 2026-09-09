@@ -1,4 +1,4 @@
-import type { TurnTimeoutCause } from '../outcome'
+import type { TurnTimeoutCause, TurnVerdict } from '../outcome'
 /**
  * What a sequence of frames means: the round's carried state, and the attempt result a terminal
  * frame produces.
@@ -35,6 +35,19 @@ export interface TurnRoundState {
   interruptedBy?: TurnTimeoutCause
   /** Epoch millis of that `interrupt`, which is what the settle deadline is measured from. */
   interruptedAt?: number
+  /**
+   * The turn's own `result` message, as the rounds have read it so far (#376).
+   *
+   * Carried across the boundary for the same reason `since` is: the SDK's `result` arrives as an
+   * ordinary `raw` frame, and the `finish` that ends the turn can land in a *later* round than the
+   * frame that carried the verdict — a window can expire between the two. A round that started
+   * without it would hand the loop an ending with no judgment on it and the loop would fall back
+   * to the exit code, which is the reading #376 exists to stop making.
+   *
+   * Small enough to ride a step result by construction: three fields, no agent text
+   * ({@link TurnVerdict}).
+   */
+  verdict?: TurnVerdict
 }
 
 /**

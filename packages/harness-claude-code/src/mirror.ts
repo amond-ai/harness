@@ -66,6 +66,22 @@ export interface LiveMirror {
    * deliberately does not use — see {@link flush}.
    */
   readonly cursor: string | undefined
+  /**
+   * The record a *resumed* mirror started from — what a previous instance of this step already
+   * published — or `undefined` on a first entry (#376).
+   *
+   * Here because {@link cursor} is: the first log read starts at that cursor, so every byte the
+   * seed holds is a byte this entry will never be handed again. The mirror is the only component
+   * that still has them, and a driver that has to read the turn's own `result` out of the stream
+   * would otherwise lose it for exactly the turns that were restarted.
+   *
+   * It is the *stored* text — masked, line by line — and reading it back for the terminal message
+   * is what the settle path already does with the same object (`hasCompleteLiveRecord`), so this
+   * makes no new claim about what a published snapshot can be parsed for. Deliberately only the
+   * seed and never the live text: everything appended since arrived through `append`, and a
+   * consumer that wanted that has already seen it.
+   */
+  readonly resumedFrom?: string
 }
 
 /**

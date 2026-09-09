@@ -33,6 +33,28 @@ export const TURN_TIMEOUT_CAUSES = ['watchdog', 'budget'] as const
 export type TurnTimeoutCause = typeof TURN_TIMEOUT_CAUSES[number]
 
 /**
+ * What the *turn* said about its own ending, as opposed to what its host's exit said (#376).
+ *
+ * The two answer different questions and can disagree: a turn that reported `subtype: 'success'`
+ * from a host that then exited non-zero did the work, and an exit-0 `is_error` is a turn that
+ * could not. Settle has read the turn's word ahead of the exit code since D5; this is the same
+ * word, projected small enough to ride an attempt's result so the loop can read it too.
+ *
+ * Three fields and no text. `subtype` and `isError` are the judgment; `terminalReason` is here for
+ * exactly one value — `tool_deferred`, the ending that is a pending question rather than a failure
+ * and must never be read as a transient one to retry. The agent's own prose stays out: it is the
+ * settle replay's to record, and the loop decides nothing with it.
+ */
+export interface TurnVerdict {
+  /** `SDKResultMessage.subtype`, verbatim; `success` is the only value anything branches on. */
+  subtype: string
+  /** The agent's own "I could not do this", which an exit code cannot show. */
+  isError: boolean
+  /** Why the terminal state was reached (`tool_deferred`, `max_turns`, …); absent on older CLIs. */
+  terminalReason?: string
+}
+
+/**
  * The one narrowing of an untrusted value to a timeout cause.
  *
  * Two readers need it and they must not drift: a run result read back through JSON

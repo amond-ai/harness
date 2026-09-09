@@ -32,7 +32,7 @@ export type { LogSample } from './log-sample'
 export { LOG_READ_TIMEOUT_MS, readLogSample } from './log-sample'
 export type { LiveMirror } from './mirror'
 export { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS, LIVE_MIRROR_MAX_BYTES } from './mirror'
-export type { AttemptOutcome, TurnTimeoutCause } from './outcome'
+export type { AttemptOutcome, TurnTimeoutCause, TurnVerdict } from './outcome'
 export { asTurnTimeoutCause, ATTEMPT_OUTCOMES, TURN_TIMEOUT_CAUSES } from './outcome'
 export type { PermissionMode } from './permission-mode'
 export { parsePermissionMode, PERMISSION_MODES } from './permission-mode'
@@ -96,6 +96,17 @@ export { turnDriver } from './turn-driver'
 export type { TurnDriverKind } from './turn-driver-kind'
 export { parseTurnDriver, TURN_DRIVERS } from './turn-driver-kind'
 export { flushOnInterval } from './turn-mirror-flush'
+export type { TurnResult } from './turn-result'
+export {
+  isResultMessage,
+  parseTurnResult,
+  RESULT_MESSAGE_TYPE,
+  turnResultFailure,
+  turnResultSchema,
+  turnVerdict,
+} from './turn-result'
+export type { TurnResultScanner } from './turn-result-scan'
+export { createTurnResultScanner, withVerdict } from './turn-result-scan'
 export type { TurnBudgetInput, WatchdogDecision, WatchdogInput } from './watchdog'
 export {
   AWAIT_EXIT_STEP_TIMEOUT,

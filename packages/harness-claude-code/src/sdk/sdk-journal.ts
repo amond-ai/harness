@@ -15,11 +15,14 @@
  * a round finds the host gone and has to ask whether it ended before it went.
  */
 import type { ProcessExit, SandboxCommand, SandboxProcessHandle, SandboxSession } from '@amond-ai/sandbox'
+import type { TurnVerdict } from '../outcome'
 import type { ProcessSideChannel } from '../process-ndjson'
 import type { TerminalObservation } from './sdk-frames'
 import { describeCause } from '@amond-ai/redact'
 import { LIVE_MIRROR_MAX_BYTES } from '../mirror'
 import { demuxProcessEvents, iterateStream } from '../process-ndjson'
+import { createTurnResultScanner } from '../turn-result-scan'
+import { turnHostJournalPath } from './sdk-bridge-config'
 import { classifyFrame } from './sdk-frames'
 
 /**
@@ -152,4 +155,38 @@ export function journalTerminal(text: string, cut: boolean): TerminalObservation
     }
   }
   return last
+}
+
+/** What one journal tail says about the turn: how it ended, and what it said about itself. */
+export interface JournalEnding {
+  terminal?: TerminalObservation
+  verdict?: TurnVerdict
+}
+
+/**
+ * The journal read once, for both questions a gone host leaves open (#376).
+ *
+ * The ending is {@link journalTerminal}'s; the verdict is the turn's own `result`, scanned out of
+ * the same tail through {@link sdkJournalTranscript} so the live round and this read cannot
+ * disagree about what a frame meant. `carried` is what earlier rounds already read, which is the
+ * answer when `tail -c` starts past the result.
+ *
+ * A read that fails is not an ending: it answers with the carried verdict and no terminal frame,
+ * which is what leaves the two readings the cli path makes unchanged.
+ */
+export async function readJournalEnding(
+  session: SandboxSession,
+  stateDir: string,
+  carried: TurnVerdict | undefined,
+): Promise<JournalEnding> {
+  try {
+    const { text, cut } = await readJournalTail(session, turnHostJournalPath(stateDir))
+    const scanner = createTurnResultScanner(carried)
+    scanner.text(sdkJournalTranscript(text, cut))
+    return { terminal: journalTerminal(text, cut), verdict: scanner.verdict() }
+  }
+  catch (cause) {
+    console.warn(`turn host journal read failed state_dir=${stateDir} error="${describeCause(cause)}"`)
+    return { verdict: carried }
+  }
 }

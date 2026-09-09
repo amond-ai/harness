@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./outcome": "./src/outcome.ts",
-    "./permission-mode": "./src/permission-mode.ts"
+    "./permission-mode": "./src/permission-mode.ts",
+    "./turn-result": "./src/turn-result.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",

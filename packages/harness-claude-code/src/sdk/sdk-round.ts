@@ -20,8 +20,9 @@ import type { WsLike } from '@amond-ai/harness-transport'
 import type { SandboxProcessHandle, SandboxSession } from '@amond-ai/sandbox'
 import type { TurnDriverConfig } from '../config'
 import type { LiveMirror } from '../mirror'
-import type { TurnTimeoutCause } from '../outcome'
+import type { TurnTimeoutCause, TurnVerdict } from '../outcome'
 import type { AttemptResult, TurnHandle, TurnRoundSpec } from '../turn-driver'
+import type { TurnResultScanner } from '../turn-result-scan'
 import type { TurnChannel } from './sdk-channel'
 import type { TerminalObservation } from './sdk-frames'
 import type { TurnRoundState } from './sdk-round-state'
@@ -29,11 +30,11 @@ import { describeCause as describe } from '@amond-ai/redact'
 import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from '../cli-turn-kill'
 import { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS } from '../mirror'
 import { flushOnInterval } from '../turn-mirror-flush'
+import { createTurnResultScanner, withVerdict } from '../turn-result-scan'
 import { ROUND_WINDOW_MS, turnBudgetExhausted, turnTimeoutCause } from '../watchdog'
-import { turnHostJournalPath } from './sdk-bridge-config'
 import { createTurnChannel } from './sdk-channel'
 import { classifyFrame } from './sdk-frames'
-import { journalTerminal, readJournalTail } from './sdk-journal'
+import { readJournalEnding } from './sdk-journal'
 import { nextFrame, reportFrame } from './sdk-round-observe'
 import { applyFrame, interruptedResult, observedResult, roundEnded } from './sdk-round-state'
 
@@ -85,6 +86,11 @@ interface PumpContext {
   lastFlushAt: number
   /** When the watchdog last read this turn, so a loud one is judged on a cadence too. */
   lastJudgedAt: number
+  /**
+   * The turn's own `result`, scanned out of the `raw` frames as they go past (#376), seeded from
+   * the carried state so an earlier round's reading survives this one.
+   */
+  scanner: TurnResultScanner
   /** Set once the Worker has asked for a stop, so the pump stops asking again. */
   interruptedBy?: TurnTimeoutCause
 }
@@ -122,6 +128,7 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
       : now + ROUND_WINDOW_MS,
     lastFlushAt: now,
     lastJudgedAt: now,
+    scanner: createTurnResultScanner(carried.verdict),
   }
   const sleep = input.sleep ?? (async (ms: number) => {
     await new Promise(resolve => setTimeout(resolve, ms))
@@ -155,7 +162,7 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
       if (await processGone(input.session, input.handle.processId)) {
         // Gone, and nothing terminal came back with the replay: the same two readings
         // `abandonedWaitResult` makes on the cli path, decided the same way.
-        context.state = { ...context.state, outcome: await abandoned(input, context.interruptedBy) }
+        context.state = { ...context.state, outcome: await abandoned(input, context.interruptedBy, context.state.verdict) }
         return context.state
       }
       const unreachable = await unreachableTimeout(context)
@@ -271,8 +278,10 @@ async function consume(frame: string, context: PumpContext): Promise<boolean> {
   }
   if (effect.kind === 'transcript') {
     context.input.mirror?.append(new TextEncoder().encode(effect.line), String(effect.seq ?? context.state.since))
+    // One `raw` frame is one line by construction, so the scan needs no reassembly here.
+    context.scanner.text(effect.line)
   }
-  context.state = applyFrame(context.state, effect, now)
+  context.state = scanned(applyFrame(context.state, effect, now), context.scanner)
   context.lastFlushAt = await flushOnInterval(
     context.input.mirror,
     context.lastFlushAt,
@@ -280,10 +289,19 @@ async function consume(frame: string, context: PumpContext): Promise<boolean> {
     context.input.handle.processId,
   )
   if (effect.kind === 'terminal') {
-    context.state = { ...context.state, outcome: await settle(effect.observation, context) }
+    context.state = {
+      ...context.state,
+      outcome: withVerdict(await settle(effect.observation, context), context.state.verdict),
+    }
     return true
   }
   return false
+}
+
+/** The round's state with whatever the scan has read carried on it, and nothing else changed. */
+function scanned(state: TurnRoundState, scanner: TurnResultScanner): TurnRoundState {
+  const verdict = scanner.verdict()
+  return verdict === undefined || verdict === state.verdict ? state : { ...state, verdict }
 }
 
 /**
@@ -490,32 +508,26 @@ async function unreachableTimeout(context: PumpContext): Promise<AttemptResult |
  * unnamed timeout, it *outranks* the transcript the settle replays (`failureOf`), so a completed
  * turn would be recorded as one that wedged. A journal that holds no terminal frame, or that
  * cannot be read at all, leaves the two readings the cli path makes unchanged.
+ *
+ * The same read answers what the turn said about itself, for the same reason (`readJournalEnding`).
  */
-async function abandoned(input: AttachRoundInput, interruptedBy: TurnTimeoutCause | undefined): Promise<AttemptResult> {
-  const terminal = await journaledTerminal(input)
-  if (terminal !== undefined) {
+async function abandoned(
+  input: AttachRoundInput,
+  interruptedBy: TurnTimeoutCause | undefined,
+  carried: TurnVerdict | undefined,
+): Promise<AttemptResult> {
+  const stateDir = input.handle.bridgeStateDir
+  const journal = stateDir === undefined
+    ? { verdict: carried }
+    : await readJournalEnding(input.session, stateDir, carried)
+  if (journal.terminal !== undefined) {
     console.warn(`turn host is gone, its ending read from the journal process_id=${input.handle.processId}`)
     const now = input.now()
-    return budgetOutranks(observedResult(terminal, interruptedBy ?? inheritedCause(terminal, input, now)), input, now)
+    const observed = observedResult(journal.terminal, interruptedBy ?? inheritedCause(journal.terminal, input, now))
+    return withVerdict(budgetOutranks(observed, input, now), journal.verdict)
   }
   console.warn(`turn host is gone with no terminal frame process_id=${input.handle.processId}`)
   return { outcome: 'timed-out', killConfirmed: await killTurn(input.session, input.handle.processId) }
-}
-
-/** The journal's last terminal frame, or nothing at all — a read that fails is not an ending. */
-async function journaledTerminal(input: AttachRoundInput): Promise<TerminalObservation | undefined> {
-  const stateDir = input.handle.bridgeStateDir
-  if (stateDir === undefined) {
-    return undefined
-  }
-  try {
-    const { text, cut } = await readJournalTail(input.session, turnHostJournalPath(stateDir))
-    return journalTerminal(text, cut)
-  }
-  catch (cause) {
-    console.warn(`turn host journal read failed process_id=${input.handle.processId} error="${describe(cause)}"`)
-    return undefined
-  }
 }
 
 /**

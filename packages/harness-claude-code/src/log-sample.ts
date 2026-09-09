@@ -89,12 +89,18 @@ interface ReadProgress {
  * last event the mirror appended, so the next read resumes from there: nothing is duplicated and
  * nothing is lost — the bytes were simply not fetched yet. That is the difference from the throw
  * path, where the cursor moved past output this record will never see.
+ *
+ * `scan` is the third consumer of the same bytes and the newest (#376): the attempt loop's read of
+ * the turn's own `result` message. It is handed each stdout chunk exactly once, in order, for the
+ * same reason the mirror is — these reads are where the turn's output is, and nothing else in the
+ * driver sees it.
  */
 export async function readLogSample(
   process: SandboxProcessHandle,
   previous: LogSample,
   mirror?: LiveMirror,
   timeoutMs: number = LOG_READ_TIMEOUT_MS,
+  scan?: (chunk: Uint8Array) => void,
 ): Promise<LogSample> {
   const stop = new AbortController()
   const progress: ReadProgress = { cursor: previous.cursor, bytes: 0, stop }
@@ -108,7 +114,7 @@ export async function readLogSample(
     // appended or counted, so the next read resumes from the exact same place and the record
     // has lost nothing. Stamping it `truncated` for that would be admitting a loss that did not
     // happen.
-    await Promise.race([drainLogBatch(process, previous.cursor, progress, mirror), expiry])
+    await Promise.race([drainLogBatch(process, previous.cursor, progress, mirror, scan), expiry])
     if (stop.signal.aborted) {
       console.warn(`watchdog log read abandoned process_id=${process.id} after_ms=${timeoutMs}`)
     }
@@ -157,6 +163,7 @@ async function drainLogBatch(
   since: string | undefined,
   progress: ReadProgress,
   mirror?: LiveMirror,
+  scan?: (chunk: Uint8Array) => void,
 ): Promise<void> {
   const { signal } = progress.stop
   const stream = await process.logs({ since, replay: true, follow: false, signal })
@@ -169,6 +176,7 @@ async function drainLogBatch(
       progress.bytes += event.data.byteLength
       if (event.type === 'stdout') {
         mirror?.append(event.data, event.cursor)
+        scan?.(event.data)
       }
     }
   }

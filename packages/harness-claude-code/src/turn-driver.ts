@@ -29,7 +29,7 @@ import type { WsLike } from '@amond-ai/harness-transport'
 import type { SandboxProvider } from '@amond-ai/sandbox'
 import type { TurnDriverConfig } from './config'
 import type { LiveMirror } from './mirror'
-import type { AttemptOutcome, TurnTimeoutCause } from './outcome'
+import type { AttemptOutcome, TurnTimeoutCause, TurnVerdict } from './outcome'
 import type { PermissionMode } from './permission-mode'
 import type { TurnRoundState } from './sdk/sdk-round-state'
 import type { TurnDriverKind } from './turn-driver-kind'
@@ -244,6 +244,12 @@ export interface TurnSession {
  *
  * `session` is the `sdk` driver's alone: it comes off the host's `finish` frame, and a `cli`
  * attempt has no host to report one — that driver leaves it `undefined` on every result.
+ *
+ * `verdict` is on one member only, and the omission is the statement (#376): a turn's own
+ * `result` message decides whether *this* ending is worth another turn, but only where the
+ * ending is the turn's to describe. A timeout was decided by a timer on this side, and a
+ * deferral carries the request it is waiting on — neither is a judgment the transcript may
+ * overrule, so neither member has a place to put one.
  */
 export type AttemptResult
   = | {
@@ -255,6 +261,14 @@ export type AttemptResult
     timedOutBy?: undefined
     /** `sdk` only, and only from a `finish`: an `error` frame names no artifacts. */
     session?: TurnSession
+    /**
+     * What the turn's own terminal message said, when the driver read one going past.
+     *
+     * Absent means the turn printed no `result` this build could read — an empty stream, a turn
+     * that died before printing, or schema drift — and the loop falls back to the exit-derived
+     * `outcome`, which is what it judged on before this field existed.
+     */
+    verdict?: TurnVerdict
   }
   | {
     outcome: 'timed-out'
@@ -278,6 +292,8 @@ export type AttemptResult
      * real result, and whose session is exactly the one the next attempt should resume.
      */
     session?: TurnSession
+    /** A timer ended this turn; the transcript does not get to overrule it. See above. */
+    verdict?: undefined
   }
   | {
     /**
@@ -298,6 +314,8 @@ export type AttemptResult
     timedOutBy?: undefined
     /** The session the next attempt resumes to deliver the answer into the same conversation. */
     session?: TurnSession
+    /** A deferral is a pending question, never a transient failure to retry. See above. */
+    verdict?: undefined
   }
 
 export type { TurnRoundState }
