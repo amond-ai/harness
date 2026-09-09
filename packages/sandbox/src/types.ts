@@ -297,6 +297,24 @@ export interface SandboxSession extends SandboxFiles {
  * than holding a session across a workflow step, because a Durable Object stub does not
  * survive a step boundary. A backend whose handle acquisition is genuinely async should do
  * that work lazily inside the returned session's first call.
+ *
+ * **A session hands back a usable sandbox.** That first call is where a backend whose
+ * sandboxes can *rest* — stopped, paused, or archived by an idle timer — brings the one it
+ * reattaches to back up before answering, and the wait for it to be ready is part of the
+ * acquisition, not the caller's problem. The lookup that makes reattaching possible at all is
+ * what lets a resting sandbox through: a retried step must reach the sandbox its predecessor
+ * left behind whatever state the backend put it in, and a run parked longer than the idle
+ * timer (an SDK turn waiting on a human approval, whose timeout is 24 hours against an
+ * hour-long default) reattaches to one that is not running. So resume is the backend's
+ * obligation, by construction, rather than a detail each caller has to remember per backend —
+ * the Daytona backend wakes on `start()`, the e2b backend on `Sandbox.connect()`, which is
+ * where its SDK folds resume, and a caller sees neither.
+ *
+ * The obligation runs the other way too. `getProcess`/`listProcesses` are discovery: they
+ * answer about a sandbox the caller may never have started, so they must not *create* one
+ * merely to be told nothing is running in it — "no sandbox" is answered as `null`/`[]` — and
+ * `destroy` must never be the call that allocates what it releases. A wake on those paths is a
+ * boot nobody uses, avoided wherever the backend can tell state without one.
  */
 export interface SandboxProvider {
   readonly backend: string

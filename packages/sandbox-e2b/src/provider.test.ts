@@ -66,6 +66,10 @@ function fakeApi(existing: Record<string, string> = {}): { api: E2bSandboxApi, c
       const match = existing[query.pleaseSandboxId ?? '']
       return match ? [{ sandboxId: match }] : []
     },
+    kill: async (sandboxId) => {
+      calls.killed.push(sandboxId)
+      return true
+    },
   }
   return { api, calls }
 }
@@ -85,13 +89,16 @@ describe('createE2bProvider', () => {
    * `RunAgent.settle()` releases the sandbox from a `finally`, so this also runs for a run
    * refused before it touched one — and it runs on a different instance from the workflow
    * that started the turn, so an unacquired session does not imply an absent sandbox.
-   * Creating one to kill it and skipping the kill are both wrong; connecting is not.
+   * Creating one to kill it and skipping the kill are both wrong. So is connecting, on this
+   * backend: `connect` resumes a paused sandbox, so the kill is issued by id instead and a
+   * sandbox parked by auto-pause is deleted without being booted first (#464).
    */
-  it('kills the sandbox a previous step left behind without acquiring it first', async () => {
+  it('kills the sandbox a previous step left behind without acquiring or connecting to it', async () => {
     const { api, calls } = fakeApi({ 'run-42': 'sbx-existing' })
     await createE2bProvider({ api }).session('run-42').destroy()
 
     expect(calls.created).toEqual([])
+    expect(calls.connected).toEqual([])
     expect(calls.killed).toEqual(['sbx-existing'])
   })
 
@@ -132,6 +139,50 @@ describe('createE2bProvider', () => {
 
     expect(calls.connected).toEqual(['sbx-existing'])
     expect(calls.created).toEqual([])
+  })
+
+  /**
+   * `packages/sandbox/src/types.ts` gives `exists` the job of booting and calls
+   * `getProcess`/`listProcesses` non-waking discovery that answers from cold state. Recovery
+   * asks them about a run it may never have started (`replay-turn.ts`), so acquiring here
+   * would create a billable sandbox purely to be told nothing is running in it (#464).
+   */
+  it('answers a discovery call without creating a sandbox', async () => {
+    const { api, calls } = fakeApi()
+    const session = createE2bProvider({ api }).session('never-ran')
+
+    expect(await session.getProcess('run-1-abc')).toBeNull()
+    expect(await session.listProcesses()).toEqual([])
+    expect(calls.created).toEqual([])
+    expect(calls.connected).toEqual([])
+  })
+
+  /** Not creating is not the same as not answering: a sandbox e2b still holds is read. */
+  it('reports the processes of a sandbox that already exists', async () => {
+    const fake = fakeSandbox()
+    const calls = { created: 0, connected: [] as string[] }
+    const api: E2bSandboxApi = {
+      create: async () => {
+        calls.created++
+        return fake.sandbox
+      },
+      connect: async (sandboxId) => {
+        calls.connected.push(sandboxId)
+        return fake.sandbox
+      },
+      list: async () => [{ sandboxId: 'sbx-1' }],
+      kill: async () => true,
+    }
+    const options = { api, journalRoot: ROOT, newProcessId: () => 'run-1' }
+    const handle = await createE2bProvider(options).session('run-a').exec(['sleep', '1'])
+
+    // A fresh provider, as recovery on another Worker instance would be: nothing memoised.
+    const found = await createE2bProvider(options).session('run-a').getProcess(handle.id)
+    expect(found?.id).toBe(handle.id)
+    expect((await createE2bProvider(options).session('run-a').listProcesses()).map(p => p.id))
+      .toEqual([handle.id])
+    expect(calls.created).toBe(0)
+    expect(calls.connected).toEqual(['sbx-1', 'sbx-1', 'sbx-1'])
   })
 
   it('acquires once per session, however many calls it serves', async () => {
@@ -316,6 +367,7 @@ describe('createE2bProvider', () => {
         create: async () => fake.sandbox,
         connect: async () => fake.sandbox,
         list: async () => [],
+        kill: async () => true,
       },
       journalRoot: ROOT,
       newProcessId: () => 'run-1',

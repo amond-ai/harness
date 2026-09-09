@@ -23,6 +23,7 @@ export function e2bSandboxApi(options: E2bApiOptions = {}): E2bSandboxApi {
       await Sandbox.create(template, { ...opts, apiKey }) satisfies E2bSandboxLike,
     connect: async sandboxId =>
       await Sandbox.connect(sandboxId, { apiKey }) satisfies E2bSandboxLike,
+    kill: async sandboxId => await Sandbox.kill(sandboxId, { apiKey }),
     list: async (query) => {
       const page = await Sandbox.list({ query: { metadata: query }, apiKey }).nextItems()
       return page.map(info => ({ sandboxId: info.sandboxId }))

@@ -8,6 +8,20 @@
  * workflow step must reach the sandbox its predecessor left behind, whatever state e2b put
  * it in.
  *
+ * **Waking.** The contract makes a reattached sandbox *usable* the backend's obligation
+ * (`SandboxProvider` in `@amond-ai/sandbox`), and on e2b that obligation is met by the
+ * connect itself: `Sandbox.connect()` is `POST /sandboxes/{id}/connect`, whose contract reads
+ * "if the sandbox is paused, it will be resumed" (e2b 2.45.0, `SandboxApi.connect` and the
+ * OpenAPI description), and it answers once the resume is done — research note 027 Q5 read a
+ * file through exactly that path. So there is no `start()` here the way the Daytona backend
+ * has one, and nothing to wait for after `connect` resolves. The flip side is that connecting
+ * *is* waking: a paused sandbox cannot be inspected without resuming it, which is why
+ * discovery below avoids the walk entirely when `list` finds nothing and pays the resume only
+ * when it finds a paused one, and why release goes through `Sandbox.kill(sandboxId)` — a
+ * `DELETE` by id — rather than a connect. Left to the API default (`onTimeout: 'kill'`) a
+ * sandbox that outlives `timeoutMs` is not paused but gone — `list` no longer returns it and
+ * the next step creates afresh — so the paused case is the one a deployment opts into.
+ *
  * **Timing.** `SandboxProvider.session` is synchronous by contract, because the Cloudflare
  * backend resolves a Durable Object stub with no I/O and callers hold a session for one
  * step at a time. Acquiring an e2b sandbox is a network call, so it is deferred to the
@@ -31,6 +45,11 @@ export interface E2bSandboxApi {
   ) => Promise<E2bSandboxLike>
   connect: (sandboxId: string) => Promise<E2bSandboxLike>
   list: (query: { pleaseSandboxId?: string }) => Promise<{ sandboxId: string }[]>
+  /**
+   * `Sandbox.kill(sandboxId)` — a `DELETE` by id, which is how a sandbox nobody holds a handle
+   * to is released without `connect` resuming it first (see the header).
+   */
+  kill: (sandboxId: string) => Promise<boolean>
 }
 
 export interface E2bProviderOptions extends Partial<Omit<E2bSessionOptions, 'journalRoot'>> {
@@ -103,11 +122,16 @@ export function createE2bProvider(options: E2bProviderOptions): SandboxProvider 
   const template = options.template ?? DEFAULT_TEMPLATE
   const journalRoot = options.journalRoot ?? DEFAULT_JOURNAL_ROOT
 
+  /** The e2b-side id for this session id, from `list`, without minting one that is not there. */
+  async function findExisting(sandboxId: string): Promise<string | undefined> {
+    const existing = await options.api.list({ [SANDBOX_ID_METADATA_KEY]: sandboxId })
+    return existing[0]?.sandboxId
+  }
+
   /** The sandbox e2b already holds for this id, without minting one that is not there. */
   async function connect(sandboxId: string): Promise<E2bSandboxLike | undefined> {
-    const existing = await options.api.list({ [SANDBOX_ID_METADATA_KEY]: sandboxId })
-    const found = existing[0]
-    return found ? options.api.connect(found.sandboxId) : undefined
+    const found = await findExisting(sandboxId)
+    return found ? options.api.connect(found) : undefined
   }
 
   async function listThenCreate(sandboxId: string): Promise<E2bSandboxLike> {
@@ -178,6 +202,12 @@ export function createE2bProvider(options: E2bProviderOptions): SandboxProvider 
           const sandbox = await connect(sandboxId)
           return sandbox && createE2bSession(sandbox, sessionOptions)
         },
+        release: async () => {
+          const found = await findExisting(sandboxId)
+          if (found) {
+            await options.api.kill(found)
+          }
+        },
       })
       sessions.set(sandboxId, created)
       return created
@@ -208,6 +238,8 @@ interface LazySessionOptions {
   open: () => Promise<SandboxSession>
   /** Connect only — resolves `undefined` rather than creating one. */
   openExisting: () => Promise<SandboxSession | undefined>
+  /** Kill the sandbox for this id by id, without connecting; a no-op when e2b holds none. */
+  release: () => Promise<void>
 }
 
 /**
@@ -228,6 +260,15 @@ function lazySession(options: LazySessionOptions): SandboxSession {
     pending = undefined
     throw cause
   }))
+  /**
+   * The session for a sandbox that already exists, or `undefined` — never the thing that makes one.
+   *
+   * An acquisition already in flight is reused, so a caller that follows `exec` pays nothing here;
+   * otherwise this connects without creating, exactly as `destroy` has always done.
+   */
+  const existing = async (): Promise<SandboxSession | undefined> =>
+    pending ? await pending : await options.openExisting()
+
   return {
     // The file surface allocates on first use like every other call: a read is a use of the
     // sandbox, so it acquires one, rather than being answered against a session that is not
@@ -238,8 +279,28 @@ function lazySession(options: LazySessionOptions): SandboxSession {
       (await resolved()).writeFile(path, content, fileOptions),
     mkdir: async (path, mkdirOptions) => (await resolved()).mkdir(path, mkdirOptions),
     exec: async (command, execOptions) => (await resolved()).exec(command, execOptions),
-    getProcess: async id => (await resolved()).getProcess(id),
-    listProcesses: async () => (await resolved()).listProcesses(),
+    /**
+     * Discovery, which the contract says must not create anything.
+     *
+     * `packages/sandbox/src/types.ts` names `getProcess`/`listProcesses` non-waking discovery
+     * that answers from cold state, and gives `exists` the job of booting — so routing these
+     * two through the acquisition broke the contract on this backend: recovery asking whether
+     * a stale turn is still there (`replay-turn.ts`) would *create* a billable sandbox merely
+     * to be told `null`, the same shape the Daytona backend fixed in PR #463 (#464).
+     *
+     * "No sandbox" is an answer here rather than an error: nothing can be running in a sandbox
+     * that does not exist, which is precisely what `null`/`[]` say. A sandbox e2b still holds
+     * is read — and on e2b that read resumes a paused one, because `connect` is the only way
+     * to reach its process table (see the header); the cost avoided here is the create.
+     */
+    getProcess: async (id) => {
+      const session = await existing()
+      return session ? await session.getProcess(id) : null
+    },
+    listProcesses: async () => {
+      const session = await existing()
+      return session ? await session.listProcesses() : []
+    },
     exists: async path => (await resolved()).exists(path),
     /**
      * Release, which must never be the thing that allocates.
@@ -251,10 +312,19 @@ function lazySession(options: LazySessionOptions): SandboxSession {
      * create a sandbox purely to kill it, while skipping the call whenever the session was
      * never acquired would leak every sandbox the workflow made. Connecting without creating
      * is the reading that is right in both directions (codex review, PR #260).
+     *
+     * And on e2b, not even connecting: `connect` resumes a paused sandbox (see the header),
+     * so reaching one through `openExisting` to kill it would pay for a boot whose only use is
+     * being deleted. `Sandbox.kill(sandboxId)` deletes by id in whatever state the sandbox
+     * rests, so a session that never acquired releases through that. One that did already
+     * holds the running sandbox, and kills it through the session as before.
      */
     destroy: async () => {
-      const session = pending ? await pending : await options.openExisting()
-      await session?.destroy()
+      if (pending) {
+        await (await pending).destroy()
+        return
+      }
+      await options.release()
     },
   }
 }
