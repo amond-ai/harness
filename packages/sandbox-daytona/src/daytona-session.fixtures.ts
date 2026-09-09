@@ -51,6 +51,17 @@ export interface Fake {
   state: string
   /** The wake calls a reattach made, in order — so "started once" is distinguishable from "twice". */
   woke: string[]
+  /**
+   * The states successive `refreshData` calls land the sandbox in, consumed front to back — how a
+   * test scripts a sandbox that is `archiving` on one read and `archived` on the next. An empty
+   * queue leaves `state` where it is, which is what a sandbox that never settles looks like.
+   */
+  refreshes: string[]
+  /**
+   * Whether `refreshData` answers at all — a `true` leaves the call pending forever, which is how a
+   * test scripts the stalled Daytona request a settle deadline has to bound on its own.
+   */
+  stalls: boolean
   /** Call counts, so a test can pin *how often* a loop reaches the network. */
   calls: { getSession: number, getSessionCommand: number, logs: number }
   /**
@@ -172,6 +183,8 @@ export function fakeSandbox(): Fake {
     deleted: false,
     state: 'started',
     woke: [] as string[],
+    refreshes: [] as string[],
+    stalls: false,
     calls: { getSession: 0, getSessionCommand: 0, logs: 0 },
     failing: new Set<string>(),
   } as unknown as Fake
@@ -192,6 +205,16 @@ export function fakeSandbox(): Fake {
     waitUntilStopped: async () => {
       fake.woke.push('waitUntilStopped')
       fake.state = 'stopped'
+    },
+    refreshData: async () => {
+      fake.woke.push('refreshData')
+      if (fake.stalls) {
+        await new Promise(() => {})
+      }
+      const next = fake.refreshes.shift()
+      if (next !== undefined) {
+        fake.state = next
+      }
     },
     process: fakeProcess(fake, state),
     fs: fakeFs(fake),

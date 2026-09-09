@@ -2,7 +2,7 @@ import type { Fake } from './daytona-session.fixtures'
 import type { DaytonaSandboxLike } from './daytona-surface'
 import type { DaytonaSandboxApi } from './provider'
 import { describe, expect, it } from 'vitest'
-import { fakeSandbox } from './daytona-session.fixtures'
+import { fakeSandbox, leapingClock } from './daytona-session.fixtures'
 import { createDaytonaProvider, SANDBOX_ID_LABEL } from './provider'
 
 interface FakeApi {
@@ -223,6 +223,98 @@ describe('createDaytonaProvider', () => {
     await createDaytonaProvider({ api: fake.api }).session('run-1').exists('/tmp')
 
     expect(held!.fake.woke).toEqual(['waitUntilStarted'])
+  })
+
+  /**
+   * `archiving` ends in `archived`, not `stopped`, so `waitUntilStopped` cannot settle it and the
+   * SDK ships nothing else — it is re-read until it rests, then started like any archived sandbox
+   * (#468). This is the window a container sandbox actually passes through, seven days after
+   * auto-stop.
+   */
+  it('re-reads a reattached sandbox that is archiving until it rests, then starts it', async () => {
+    const fake = fakeApi()
+    await createDaytonaProvider({ api: fake.api }).session('run-1').exists('/tmp')
+    const held = fake.held.get('daytona-1')
+    held!.fake.state = 'archiving'
+    held!.fake.refreshes = ['archiving', 'archived']
+    held!.fake.woke.length = 0
+
+    await createDaytonaProvider({ api: fake.api, pollIntervalMs: 1 }).session('run-1').exists('/tmp')
+
+    expect(held!.fake.woke).toEqual(['refreshData', 'refreshData', 'start', 'waitUntilStarted'])
+    expect(held!.fake.state).toBe('started')
+  })
+
+  /** The VM-class twin of `archiving`, settled the same way into `paused`. */
+  it('re-reads a reattached sandbox that is pausing until it rests, then starts it', async () => {
+    const fake = fakeApi()
+    await createDaytonaProvider({ api: fake.api }).session('run-1').exists('/tmp')
+    const held = fake.held.get('daytona-1')
+    held!.fake.state = 'pausing'
+    held!.fake.refreshes = ['paused']
+    held!.fake.woke.length = 0
+
+    await createDaytonaProvider({ api: fake.api, pollIntervalMs: 1 }).session('run-1').exists('/tmp')
+
+    expect(held!.fake.woke).toEqual(['refreshData', 'start', 'waitUntilStarted'])
+    expect(held!.fake.state).toBe('started')
+  })
+
+  /**
+   * The state a settling sandbox rests in is read, not assumed — `Sandbox.pause()` itself counts
+   * any exit from `pausing` as done. One that rests in `error` is left alone, exactly as an
+   * `error` read directly would be, so Daytona's own error is the one the caller sees.
+   */
+  it('leaves a settling sandbox alone when it rests in a state that is not startable', async () => {
+    const fake = fakeApi()
+    await createDaytonaProvider({ api: fake.api }).session('run-1').exists('/tmp')
+    const held = fake.held.get('daytona-1')
+    held!.fake.state = 'archiving'
+    held!.fake.refreshes = ['error']
+    held!.fake.woke.length = 0
+
+    await createDaytonaProvider({ api: fake.api, pollIntervalMs: 1 }).session('run-1').exists('/tmp')
+
+    expect(held!.fake.woke).toEqual(['refreshData'])
+    expect(held!.fake.state).toBe('error')
+  })
+
+  /** Bounded: a sandbox that never leaves `archiving` is reported by name, not started into. */
+  it('gives up on a settling sandbox that never rests, naming the state it is stuck in', async () => {
+    const fake = fakeApi()
+    await createDaytonaProvider({ api: fake.api }).session('run-1').exists('/tmp')
+    const held = fake.held.get('daytona-1')
+    held!.fake.state = 'archiving'
+    held!.fake.woke.length = 0
+    const provider = createDaytonaProvider({
+      api: fake.api,
+      pollIntervalMs: 1,
+      settleTimeoutMs: 100,
+      monotonicNowMs: leapingClock(60),
+    })
+
+    await expect(provider.session('run-1').exists('/tmp')).rejects.toThrow(/still archiving after \d+ms/)
+
+    expect(held!.fake.woke).toEqual(['refreshData'])
+  })
+
+  /**
+   * The bound covers the round trip, not only the gaps between them. A `refreshData` that never
+   * answers would otherwise hold the reattach open past `settleTimeoutMs`, because the loop reaches
+   * its deadline check only once that call has returned.
+   */
+  it('gives up on a settling sandbox whose refresh never answers', async () => {
+    const fake = fakeApi()
+    await createDaytonaProvider({ api: fake.api }).session('run-1').exists('/tmp')
+    const held = fake.held.get('daytona-1')
+    held!.fake.state = 'archiving'
+    held!.fake.stalls = true
+    held!.fake.woke.length = 0
+    const provider = createDaytonaProvider({ api: fake.api, pollIntervalMs: 1, settleTimeoutMs: 5 })
+
+    await expect(provider.session('run-1').exists('/tmp')).rejects.toThrow(/still archiving after \d+ms/)
+
+    expect(held!.fake.woke).toEqual(['refreshData'])
   })
 
   /** A running sandbox costs no round trip, which is the common case on every retried step. */

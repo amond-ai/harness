@@ -72,7 +72,7 @@ export function createDaytonaSession(
   const now = options.now ?? (() => new Date().toISOString())
   const pollMs = options.pollIntervalMs ?? DEFAULT_POLL_MS
   const followMs = options.followIntervalMs ?? DEFAULT_FOLLOW_MS
-  const elapsedMs = options.monotonicNowMs ?? (() => Date.now())
+  const elapsedMs = options.monotonicNowMs ?? (() => performance.now())
   const root = options.stateRoot.replace(/\/+$/, '')
 
   const reader = createCommandReader(sandbox)

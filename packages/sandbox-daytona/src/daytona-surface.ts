@@ -49,6 +49,13 @@ export interface DaytonaSandboxLike {
   waitUntilStarted: (timeout?: number) => Promise<void>
   /** Block until a sandbox on its way down reaches `stopped`, which is where `start` can take it. */
   waitUntilStopped: (timeout?: number) => Promise<void>
+  /**
+   * Re-read the sandbox from the API, so `state` reflects what Daytona holds now.
+   *
+   * The only primitive 0.211.2 offers for `archiving` and `pausing`: there is no `waitUntilArchived`
+   * or `waitUntilPaused`, and `waitUntilStopped` would time out on both (research note 035 §2).
+   */
+  refreshData: () => Promise<void>
   process: {
     createSession: (sessionId: string) => Promise<void>
     getSession: (sessionId: string) => Promise<DaytonaSession>

@@ -49,12 +49,22 @@ export interface DaytonaProviderOptions extends Partial<Omit<DaytonaSessionOptio
    * (15 minutes), which is shorter than a turn; `0` disables the stop entirely.
    */
   autoStopIntervalMinutes?: number
+  /**
+   * How long a reattach waits for a sandbox caught `archiving` or `pausing` to settle before
+   * giving up. Defaults to {@link DEFAULT_SETTLE_TIMEOUT_MS}; the re-read cadence is
+   * `pollIntervalMs`, shared with the process waits.
+   */
+  settleTimeoutMs?: number
 }
 
 /** Daytona's default sandbox user is `daytona`, and `$HOME` is where its shell can write. */
 const DEFAULT_STATE_ROOT = '/home/daytona/.agent-runs'
 /** The label carrying the orchestrator's own sandbox id. */
 export const SANDBOX_ID_LABEL = 'pleaseSandboxId'
+/** How often a settling sandbox is re-read, when the caller set no `pollIntervalMs`. */
+const DEFAULT_SETTLE_POLL_MS = 1_000
+/** How long the re-reads go on — the same 60 seconds the SDK's own `waitUntil*` default to. */
+const DEFAULT_SETTLE_TIMEOUT_MS = 60_000
 
 /**
  * The scheme a caller that named none gets.
@@ -106,11 +116,25 @@ export function createDaytonaProvider(options: DaytonaProviderOptions): SandboxP
     return found ? options.api.connect(found.id) : undefined
   }
 
+  const settle: SettleOptions = {
+    pollMs: options.pollIntervalMs ?? DEFAULT_SETTLE_POLL_MS,
+    timeoutMs: options.settleTimeoutMs ?? DEFAULT_SETTLE_TIMEOUT_MS,
+    elapsedMs: options.monotonicNowMs ?? (() => performance.now()),
+  }
+
   async function listThenCreate(sandboxId: string): Promise<DaytonaSandboxLike> {
     const existing = await connect(sandboxId)
     if (existing) {
-      return await woken(existing)
+      return await woken(existing, settle)
     }
+    // `autoPauseInterval` is deliberately not sent. Auto-pause exists only for VM sandbox classes
+    // and is refused for container ones (Daytona docs, "Auto-pause sandboxes": "Auto-pause is not
+    // supported for container sandboxes"), and a snapshot built from `docker/Dockerfile` — which
+    // is the only kind a turn host ships in — is a container. The 60-minute auto-pause default
+    // applies "when neither interval is provided", and `autoStopInterval` is provided whenever
+    // the caller set one, `0` included. Sending `autoPauseInterval: 0` beside it would buy
+    // nothing on a container and risks a rejected create on a class the field is not allowed for
+    // (#468).
     return options.api.create({
       snapshot: options.snapshot,
       labels: { [SANDBOX_ID_LABEL]: sandboxId },
@@ -210,9 +234,12 @@ export function createDaytonaProvider(options: DaytonaProviderOptions): SandboxP
  *
  * `paused` is on the same footing as the other two even though nothing here asks for a pause:
  * `SandboxState` in 0.211.2 carries `pausing`/`paused`/`resuming`, `Sandbox.pause()` is public,
- * and a sandbox class that supports pausing auto-pauses after 60 minutes when *neither* interval
- * is given at create time — which this provider allows, since `autoStopIntervalMinutes` is
- * optional. `start()` is the way back up from it: 0.211.2 ships no `resume`, and the API has only
+ * and a VM sandbox class auto-pauses after 60 minutes when *neither* interval is given at create
+ * time — which this provider allows, since `autoStopIntervalMinutes` is optional. A container
+ * sandbox, which is what a snapshot built from a Dockerfile is, cannot pause at all (Daytona
+ * docs, "Pause / resume sandboxes"), so on the orchestrator's own snapshot this branch is
+ * unreachable; it stays because the provider does not know which class it was pointed at.
+ * `start()` is the way back up from it: 0.211.2 ships no `resume`, and the API has only
  * `startSandbox` (Codex review, PR #463).
  */
 const STARTABLE = new Set(['stopped', 'archived', 'paused'])
@@ -228,14 +255,96 @@ const COMING_UP = new Set(['starting', 'restoring', 'creating', 'pulling_snapsho
  * exposes `waitUntilStopped` for exactly this — and then woken like any other stopped sandbox
  * (Codex review, PR #463).
  *
- * `archiving` and `pausing` are deliberately not here. They end in `archived` and `paused` rather
- * than `stopped`, and 0.211.2 ships a wait primitive for neither (research note 035 §1), so
- * covering them would mean inventing a poll loop in this package. Both are also narrower windows
- * than `stopping`: they are the seconds a sandbox spends on its way into a state this function
- * *does* wake from, so a reattach landing in one gets Daytona's own error and the next attempt
- * finds `archived`/`paused` and starts it.
+ * `archiving` and `pausing` are not here because `waitUntilStopped` cannot settle them: they end
+ * in `archived` and `paused` rather than `stopped`, so it would time out instead. They have their
+ * own set, {@link SETTLING_BY_POLL}.
  */
 const SETTLING = new Set(['stopping'])
+
+/**
+ * On its way down into a resting state that is *not* `stopped`, so settled by re-reading instead.
+ *
+ * 0.211.2 ships no `waitUntilArchived`/`waitUntilPaused` and the API has no equivalent endpoint
+ * (research note 035 §2); `refreshData()` is the only primitive, so this package polls it. A
+ * reattach used to get Daytona's own error in either window and rely on the step being retried
+ * (#468). `archiving` is the one that actually happens on the orchestrator's snapshot — a
+ * container sandbox is auto-archived after it has been stopped for `autoArchiveInterval`, seven
+ * days by default — and `pausing` is the VM-class twin, covered for the same reason `paused` is.
+ *
+ * The exit state is not assumed: `Sandbox.pause()` in 0.211.2 treats leaving `pausing` as done
+ * whatever state follows, so the settled state is dispatched like a freshly read one — started
+ * if startable, waited for if coming up, and left alone otherwise.
+ */
+const SETTLING_BY_POLL = new Set(['archiving', 'pausing'])
+
+interface SettleOptions {
+  pollMs: number
+  timeoutMs: number
+  /** Monotonic milliseconds, injectable so a test can reach the deadline without waiting for it. */
+  elapsedMs: () => number
+}
+
+/**
+ * The state a sandbox caught in {@link SETTLING_BY_POLL} ends up in, or an error once
+ * `timeoutMs` has passed without it leaving.
+ *
+ * The timeout is an error rather than a fall-through on purpose: handing the still-settling
+ * sandbox on would end in a Daytona error from whichever `fs`/`process` call came first, which
+ * names neither the state nor how long it was waited for.
+ */
+async function settledByPoll(sandbox: DaytonaSandboxLike, settle: SettleOptions): Promise<string | undefined> {
+  const startedAt = settle.elapsedMs()
+  const deadline = startedAt + settle.timeoutMs
+  const expired = (at: number): Error =>
+    new Error(`daytona sandbox ${sandbox.id} is still ${sandbox.state ?? 'settling'} after ${String(Math.round(at - startedAt))}ms`)
+  while (true) {
+    // Read before spending the round trip, not after it. A budget carried across the nap would be
+    // the one computed *before* it, so an event loop that returns late from `setTimeout` would
+    // hand the next refresh a stale, too-generous allowance and let a sandbox come back past the
+    // deadline it was given.
+    const at = settle.elapsedMs()
+    if (at >= deadline) {
+      throw expired(at)
+    }
+    await refreshedWithin(sandbox, deadline - at, () => expired(settle.elapsedMs()))
+    const state = sandbox.state
+    if (state === undefined || !SETTLING_BY_POLL.has(state)) {
+      return state
+    }
+    // Read again rather than reusing `at`, which predates the round trip: a slow refresh would
+    // leave it overstating what is left, and the nap would spend a full `pollMs` on a deadline
+    // that is already at hand.
+    const remaining = deadline - settle.elapsedMs()
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(settle.pollMs, remaining))))
+  }
+}
+
+/**
+ * One `refreshData()` round trip, bounded by what is left of the settle deadline.
+ *
+ * Awaiting it outright would enforce `timeoutMs` only *between* round trips, because the loop
+ * reaches its deadline check once the call has returned: a Daytona request that stalls carries the
+ * reattach past the bound the caller was promised, and one that answers late could still hand a
+ * rested sandbox back after that bound had passed. Racing it against the remainder bounds the
+ * acquisition itself. The abandoned request keeps the rejection handler `Promise.race` attached to
+ * it, so a refusal arriving after the race was decided is never an unhandled rejection.
+ */
+async function refreshedWithin(sandbox: DaytonaSandboxLike, withinMs: number, expired: () => Error): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      sandbox.refreshData(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(expired())
+        }, Math.max(0, withinMs))
+      }),
+    ])
+  }
+  finally {
+    clearTimeout(timer)
+  }
+}
 
 /**
  * A reattached sandbox, brought back up before anything asks it for work.
@@ -248,20 +357,24 @@ const SETTLING = new Set(['stopping'])
  * an hour-long default — would reattach and then issue filesystem and process calls at a sandbox
  * that is not running (Codex review, PR #463).
  *
- * Three groups are acted on and the rest are left alone on purpose. `stopped`/`archived`/`paused`
+ * Four groups are acted on and the rest are left alone on purpose. `stopped`/`archived`/`paused`
  * are the resting states Daytona's own lifecycle puts a sandbox in, and `start()` covers all three
  * — it restores an archived sandbox and resumes a paused one, and 0.211.2 offers no other way up.
- * `stopping` is settled into `stopped` first, then woken the same way. Transitional up-states are
- * already coming up, so they are waited for rather than started again. A state that is `started`,
- * absent, or terminal (`destroyed`, `error`, …) is not this function's to fix: starting the first
- * is a wasted round trip, and the other two would replace Daytona's own error with a less useful
- * one from `start`.
+ * `stopping` is settled into `stopped` first, then woken the same way; `archiving`/`pausing` are
+ * settled by re-reading until they rest, then dispatched on whatever they rested in. Transitional
+ * up-states are already coming up, so they are waited for rather than started again. A state that
+ * is `started`, absent, or terminal (`destroyed`, `error`, …) is not this function's to fix:
+ * starting the first is a wasted round trip, and the other two would replace Daytona's own error
+ * with a less useful one from `start`.
  *
  * Only the acquisition path calls this. `destroy()` reaches Daytona through `openExisting`, and
  * waking a sandbox purely to delete it would pay for a boot nobody uses.
  */
-async function woken(sandbox: DaytonaSandboxLike): Promise<DaytonaSandboxLike> {
-  const state = sandbox.state
+async function woken(sandbox: DaytonaSandboxLike, settle: SettleOptions): Promise<DaytonaSandboxLike> {
+  let state = sandbox.state
+  if (state !== undefined && SETTLING_BY_POLL.has(state)) {
+    state = await settledByPoll(sandbox, settle)
+  }
   if (state === undefined || !(STARTABLE.has(state) || COMING_UP.has(state) || SETTLING.has(state))) {
     return sandbox
   }
