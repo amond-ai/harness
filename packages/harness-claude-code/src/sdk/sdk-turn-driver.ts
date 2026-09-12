@@ -82,7 +82,7 @@ function turnPolicy(
 export function sdkTurnDriver(input: SdkTurnDriverInput): TurnDriver {
   // Resolved per operation, never held: `SandboxProvider` requires that because a Durable Object
   // stub does not survive a step boundary, and `start`, each attach round and a kill are all
-  // different steps here (`packages/amond-ai/sandbox/src/types.ts`). One round *does* keep the
+  // different steps here (`packages/sandbox/src/types.ts`). One round *does* keep the
   // session it resolved for the length of that round, which is one step.
   const session = (): SandboxSession => input.provider.session(input.sandboxId)
   const fill = input.randomFill ?? ((into: Uint8Array) => crypto.getRandomValues(into))

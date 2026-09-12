@@ -142,7 +142,7 @@ describe('createE2bProvider', () => {
   })
 
   /**
-   * `packages/amond-ai/sandbox/src/types.ts` gives `exists` the job of booting and calls
+   * `packages/sandbox/src/types.ts` gives `exists` the job of booting and calls
    * `getProcess`/`listProcesses` non-waking discovery that answers from cold state. Recovery
    * asks them about a run it may never have started (`replay-turn.ts`), so acquiring here
    * would create a billable sandbox purely to be told nothing is running in it (#464).

@@ -86,7 +86,7 @@ describe('createHarnessSandboxSession', () => {
      * Latch the success, not the failure. A rejected promise left in the latch is replayed by
      * every later call without touching the backend again, so one transient RPC error would
      * outlive itself and leave the sandbox unreapable for the session's whole life — the bug
-     * `lazySession` already fixed once in `packages/amond-ai/sandbox-e2b/src/provider.ts` ("Memoise the
+     * `lazySession` already fixed once in `packages/sandbox-e2b/src/provider.ts` ("Memoise the
      * acquisition, not its failure", codex review, PR #260).
      */
     it('retries a teardown that failed instead of replaying its rejection', async () => {

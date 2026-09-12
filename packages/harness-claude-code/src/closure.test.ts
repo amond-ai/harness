@@ -1,12 +1,11 @@
 /**
  * The seam's dependency closure, asserted rather than remembered.
  *
- * The packages under `packages/amond-ai` are meant to be liftable into a repository of their own,
- * which only holds while none of them reaches for anything outside the set: an `apps/*` import,
- * the orchestrator's `agent-core`, the CLI-spawning `sandbox-bridge`, a dashboard schema. Each of
- * those would be invisible until the split, and then it would be a rewrite rather than a move —
- * so the check runs here, on every test run, where a `workspace:*` line added by hand fails
- * immediately.
+ * These packages live in a repository of their own, which only holds while none of them reaches
+ * for anything outside the set: an `apps/*` import, the orchestrator's `agent-core`, the
+ * CLI-spawning `sandbox-bridge`, a dashboard schema. Each of those would be invisible until
+ * something tried to build the set somewhere else, so the check runs here, on every test run,
+ * where a `workspace:*` line added by hand fails immediately.
  *
  * The set carries its own scope, `@amond-ai`, which makes the second assertion below possible and
  * necessary at once: inside the set a dependency is named by scope, so a `@pleaseai/…` line in one
@@ -30,14 +29,14 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-/** `packages/amond-ai/harness-claude-code/src` → `packages/amond-ai`, two levels up. */
+/** `packages/harness-claude-code/src` → `packages`, two levels up. */
 const SET_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
 /**
- * The set is the directory. Every package under `packages/amond-ai` is a member, so a new one is
+ * The set is the directory. Every package under `packages` is a member, so a new one is
  * held to the assertions below from the moment it exists, rather than from whenever somebody
- * remembers to name it here — the omission a hand-kept list invites, and one that would surface
- * only at the split.
+ * remembers to name it here — the omission a hand-kept list invites, and one that nothing
+ * else would catch.
  */
 const CLOSED_SET = readdirSync(SET_ROOT)
   .filter(entry => existsSync(join(SET_ROOT, entry, 'package.json')))

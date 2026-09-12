@@ -94,7 +94,7 @@ describe('acceptUpgrade', () => {
    *
    * `cancel()` answers a promise, and a rejected one nobody handles surfaces in a Worker as an
    * unhandled rejection — reported *after* the refusal it was cleaning up after, naming the
-   * wrong call. Same shape as the kills in `packages/amond-ai/harness-sandbox/src/process.ts`, which
+   * wrong call. Same shape as the kills in `packages/harness-sandbox/src/process.ts`, which
    * are `.catch(() => {})`-ed for the same reason, and settled the same way here.
    */
   it('still throws the refusal when releasing the body fails, and leaves nothing unhandled', async () => {

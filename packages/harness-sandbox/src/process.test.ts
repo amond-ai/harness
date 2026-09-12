@@ -112,7 +112,7 @@ describe('spawn', () => {
   /**
    * `SandboxProcessOptions.command` is a shell string and `SandboxCommand` is argv, so the
    * shell has to be named explicitly. A backend that quotes argv into a shell word list
-   * (`packages/amond-ai/sandbox-e2b/src/shell-quote.ts`) re-quotes these three words and `sh` reads
+   * (`packages/sandbox-e2b/src/shell-quote.ts`) re-quotes these three words and `sh` reads
    * the command back as one literal argument, so the wrapping survives that round trip.
    */
   it('wraps the shell string as argv for the shell itself', async () => {

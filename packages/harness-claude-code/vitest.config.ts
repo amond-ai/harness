@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config'
-import { sharedCoverage, sharedInlineDeps } from '../../../vitest.shared'
+import { sharedCoverage, sharedInlineDeps } from '../../vitest.shared'
 
 export default defineConfig({
   test: {
