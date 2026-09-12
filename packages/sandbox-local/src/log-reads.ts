@@ -161,15 +161,31 @@ export function createProcessLogs(
         continue
       }
       if (goneSeen) {
-        const exit = terminal ? await io.readExit(paths) : undefined
-        if (exit) {
-          yield {
-            type: 'terminal',
-            state: 'exited',
-            cursor: encodeCursor(cursor.stdout, cursor.stderr),
-            timestamp: now(),
-            exit,
-          }
+        if (terminal) {
+          const exit = await io.readExit(paths)
+          yield exit
+            ? {
+                type: 'terminal',
+                state: 'exited',
+                cursor: encodeCursor(cursor.stdout, cursor.stderr),
+                timestamp: now(),
+                exit,
+              }
+            // Nothing of the tree is left and the wrapper recorded no code: it was killed
+            // before its `printf` could run. Closing the stream on that is the one ending a
+            // consumer cannot read — a silent close is exactly what a clean finish looks
+            // like — so the follower says it the same way `status()` does rather than
+            // letting a lost turn pass for a completed one.
+            : {
+                type: 'terminal',
+                state: 'error',
+                cursor: encodeCursor(cursor.stdout, cursor.stderr),
+                timestamp: now(),
+                error: {
+                  code: 'no_exit_record',
+                  message: 'process is not running and journalled no exit code',
+                },
+              }
         }
         return
       }

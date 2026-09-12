@@ -11,7 +11,7 @@
  * POSIX only, and skipped elsewhere rather than pretended: process groups, signal numbers and
  * `ps` have no Windows equivalent, which is a limit of the backend and not of this suite.
  */
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
@@ -61,12 +61,20 @@ describe.skipIf(!posix)('against a real machine', () => {
   it('passes an argv through the shell without the shell reading any of it', async () => {
     // The prompt travels as one argv element and is attacker-influenced text; the wrapper is a
     // shell script, which is the boundary where that guarantee would otherwise stop holding.
-    const hostile = `$(touch /tmp/pwned) ; rm -rf / && 'quoted' "double" \`backtick\``
+    //
+    // The payload is a canary under this suite's own temp root rather than anything destructive.
+    // A literal `rm -rf /` would be inert only for as long as the quoting under test is correct
+    // — the developer's machine would be staked on the very code the test exists to doubt, with
+    // no `--no-preserve-root` backstop on macOS. A `touch` proves the same thing: every
+    // metacharacter that could reach the shell here would leave the file behind.
+    const canary = join(root, 'argv-was-interpreted')
+    const hostile = `$(touch ${canary}) ; touch ${canary} && 'quoted' "double" \`touch ${canary}\``
     const session = providerFor('p-quoting').session('run-quoting')
     const handle = await session.exec(['printf', '%s', hostile])
 
     await expect(handle.waitForExit({ timeout: 10_000 })).resolves.toEqual({ code: 0, timedOut: false })
     expect((await transcript(await handle.logs())).out).toBe(hostile)
+    await expect(stat(canary)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('enforces a timeout from inside the tree, and says that is what happened', async () => {

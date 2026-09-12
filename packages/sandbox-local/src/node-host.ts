@@ -24,11 +24,25 @@ const execFile = promisify(execFileCallback)
 
 const EMPTY = new Uint8Array()
 
-/** The whole machine's process table can be large; the default 1MB would truncate it. */
+/**
+ * The buffer both `ps` reads are given; the default 1MB would truncate either of them.
+ *
+ * The whole machine's process table is the obvious case. A single row is the less obvious one:
+ * `-ww` renders a wrapper's command line in full, and this backend's argv carries prompts.
+ */
 const PS_MAX_BUFFER = 16 * 1024 * 1024
 
+/**
+ * Whether a syscall failed because the path names nothing.
+ *
+ * `ENOTDIR` counts alongside `ENOENT`: a path that walks *through* a regular file — a caller
+ * asking about `<file>/nested`, which a sandbox's own command can arrange by writing a file
+ * where a directory was expected — fails with it rather than with `ENOENT`. Every caller here
+ * is asking an existence question, and both answers to that question are "no".
+ */
 function isMissing(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as { code?: string }).code === 'ENOENT'
+  const code = typeof error === 'object' && error !== null ? (error as { code?: string }).code : undefined
+  return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
 async function sizeOf(path: string): Promise<number | undefined> {
@@ -131,8 +145,13 @@ async function identify(pid: number): Promise<LocalProcessRow | undefined> {
   try {
     // The same three columns the whole-table read asks for, so one parser serves both — and
     // `-ww` for the same reason: the wrapper's marker is near the front of a long script, but a
-    // truncated line is one the registry cannot recognise as ours.
-    const { stdout } = await execFile('ps', ['-p', String(pid), '-ww', '-o', 'pid=,lstart=,args='])
+    // truncated line is one the registry cannot recognise as ours. `-ww` is also why the buffer
+    // has to be the table read's: one wrapper carrying a near-`ARG_MAX` argv already outgrows
+    // the 1MB default, and an overflow here reads as "cannot say" about a process that is very
+    // much alive — so recovery would not verify it and destruction would not stop it.
+    const { stdout } = await execFile('ps', ['-p', String(pid), '-ww', '-o', 'pid=,lstart=,args='], {
+      maxBuffer: PS_MAX_BUFFER,
+    })
     return parsePsRow(stdout.split('\n')[0] ?? '')
   }
   catch {

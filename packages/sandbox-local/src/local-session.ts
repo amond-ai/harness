@@ -41,6 +41,18 @@ import { createProcessRegistry } from './registry'
 
 /** How often `waitForExit` re-reads the journal. A local read, so it can afford to be brisk. */
 const DEFAULT_POLL_MS = 100
+
+/**
+ * How long `kill` waits for a just-spawned wrapper to publish its command's pid.
+ *
+ * Sized against what the wrapper actually has to do — a `printf` builtin and one `mv`, so a
+ * fork and an exec — with room for a loaded machine, and not against how long a caller might
+ * tolerate a hang: a `kill` that took a second would be its own bug.
+ */
+const PID_PUBLICATION_MS = 500
+
+/** How often that window is re-checked. */
+const PID_POLL_MS = 10
 /** How long a following `logs()` waits after a read that found nothing new. */
 const DEFAULT_FOLLOW_MS = 200
 /** POSIX SIGTERM — what a `kill` with no signal named sends, matching the Cloudflare backend. */
@@ -183,15 +195,54 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
    * there. Once the wrapper is gone the only thing left to name is the group, and only what
    * outlived the wrapper is in it.
    */
+  /**
+   * The command's own pid, waited for briefly rather than asked for once.
+   *
+   * `exec` returns as soon as the shell is spawned, so a caller that kills immediately — a
+   * turn cancelled the moment it starts — arrives before the wrapper has run the two commands
+   * that publish `$!`. That is a publication window, not an absence: the wrapper has already
+   * been confirmed alive, so the pid is coming. Asking once and giving up would report a
+   * non-delivery for a process that is perfectly signallable a millisecond later.
+   *
+   * Bounded, because the other reading of a missing pid is a wrapper whose journal was removed
+   * under it, and that one never resolves. The budget is short enough to stay inside what a
+   * caller expects `kill` to cost, and the wrapper is re-checked each time so a command that
+   * exits during the wait ends the wait rather than running it out.
+   */
+  async function publishedCommandPid(record: ProcessRecord): Promise<number | undefined> {
+    const paths = journalPaths(sandbox.state, record.id)
+    const until = elapsedMs() + PID_PUBLICATION_MS
+    while (true) {
+      const pid = await io.readCommandPid(paths)
+      if (pid !== undefined || elapsedMs() >= until) {
+        return pid
+      }
+      await new Promise(resolve => setTimeout(resolve, PID_POLL_MS))
+      if (await registry.liveness(record) !== 'live') {
+        return io.readCommandPid(paths)
+      }
+    }
+  }
+
   async function kill(record: ProcessRecord, signal?: number): Promise<void> {
     const sent = signal ?? SIGTERM
     const state = await registry.liveness(record)
     if (state === 'live') {
-      const commandPid = await io.readCommandPid(journalPaths(sandbox.state, record.id))
-      if (commandPid !== undefined) {
-        host.signal(commandPid, sent)
+      const commandPid = await publishedCommandPid(record)
+      if (commandPid === undefined) {
+        // The wrapper is alive but never published its command's pid within the window above.
+        // Falling through to the group here is what {@link JournalPaths.pid} exists to
+        // prevent: the group contains the wrapper, which dies on SIGINT or SIGTERM without
+        // running the `printf` that records the exit, so the turn would end with neither the
+        // `result` the interrupt was for nor an exit code. Reported as non-delivery instead.
+        console.warn(
+          `sandbox-local: kill of '${record.id}' (signal ${String(sent)}) signalled nothing:`
+          + ` its wrapper is running but has not recorded the command's pid`,
+        )
         return
       }
+      host.signal(commandPid, sent)
+      return
     }
     if (state === 'unknown') {
       // Nothing is signalled, and it is said out loud. The recorded command pid is only
@@ -209,10 +260,12 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
     await registry.signalGroup(record, sent)
   }
 
-  /** Has this id left anything behind — an exit record, or a transcript? */
+  /** Has this id left anything behind — an exit record, or either transcript? */
   async function journalled(id: string): Promise<boolean> {
     const paths = journalPaths(sandbox.state, id)
-    const found = await Promise.all([paths.exit, paths.stdout].map(path => host.exists(path)))
+    const found = await Promise.all(
+      [paths.exit, paths.stdout, paths.stderr].map(path => host.exists(path)),
+    )
     return found.includes(true)
   }
 
@@ -284,9 +337,15 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
         // no handle is returned, and discovery would find it only through the process table.
         // Killing it here makes the caller's failure "the process did not start" rather than
         // "something is running in your checkout and nobody owns it".
-        await registry.signalGroup(record, SIGKILL)
+        const killed = await registry.signalGroup(record, SIGKILL)
         throw new Error(
-          `process record for '${id}' could not be written; its wrapper (pid ${String(spawned.pid)}) was killed`,
+          killed
+            ? `process record for '${id}' could not be written; its wrapper (pid ${String(spawned.pid)}) was killed`
+            // The refusal is the worse half of this failure and must not read as the better
+            // one: `signalGroup` declines a leader it cannot verify, so the command is still
+            // running, still writing into the working directory, and now has no record at all.
+            : `process record for '${id}' could not be written and its wrapper (pid ${String(spawned.pid)})`
+              + ` could not be confirmed killed; a command may still be running in '${cwd}' that nothing owns`,
           { cause },
         )
       }
@@ -338,8 +397,25 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
      * "remove the working directory" is one line and takes the neighbours with it.
      */
     destroy: async () => {
+      const unconfirmed: string[] = []
       for (const record of await registry.list()) {
-        await registry.signalGroup(record, SIGKILL)
+        // `signalGroup` declines a leader it cannot verify *and* one whose pid was reissued,
+        // and only the first of those is a reason to stop: a reissued pid means the process is
+        // genuinely gone, while an unverifiable one may be running this instant.
+        if (!await registry.signalGroup(record, SIGKILL) && await registry.liveness(record) === 'unknown') {
+          unconfirmed.push(record.id)
+        }
+      }
+      if (unconfirmed.length > 0) {
+        // Removing the state directory here is what makes this unrecoverable rather than
+        // merely unfinished: the journal is the only record of a process the host would not
+        // confirm, so deleting it strands something that is still writing into the working
+        // directory with nothing left to find it by. Nothing is removed, and the caller can
+        // retry once the host can answer again.
+        throw new Error(
+          `sandbox '${sandbox.state}' was not destroyed: ${unconfirmed.join(', ')} could not be`
+          + ` confirmed killed, and removing their journal would leave them unrecoverable`,
+        )
       }
       await host.remove(sandbox.state)
       if (sandbox.owned) {

@@ -103,8 +103,21 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
   const { host, now, stateDir } = options
   const elapsedMs = options.elapsedMs ?? (() => Date.now())
   const identityTtlMs = options.identityTtlMs ?? DEFAULT_IDENTITY_TTL_MS
-  /** Per process id: whether the pid was ours when last asked, and when that was. */
-  const identity = new Map<string, { ours: boolean, at: number }>()
+  /**
+   * Per process id: that the pid was *not* ours when last asked, and when that was.
+   *
+   * Only the negative answer, and that asymmetry is the whole content of this cache. While a
+   * pid stays allocated, "not ours" cannot become "ours" — a process this record was written
+   * for does not come back on a pid it has already lost — so a stale negative is still true.
+   * A positive goes the other way: our process exits, the kernel hands the number to a
+   * stranger, and `signal(pid, 0)` keeps answering yes throughout. Reusing a cached `'live'`
+   * across that would report the stranger as our process and, through `kill`, signal it.
+   *
+   * So a positive costs a process-table read every time it is asked for. There is no cheaper
+   * reuse detector to cache against: the pid alone cannot tell the two apart, which is the
+   * premise of `ownsPid` above it.
+   */
+  const notOurs = new Map<string, number>()
 
   /**
    * Is the process now holding this pid the one the record was written for?
@@ -143,12 +156,12 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
     if (!host.signal(record.pid, 0)) {
       // The pid is free. Nothing else can be true of it, and the cached identity is now about
       // a number rather than about a process, so it goes.
-      identity.delete(record.id)
+      notOurs.delete(record.id)
       return 'gone'
     }
-    const cached = identity.get(record.id)
-    if (cached && elapsedMs() - cached.at < identityTtlMs) {
-      return cached.ours ? 'live' : 'gone'
+    const ruledOut = notOurs.get(record.id)
+    if (ruledOut !== undefined && elapsedMs() - ruledOut < identityTtlMs) {
+      return 'gone'
     }
     const row = await host.identify(record.pid)
     if (row === undefined) {
@@ -162,8 +175,14 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
     if (ours === undefined) {
       return 'unknown'
     }
-    identity.set(record.id, { ours, at: elapsedMs() })
-    return ours ? 'live' : 'gone'
+    if (ours) {
+      // Deliberately not remembered: see `notOurs`. This answer is true of the process holding
+      // the pid *now*, and the next caller has no way to know the kernel has not reissued it.
+      notOurs.delete(record.id)
+      return 'live'
+    }
+    notOurs.set(record.id, elapsedMs())
+    return 'gone'
   }
 
   return {
@@ -207,7 +226,15 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
         .filter(isProcessId)
       const stored = await Promise.all(ids.map(async (id) => {
         const { data } = await host.readSlice(journalPaths(stateDir, id).meta, 0)
-        return data.length === 0 ? undefined : parseProcessRecord(new TextDecoder().decode(data))
+        if (data.length === 0) {
+          return undefined
+        }
+        const record = parseProcessRecord(new TextDecoder().decode(data))
+        // The same filename check `read` makes, and for a sharper reason here: `destroy()`
+        // signals every group this list names, so a record whose `id` disagrees with the file
+        // it was read from would let one writable journal file aim that kill at another
+        // process's group. Answered as absence, exactly as a single read answers it.
+        return record?.id === id ? record : undefined
       }))
       // The records name what has *run*; the process table names what is *running*. Unioned
       // because neither is complete on its own: an exited process is only in the records, and

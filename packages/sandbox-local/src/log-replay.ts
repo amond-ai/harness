@@ -44,18 +44,35 @@ export function decodeCursor(cursor?: string): { stdout: number, stderr: number 
  *
  * The cursor encodes the files' full lengths, never how much was served: it is a position in
  * the journal, and `data.length` is only the part that arrived after the last one.
+ *
+ * Each event carries the position *as of that event*, which is why the two are not the same
+ * string. A consumer may stop on any event it has handled and resume from the cursor it saw,
+ * so a stdout event that already named stderr's new end would promise bytes it had not
+ * delivered — and the next `since` read would start past them and lose them for good. The
+ * stdout event therefore still names stderr's old end, recovered as `total - data.length`,
+ * and only the stderr event moves that half forward.
  */
 export function replayPositioned(
   slices: { stdout: LocalSlice, stderr: LocalSlice },
   at: string,
 ): ProcessLogEvent[] {
-  const cursor = encodeCursor(slices.stdout.total, slices.stderr.total)
   const events: ProcessLogEvent[] = []
   if (slices.stdout.data.length > 0) {
-    events.push({ type: 'stdout', cursor, timestamp: at, data: slices.stdout.data })
+    const stderrStart = slices.stderr.total - slices.stderr.data.length
+    events.push({
+      type: 'stdout',
+      cursor: encodeCursor(slices.stdout.total, stderrStart),
+      timestamp: at,
+      data: slices.stdout.data,
+    })
   }
   if (slices.stderr.data.length > 0) {
-    events.push({ type: 'stderr', cursor, timestamp: at, data: slices.stderr.data })
+    events.push({
+      type: 'stderr',
+      cursor: encodeCursor(slices.stdout.total, slices.stderr.total),
+      timestamp: at,
+      data: slices.stderr.data,
+    })
   }
   return events
 }

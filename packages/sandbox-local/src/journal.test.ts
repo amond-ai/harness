@@ -31,14 +31,29 @@ describe('journalledScript', () => {
     expect(journalledScript(['echo', 'hi'], PATHS)).toBe(
       `: 'p1' ; 'echo' 'hi' > '/state/p1.out' 2> '/state/p1.err' & __c=$!`
       + ` ; printf '%s' "$__c" > '/state/p1.pid'`
-      + ` ; wait $__c ; __e=$? ; printf '%s' "$__e" > '/state/p1.exit'`,
+      + ` ; wait $__c ; __e=$?`
+      + ` ; printf '%s' "$__e" > '/state/p1.exit.pending' ; mv '/state/p1.exit.pending' '/state/p1.exit'`,
     )
+  })
+
+  it('publishes the exit by a rename from a sibling, so no reader sees a prefix', () => {
+    const script = journalledScript(['echo', 'hi'], PATHS)
+    // Same directory, or `mv` is a copy across filesystems and the atomicity POSIX gives
+    // `rename(2)` is gone — reintroducing the torn read the two-step write is here to remove.
+    expect(script).toContain(`> '/state/p1.exit.pending' ; mv '/state/p1.exit.pending' '/state/p1.exit'`)
+    // And the pending name is invisible to the state directory's scan, which reads records by
+    // their `.meta.json` suffix and would otherwise take `p1.exit.pending` for a process.
+    expect(script).not.toContain('.meta.json')
+    // The pid keeps its one `printf`, and the reason is latency rather than principle: `mv` is
+    // a fork where `printf` is a builtin, and those milliseconds straddle the window in which
+    // `exec()` hands back a handle a caller may immediately `kill()`.
+    expect(script).toContain(`printf '%s' "$__c" > '/state/p1.pid' ;`)
   })
 
   it('records the exit from inside the tree, after the command has been waited on', () => {
     const script = journalledScript(['false'], PATHS)
     // The order is the durability guarantee: whoever spawned this may be gone by now.
-    expect(script.indexOf('wait $__c')).toBeLessThan(script.indexOf(`> '/state/p1.exit'`))
+    expect(script.indexOf('wait $__c')).toBeLessThan(script.indexOf(`mv '/state/p1.exit.pending'`))
   })
 
   it('carries its own deadline, so a timeout outlives the orchestrator too', () => {
@@ -58,8 +73,10 @@ describe('journalledScript', () => {
     // And signalling the command alone bounds nothing when it has children: they stay in the
     // wrapper's group, so the caller's wait carries on past the deadline it set.
     expect(script).toContain(`[ -f '/state/p1.timeout' ] && kill -KILL -$$`)
-    // The exit is recorded before the group signal, which reaches the wrapper too.
-    expect(script.indexOf(`> '/state/p1.exit'`)).toBeLessThan(script.indexOf('kill -KILL -$$'))
+    // The exit is recorded before the group signal, which reaches the wrapper too — the
+    // rename included, since a record still under its pending name is one no reader can find.
+    expect(script.indexOf(`mv '/state/p1.exit.pending' '/state/p1.exit'`))
+      .toBeLessThan(script.indexOf('kill -KILL -$$'))
     // `-$$`, never `0`: both name this group when the wrapper leads one, but on a host that
     // failed to detach it, `0` would name the orchestrator's group and kill the application.
     expect(script).not.toContain('kill -KILL 0')
@@ -155,5 +172,19 @@ describe('parseProcessRecord', () => {
     ]) {
       expect(parseProcessRecord(raw)).toBeUndefined()
     }
+  })
+
+  it('refuses a pid no host could be asked about', () => {
+    // `1e100` is an integer to JavaScript and not a pid to anything else, so `isInteger` lets
+    // it through and the host refuses it at the liveness probe instead — one malformed file
+    // turning into a process that can never be resolved either way.
+    expect(parseProcessRecord(JSON.stringify({ ...record, pid: 1e100 }))).toBeUndefined()
+  })
+
+  it('refuses an id no journal path can be built from', () => {
+    // `registry.list()` trusts this field and hands it to `journalPaths()`, which throws on
+    // anything outside `[A-Za-z0-9_-]+`. Unguarded, a single bad `.meta.json` fails the listing
+    // for the whole sandbox rather than for itself.
+    expect(parseProcessRecord(JSON.stringify({ ...record, id: '../../etc/passwd' }))).toBeUndefined()
   })
 })

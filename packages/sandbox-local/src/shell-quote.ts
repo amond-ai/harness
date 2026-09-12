@@ -11,8 +11,19 @@
  * that guarantee would otherwise stop holding.
  */
 
-/** Quote one argument so the shell reads it as a single literal word. */
-export function quoteArg(arg: string): string {
+/**
+ * Quote one argument so the shell reads it as a single literal word.
+ *
+ * A NUL byte throws rather than being quoted: there is no shell spelling for one, and the
+ * script this word goes into is handed to `spawn` as an argument, where the runtime rejects
+ * the whole call with a bare `ERR_INVALID_ARG_VALUE` naming the script — a diagnosis several
+ * layers away from the argv element or path that actually carries the byte. {@link role} is
+ * what closes that distance, so the caller is told which one at the boundary that knows.
+ */
+export function quoteArg(arg: string, role = 'an argument'): string {
+  if (arg.includes('\0')) {
+    throw new Error(`cannot quote ${role} containing a NUL byte: the local backend runs every command through a shell script, and a script cannot spell one`)
+  }
   return `'${arg.replaceAll(`'`, `'\\''`)}'`
 }
 
@@ -27,7 +38,7 @@ export function quoteArgv(argv: readonly string[]): string {
   if (argv.length === 0) {
     throw new Error('cannot quote an empty argv: there is no command to run')
   }
-  return argv.map(quoteArg).join(' ')
+  return argv.map((arg, index) => quoteArg(arg, `argv[${String(index)}]`)).join(' ')
 }
 
 /**

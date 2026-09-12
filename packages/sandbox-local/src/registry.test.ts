@@ -100,18 +100,49 @@ describe('liveness', () => {
     expect(moved).toBe('gone')
   })
 
-  it('reuses one identity answer, and re-asks once it is stale', async () => {
+  it('re-reads the process table for every live answer, and never caches one', async () => {
+    // The cache cannot hold a positive. `signal(pid, 0)` keeps answering yes after our process
+    // exits and the kernel reissues the number, so a remembered 'live' is indistinguishable
+    // from a stranger — and `kill` would deliver to it.
+    const fake = fakeHost()
+    fake.place({ pid: 4711 })
+    const registry = registryOver(fake)
+
+    await registry.liveness(recordFor(4711))
+    await registry.liveness(recordFor(4711))
+    expect(fake.calls.identify).toBe(2)
+  })
+
+  it('sees a pid reissued inside the identity window as gone', async () => {
+    // The failure the positive cache produced: our wrapper ends, the pid is handed to somebody
+    // else within the TTL, and the pid is still allocated throughout — so nothing but the
+    // process table can tell the two apart.
     const fake = fakeHost()
     fake.place({ pid: 4711 })
     const elapsed = { ms: 0 }
     const registry = registryOver(fake, elapsed)
+    await expect(registry.liveness(recordFor(4711))).resolves.toBe('live')
 
-    await registry.liveness(recordFor(4711))
-    await registry.liveness(recordFor(4711))
+    fake.end(4711)
+    fake.place({ pid: 4711, startedAt: 'a different day' })
+    elapsed.ms = 1_000
+    await expect(registry.liveness(recordFor(4711))).resolves.toBe('gone')
+  })
+
+  it('reuses one not-ours answer, and re-asks once it is stale', async () => {
+    // The negative is the half that keeps: while the pid stays allocated it cannot turn back
+    // into ours, because a record does not get its lost pid returned to it.
+    const fake = fakeHost()
+    fake.place({ pid: 4711, startedAt: 'a different day' })
+    const elapsed = { ms: 0 }
+    const registry = registryOver(fake, elapsed)
+
+    await expect(registry.liveness(recordFor(4711))).resolves.toBe('gone')
+    await expect(registry.liveness(recordFor(4711))).resolves.toBe('gone')
     expect(fake.calls.identify).toBe(1)
 
     elapsed.ms = 6_000
-    await registry.liveness(recordFor(4711))
+    await expect(registry.liveness(recordFor(4711))).resolves.toBe('gone')
     expect(fake.calls.identify).toBe(2)
   })
 
@@ -211,6 +242,14 @@ describe('discovery', () => {
     const fake = fakeHost()
     fake.put(journalPaths(STATE, 'p1').meta, serializeProcessRecord(recordFor(4000, { id: 'somebody-else' })))
     await expect(registryOver(fake).read('p1')).resolves.toBeUndefined()
+  })
+
+  it('leaves that record out of the listing too, not only out of a single read', async () => {
+    // `destroy()` signals every group the listing names, so a record trusted here would let one
+    // writable journal file aim that kill at a process it does not own.
+    const fake = fakeHost()
+    fake.put(journalPaths(STATE, 'p1').meta, serializeProcessRecord(recordFor(4000, { id: 'somebody-else' })))
+    await expect(registryOver(fake).list()).resolves.toEqual([])
   })
 })
 

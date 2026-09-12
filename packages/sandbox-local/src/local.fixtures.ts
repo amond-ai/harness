@@ -108,6 +108,12 @@ export function fakeHost(options: { nextPid?: number } = {}): FakeHost {
         files.set(path, data)
       },
       mkdir: async (path: string) => {
+        // Every ancestor, not just the leaf: the real `LocalHost.mkdir` is `mkdir -p`, and a
+        // fake that recorded only the leaf would answer `exists` for a nested state directory
+        // whose parents production code had never asked for — the one bug this call can have.
+        for (let at = path.indexOf('/', 1); at > 0; at = path.indexOf('/', at + 1)) {
+          dirs.add(path.slice(0, at))
+        }
         dirs.add(path)
       },
       readdir: async (path: string) => {
@@ -179,11 +185,15 @@ export function fakeHost(options: { nextPid?: number } = {}): FakeHost {
 
 /** A session over the fake, addressing the sandbox {@link SANDBOX_ID} names. */
 export function sessionOver(fake: FakeHost, overrides: Partial<LocalSessionOptions> = {}): SandboxSession {
+  // One id per `exec`, counted per session, because the real minter never repeats: a constant
+  // would have a second command overwrite the first one's record and journal in place, and a
+  // suite about two concurrent processes would then be testing one.
+  let minted = 0
   return createLocalSession({
     host: fake.host,
     paths: { work: WORK, state: STATE, owned: true },
     env: { PATH: '/usr/bin' },
-    newProcessId: () => 'p1',
+    newProcessId: () => `p${String(++minted)}`,
     now: () => AT,
     pollIntervalMs: 0,
     followIntervalMs: 0,

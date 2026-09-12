@@ -47,6 +47,39 @@ describe('logs', () => {
     ])
   })
 
+  it('moves each half of a positioned cursor only once its own bytes are delivered', async () => {
+    // A consumer may stop on any event it has handled and resume from the cursor it saw, so a
+    // stdout event naming stderr's new end would promise bytes it had not delivered — and the
+    // next `since` read would start past them and lose them for good. The whole-transcript
+    // read above already reads this way; this is the positioned one agreeing with it.
+    const fake = fakeHost()
+    recorded(fake)
+    fake.put(PATHS.stdout, 'out')
+    fake.put(PATHS.stderr, 'err!')
+    fake.put(PATHS.exit, '0')
+
+    const handle = await sessionOver(fake).getProcess('p1')
+    expect(shape(await collect(await handle!.logs({ since: '0:0' })))).toEqual([
+      ['stdout', 'out', '3:0'],
+      ['stderr', 'err!', '3:4'],
+    ])
+  })
+
+  it('says so when a followed process ends without journalling an exit', async () => {
+    // Closing the stream on that ending is the one a consumer cannot read: a silent close is
+    // exactly what a clean finish looks like, so a wrapper killed before its `printf` would
+    // pass for a completed turn. `status()` already reports it; the follower has to as well.
+    const fake = fakeHost()
+    recorded(fake)
+    fake.put(PATHS.stdout, 'partial')
+
+    const handle = await sessionOver(fake).getProcess('p1')
+    expect(shape(await collect(await handle!.logs({ follow: true, replay: true })))).toEqual([
+      ['stdout', 'partial', '7:0'],
+      ['terminal', 'no_exit_record', '7:0'],
+    ])
+  })
+
   it('serves a positioned read only what arrived since, and no terminal event', async () => {
     // The watchdog samples this every few seconds for the length of a turn: it counts bytes and
     // ignores terminal events, so re-serving one per tick is noise at best.

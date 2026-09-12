@@ -76,6 +76,17 @@ describe('createLocalProvider', () => {
     await expect(provider.portEndpoint('run-42', 3000, { protocol: 'ws' })).resolves.toEqual({ url: 'ws://127.0.0.1:3000/' })
   })
 
+  it('brackets an IPv6 loopback rather than building a URL that will not parse', async () => {
+    // `http://::1:3000` is not a URL, and `new URL` rejects it outright — so a consumer that
+    // asked for the v6 loopback would get a throw where the endpoint should be.
+    const provider = createLocalProvider({ root: ROOT, host: fakeHost().host, loopbackHost: '::1' })
+    await expect(provider.portEndpoint('run-42', 3000)).resolves.toEqual({ url: 'http://[::1]:3000/' })
+    const bracketed = createLocalProvider({ root: ROOT, host: fakeHost().host, loopbackHost: '[::1]' })
+    await expect(bracketed.portEndpoint('run-42', 3000)).resolves.toEqual({ url: 'http://[::1]:3000/' })
+    const named = createLocalProvider({ root: ROOT, host: fakeHost().host, loopbackHost: 'localhost' })
+    await expect(named.portEndpoint('run-42', 3000)).resolves.toEqual({ url: 'http://localhost:3000/' })
+  })
+
   it('refuses an id it would refuse anywhere else', async () => {
     const provider = createLocalProvider({ root: ROOT, host: fakeHost().host })
     await expect(provider.portEndpoint('../escape', 3000)).rejects.toThrow(/invalid sandbox id/)

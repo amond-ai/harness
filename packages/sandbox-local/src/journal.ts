@@ -58,6 +58,14 @@ const WRAPPER_PREFIX = `${WRAPPER_SHELL} -c ${SCRIPT_OPEN}`
  */
 const TIMEOUT_GRACE_SECONDS = 5
 
+/**
+ * What the exit record wears while it is being written, and never once it is readable.
+ *
+ * Chosen so the state directory's own scan cannot pick one up: `registry.ts` lists records by
+ * the `.meta.json` suffix, and nothing else in the package matches on a name.
+ */
+const PENDING_SUFFIX = '.pending'
+
 export interface JournalPaths {
   stdout: string
   stderr: string
@@ -109,7 +117,8 @@ export function journalPaths(stateDir: string, processId: string): JournalPaths 
  *   quietly stop existing the moment the desktop app was quit.
  *
  * `printf '%s'` rather than `echo` keeps the recorded numbers free of a trailing newline the
- * reader would have to strip.
+ * reader would have to strip, and the exit status is handed over by {@link publish} rather
+ * than redirected straight at its journal.
  *
  * Note what is *not* here: no `setsid`. The e2b backend has to ask for a session of its own
  * because its commands are all started by one daemon inside one session; here the host spawns
@@ -125,14 +134,48 @@ export function journalledScript(
   const id = journalIdOf(paths)
   return [
     `${SCRIPT_OPEN}${id}${SCRIPT_OPEN_CLOSE}${quoteArgv(argv)}${redirection(paths)} & __c=$!`,
-    `printf '%s' "$__c" > ${quoteArg(paths.pid)}`,
+    `printf '%s' "$__c" > ${quoteArg(paths.pid, 'the pid journal path')}`,
     ...watchdog(paths, timeoutMs),
     `wait $__c`,
     `__e=$?`,
     ...(timeoutMs === undefined ? [] : [`kill $__w 2> /dev/null`]),
-    `printf '%s' "$__e" > ${quoteArg(paths.exit)}`,
+    ...publish('$__e', paths.exit),
     ...reapAfterTimeout(paths, timeoutMs),
   ].join(' ; ')
+}
+
+/**
+ * Hand the exit status to the journal in a state a reader can only see whole.
+ *
+ * A plain redirection publishes in two observable steps: `>` truncates the target when the
+ * command is set up, and the `printf` fills it some time after. The state in between is a
+ * zero-byte file, which the reader already answers as "not written yet", so the plain form is
+ * not *wrong* — it is correct by an argument about how a three-byte write behaves rather than
+ * by construction. This is the record that settles whether a turn is over, which is not a
+ * thing to hold by an argument when POSIX will hold it outright: `rename(2)` within one
+ * directory is atomic, so a reader sees no file or the finished status and never a prefix.
+ *
+ * The pending file is a *sibling* of its target and not somewhere under `TMPDIR`, because `mv`
+ * across filesystems is a copy followed by a delete — the non-atomic publication this exists
+ * to remove, reintroduced by the fix for it.
+ *
+ * A wrapper killed between the two commands leaves the pending file and no record, which is
+ * the same answer as one killed before either: nothing was published, and the caller reads it
+ * as {@link import('@amond-ai/sandbox').SandboxNoExitRecordError} rather than as an exit that
+ * never happened.
+ *
+ * The pid is *not* published this way, and the reason is latency rather than principle. `mv`
+ * is a fork and an exec where `printf` is a builtin writing to an fd the shell already holds:
+ * measured on macOS 2026-09-13 it moves the pid's arrival from ~8ms after the spawn to ~12ms,
+ * which straddles the ~19ms in which `exec()` returns a handle a caller may immediately
+ * `kill()` — and a kill that finds no pid is one this backend refuses to deliver rather than
+ * broadcast to the group. The exit is read by polling and has no such deadline. What the pid
+ * gets instead is what the exit had before: one `printf` of a value the shell already holds,
+ * which POSIX makes a single atomic `write()` against any concurrent read of a regular file.
+ */
+function publish(variable: string, path: string): string[] {
+  const pending = quoteArg(`${path}${PENDING_SUFFIX}`, 'the exit journal path')
+  return [`printf '%s' "${variable}" > ${pending}`, `mv ${pending} ${quoteArg(path, 'the exit journal path')}`]
 }
 
 /**
@@ -144,7 +187,8 @@ export function journalledScript(
  * something of it is — so the caller's wait carries on past the deadline it set. The group is
  * the only handle on that remainder.
  *
- * Two details are load-bearing. The exit record is written *before* the signal, because the
+ * Two details are load-bearing. The exit record is published *before* the signal — the rename
+ * included, since a record still under its pending name is one no reader can find — because the
  * group includes the wrapper and the record would otherwise never be written. And the group is
  * named as `-$$` rather than `0`: both mean "my process group" when the wrapper leads one, but
  * a host that neglected to spawn it detached would have `0` name the *orchestrator's* group and
@@ -155,12 +199,12 @@ function reapAfterTimeout(paths: JournalPaths, timeoutMs?: number): string[] {
   if (timeoutMs === undefined) {
     return []
   }
-  return [`[ -f ${quoteArg(paths.timeout)} ] && kill -KILL -$$ 2> /dev/null`]
+  return [`[ -f ${quoteArg(paths.timeout, 'the timeout marker path')} ] && kill -KILL -$$ 2> /dev/null`]
 }
 
 /** The redirection both streams take, and the anchor {@link parseJournalScript} matches on. */
 function redirection(paths: JournalPaths): string {
-  return ` > ${quoteArg(paths.stdout)} 2> ${quoteArg(paths.stderr)}`
+  return ` > ${quoteArg(paths.stdout, 'the stdout journal path')} 2> ${quoteArg(paths.stderr, 'the stderr journal path')}`
 }
 
 /**
@@ -170,6 +214,11 @@ function redirection(paths: JournalPaths): string {
  * that woke a moment later. The marker is written *before* the signal, because the reader can
  * only ever see the file after the fact and the other order leaves a window where a killed
  * command reads as one that failed on its own.
+ *
+ * It is redirected straight at its path rather than published through {@link publish}, and the
+ * difference is that nobody reads its contents — `[ -f ]` below, `exists()` in the reader — so
+ * the whole record is the file's existence, which the redirection establishes in one step. The
+ * `t` is there to make the file legible to a human looking at a state directory.
  */
 function watchdog(paths: JournalPaths, timeoutMs?: number): string[] {
   if (timeoutMs === undefined) {
@@ -178,7 +227,7 @@ function watchdog(paths: JournalPaths, timeoutMs?: number): string[] {
   const seconds = Math.max(0, timeoutMs) / 1000
   return [
     `{ sleep ${seconds} ; kill -0 $__c 2> /dev/null`
-    + ` && { printf t > ${quoteArg(paths.timeout)} ; kill -TERM $__c 2> /dev/null`
+    + ` && { printf t > ${quoteArg(paths.timeout, 'the timeout marker path')} ; kill -TERM $__c 2> /dev/null`
     + ` ; sleep ${TIMEOUT_GRACE_SECONDS} ; kill -KILL $__c 2> /dev/null ; } ; } & __w=$!`,
   ]
 }
@@ -294,11 +343,16 @@ export function parseProcessRecord(raw: string): ProcessRecord | undefined {
     return undefined
   }
   const candidate = parsed as Partial<ProcessRecord>
-  // The elements are checked, not just the array. A record lives on a filesystem the command
+  // Every field is checked, not just the shape. A record lives on a filesystem the command
   // itself can write to, so `["claude", 5]` must not pass the cast and violate the tuple's own
-  // invariant downstream.
-  if (typeof candidate.id !== 'string' || typeof candidate.pid !== 'number'
-    || !Number.isInteger(candidate.pid) || candidate.pid <= 0
+  // invariant downstream — and neither must an `id` that no journal path can be built from,
+  // which `registry.list()` would carry to a `journalPaths()` call that throws for the whole
+  // sandbox rather than for the one malformed file. `isSafeInteger` rather than `isInteger`
+  // for the pid, because `1e100` is an integer to JavaScript and not a number any host will
+  // accept as a pid: the record would survive parsing and fail at the liveness probe instead.
+  if (typeof candidate.id !== 'string' || !isProcessId(candidate.id)
+    || typeof candidate.pid !== 'number'
+    || !Number.isSafeInteger(candidate.pid) || candidate.pid <= 0
     || !Array.isArray(candidate.command) || candidate.command.length === 0
     || !candidate.command.every(element => typeof element === 'string')
     || typeof candidate.startedAt !== 'string') {

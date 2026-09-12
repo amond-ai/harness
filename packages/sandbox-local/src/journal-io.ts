@@ -19,6 +19,17 @@ import type { LocalHost, LocalSlice } from './local-surface'
 /** Bytes per chunk when the whole transcript is streamed rather than sliced. */
 const CHUNK_BYTES = 64 * 1024
 
+/**
+ * The most an exit record may be, in bytes.
+ *
+ * A shell reports at most three digits — 255 is the largest status, and a signalled command
+ * comes back as 128+n within the same range — so this is headroom rather than a fit. The cap
+ * is here because the file is polled for the whole length of a turn and lives on a filesystem
+ * the command itself can write to: unbounded, a journal replaced by something large is read
+ * into memory in full, several times a second, for as long as the caller waits.
+ */
+const EXIT_RECORD_BYTES = 16
+
 export interface JournalIo {
   /** The exit the wrapper recorded, or `undefined` while it has recorded none. */
   readExit: (paths: JournalPaths) => Promise<ProcessExit | undefined>
@@ -35,16 +46,25 @@ export interface JournalIo {
 export function createJournalIo(host: LocalHost): JournalIo {
   return {
     readExit: async (paths: JournalPaths) => {
-      const { data } = await host.readSlice(paths.exit, 0)
+      const { data, total } = await host.readSlice(paths.exit, 0, EXIT_RECORD_BYTES)
       if (data.length === 0) {
-        // Absent, or created by the shell's redirection a moment before the `printf` lands.
-        // Both mean the same thing to every caller: not over yet.
+        // No file. An absent one reads as empty rather than throwing, and absence is the
+        // ordinary state for most of a turn: not over yet.
+        return undefined
+      }
+      if (total > EXIT_RECORD_BYTES) {
+        // Longer than any status the wrapper could have published, so it is not the wrapper's
+        // file — and reading the rest of it to confirm that is the allocation the cap exists
+        // to refuse.
         return undefined
       }
       const code = Number(new TextDecoder().decode(data).trim())
       if (!Number.isInteger(code)) {
-        // A partial write, or something else's file. Reporting `undefined` costs a re-read;
-        // reporting a `NaN` exit would settle a turn as finished with a code nobody can act on.
+        // Something else's file, or one the command replaced. Reporting `undefined` costs a
+        // re-read; reporting a `NaN` exit would settle a turn as finished with a code nobody
+        // can act on. What it is *not* is a half-written record: the wrapper publishes this
+        // one by renaming a finished file into place, so the file either is not there or
+        // holds the whole status.
         return undefined
       }
       // A shell reports a signalled command as 128+n and this passes that through rather than
@@ -53,11 +73,23 @@ export function createJournalIo(host: LocalHost): JournalIo {
       return { code, timedOut: await host.exists(paths.timeout) }
     },
     readCommandPid: async (paths: JournalPaths) => {
-      const { data } = await host.readSlice(paths.pid, 0)
+      const { data, total } = await host.readSlice(paths.pid, 0, EXIT_RECORD_BYTES)
+      if (total > EXIT_RECORD_BYTES) {
+        // Bounded for the same reason the exit status is: `kill` reads this every time, so a
+        // journal file that grew — corrupted, or written by whatever else can reach the state
+        // directory — would otherwise be allocated whole on each call. A pid does not run to
+        // sixteen digits, so a file that long is not one.
+        return undefined
+      }
       const pid = Number(new TextDecoder().decode(data).trim())
-      // A partial write reads as a different, still-plausible number, which is why the wrapper
-      // writes it with one `printf` of a value it already holds — and why anything that is not
-      // a positive integer is treated as "not written yet" rather than guessed at.
+      // A partial write would read as a different, still-plausible number and aim a signal at
+      // a stranger, which is why the wrapper writes this with one `printf` of a value it
+      // already holds: POSIX makes that single `write()` atomic against any concurrent read of
+      // a regular file, so the observable states are absent, empty, and whole. It is not
+      // renamed into place the way the exit status is — see `publish` in `journal.ts`, where
+      // the `mv`'s few milliseconds are the difference between a `kill()` that finds the pid
+      // and one that refuses to deliver. Anything that is not a positive integer is still
+      // treated as "not written yet" rather than guessed at.
       return Number.isInteger(pid) && pid > 0 ? pid : undefined
     },
     readSliceFrom: async (path: string, offset: number) => host.readSlice(path, offset),

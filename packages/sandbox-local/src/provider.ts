@@ -79,6 +79,19 @@ const DEFAULT_LOOPBACK_HOST = '127.0.0.1'
  */
 const DEFAULT_PROTOCOL = 'http'
 
+/**
+ * A {@link LocalProviderOptions.loopbackHost} as a URL authority can carry it.
+ *
+ * An IPv6 literal is the one form that is not already one: `::1` interpolated bare would make
+ * `http://::1:3000`, which `new URL` rejects outright rather than mis-parsing — so a consumer
+ * that asked for the v6 loopback would get a thrown provider instead of an endpoint. A colon
+ * is the tell and cannot appear in a hostname or an IPv4 address, and a value the consumer
+ * already bracketed is left as it is rather than bracketed twice.
+ */
+function asAuthority(host: string): string {
+  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
+}
+
 export function createLocalProvider(options: LocalProviderOptions): SandboxProvider {
   const host = options.host ?? nodeLocalHost()
   const loopback = options.loopbackHost ?? DEFAULT_LOOPBACK_HOST
@@ -159,7 +172,7 @@ export function createLocalProvider(options: LocalProviderOptions): SandboxProvi
     ): Promise<SandboxPortEndpoint> => {
       sandboxPaths(options, sandboxId)
       const protocol = endpointOptions?.protocol ?? DEFAULT_PROTOCOL
-      return { url: new URL(`${protocol}://${loopback}:${String(port)}`).toString() }
+      return { url: new URL(`${protocol}://${asAuthority(loopback)}:${String(port)}`).toString() }
     },
   }
 }

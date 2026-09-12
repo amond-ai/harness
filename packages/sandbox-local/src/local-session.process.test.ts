@@ -50,6 +50,19 @@ describe('exec', () => {
     expect(fake.table.has(4711)).toBe(false)
   })
 
+  it('says the wrapper survived when the kill of it was refused', async () => {
+    // The worse half of the same failure, and it must not read as the better one: `signalGroup`
+    // declines a leader it cannot verify, so the command is still running, still writing into
+    // the working directory, and now has no record at all.
+    const fake = fakeHost({ nextPid: 4711 })
+    fake.host.writeFile = async () => {
+      throw new Error('disk full')
+    }
+    fake.psWorks = false
+    await expect(sessionOver(fake).exec(['claude', '-p'])).rejects.toThrow(/could not be confirmed killed/)
+    expect(fake.table.has(4711)).toBe(true)
+  })
+
   it('refuses to start when the working directory cannot be made', async () => {
     const fake = fakeHost()
     fake.host.mkdir = async () => {}
@@ -147,6 +160,22 @@ describe('destroy', () => {
     // The root and the state root are shared with every other sandbox — and with whatever the
     // consumer caches beside them. Nothing here may reach them.
     expect(fake.dirs.has('/sandboxes')).toBe(true)
+  })
+
+  it('removes nothing while a process it could not confirm killed may still be running', async () => {
+    // The journal is the only record of that process, so deleting it is what turns an
+    // unfinished destroy into an unrecoverable one: something is still writing into the
+    // working directory and nothing is left to find it by.
+    const fake = fakeHost({ nextPid: 4711 })
+    fake.put(`${WORK}/repo/file.txt`, 'work')
+    const session = sessionOver(fake)
+    await session.exec(['claude', '-p'])
+    fake.psWorks = false
+
+    await expect(session.destroy()).rejects.toThrow(/could not be confirmed killed/)
+    expect(fake.table.has(4711)).toBe(true)
+    expect(fake.files.has(journalPaths(STATE, 'p1').meta)).toBe(true)
+    expect(fake.files.has(`${WORK}/repo/file.txt`)).toBe(true)
   })
 
   it('leaves a working directory it was merely pointed at', async () => {
