@@ -96,15 +96,35 @@ have started. Three things make that work, and each is a decision rather than a 
    is the obvious implementation and it is wrong in exactly this case: quit the app mid-turn
    and nothing is left to observe the exit, so a turn that finished perfectly comes back as
    `SandboxNoExitRecordError`. The wrapper records `$?` from inside the tree.
-2. **Liveness is verified, never inferred from the record.** Pids are reused. The record keeps
-   the kernel's own start time for the pid beside it and the pair is compared, so a pid that
-   was reissued after a reboot reads as gone rather than as a turn still in progress.
+2. **Liveness is verified, never inferred from the record.** Pids are reused, so the pid alone
+   is not an answer. What identifies a process is the wrapper's own marker in its command line;
+   the kernel's start time is the fallback for a host that cannot report one. That ordering is
+   deliberate — `ps -o lstart` resolves to a whole second on both supported platforms, so a pid
+   recycled inside that second compares equal, and there is no portable finer clock (`/proc` is
+   Linux-only). A row whose command line is unreadable falls back to the time rather than to a
+   verdict: truncated argv is not evidence of a stranger, and calling a live turn dead is the
+   expensive mistake.
+   A process this check cannot confirm is never signalled. `kill` reports the non-delivery and
+   leaves the caller's bounded wait to escalate, as `SandboxProcessHandle.kill` requires.
 3. **A process is over when its *group* is empty**, not when the wrapper exited. A command that
    detaches a child and returns leaves that child writing to the checkout, and a caller told
    "finished" starts a second one beside it.
 
 A `timeout` on `exec` is enforced by the wrapper too, for the same reason as (1): a host-side
-timer would quietly stop existing the moment the app was quit.
+timer would quietly stop existing the moment the app was quit. It asks with SIGTERM, escalates
+to SIGKILL after a grace period so a command that ignores the ask cannot outlast its deadline,
+and — only on a timeout — ends what the command left running in the wrapper's process group.
+Without that last step the deadline would bound nothing: `sh -c 'sleep 300 & wait'` answers
+SIGTERM with exit 143 while its child keeps running, and a process group that is not empty is a
+process this backend correctly reports as still alive.
+
+One limit worth knowing before you rely on recovery: a process found through the process table
+rather than through its record carries the argv **as the process table renders it**, and `ps`
+escapes a newline in an argument as `\012`. A multi-line prompt recovered that way is not
+byte-identical to the one that was spawned. Carrying an encoded copy in the wrapper's own
+command line would fix it and double the largest thing in that command line, against a 256KB
+`ARG_MAX` on macOS — so it is a stated limit rather than a hidden one. It costs nothing in the
+ordinary case: a process that still has its record is read from the record.
 
 ## Ports are not per-sandbox
 

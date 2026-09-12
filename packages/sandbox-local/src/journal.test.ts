@@ -42,6 +42,26 @@ describe('journalledScript', () => {
     expect(script).toContain('kill $__w 2> /dev/null')
   })
 
+  it('escalates a deadline the command ignores, and ends what it left running', () => {
+    const script = journalledScript(['sh', '-c', 'sleep 300 & wait'], PATHS, 1_000)
+    // A command that handles SIGTERM exits cleanly; one that ignores it would otherwise run
+    // forever with the wrapper still waiting on it, the timeout enforcing nothing.
+    expect(script).toContain('kill -TERM $__c 2> /dev/null ; sleep 5 ; kill -KILL $__c')
+    // And signalling the command alone bounds nothing when it has children: they stay in the
+    // wrapper's group, so the caller's wait carries on past the deadline it set.
+    expect(script).toContain(`[ -f '/state/p1.timeout' ] && kill -KILL -$$`)
+    // The exit is recorded before the group signal, which reaches the wrapper too.
+    expect(script.indexOf(`> '/state/p1.exit'`)).toBeLessThan(script.indexOf('kill -KILL -$$'))
+    // `-$$`, never `0`: both name this group when the wrapper leads one, but on a host that
+    // failed to detach it, `0` would name the orchestrator's group and kill the application.
+    expect(script).not.toContain('kill -KILL 0')
+  })
+
+  it('reaps nothing when the command ended on its own', () => {
+    // A turn may deliberately leave a server running — the bridge does exactly that.
+    expect(journalledScript(['claude', '-p'], PATHS)).not.toContain('kill -KILL')
+  })
+
   it('leaves no watchdog behind when no timeout was asked for', () => {
     const script = journalledScript(['sleep', '99'], PATHS)
     expect(script).not.toContain('__w')
@@ -74,7 +94,27 @@ describe('parseJournalScript', () => {
   it('claims nothing that belongs to another state directory, or to no one', () => {
     expect(parseJournalScript(lineFor(['echo', 'hi']), '/elsewhere')).toBeUndefined()
     expect(parseJournalScript('/usr/libexec/secretd -x', '/state')).toBeUndefined()
-    expect(parseJournalScript(`: 'p1' ; not-quoted-argv`, '/state')).toBeUndefined()
+    expect(parseJournalScript(`/bin/sh -c : 'p1' ; not-quoted-argv`, '/state')).toBeUndefined()
+  })
+
+  it('claims nothing that merely mentions a wrapper', () => {
+    // A marker found somewhere in a command line says only that a process has this text among
+    // its arguments — an editor holding the file open, a grep for it, the turn's own claude
+    // carrying it inside a prompt. Recovery hands what it finds to destroy(), which signals the
+    // process group, so matching a stranger is not a wrong label but a killed bystander.
+    const wrapper = journalledScript(['claude', '-p'], journalPaths('/state', 'p1'))
+    for (const line of [
+      `grep -R ${wrapper} /var/log`,
+      `/usr/bin/vim ${wrapper}`,
+      `/bin/zsh -c ${wrapper}`,
+    ]) {
+      expect(parseJournalScript(line, '/state')).toBeUndefined()
+    }
+    // And still claims its own.
+    expect(parseJournalScript(`/bin/sh -c ${wrapper}`, '/state')).toEqual({
+      id: 'p1',
+      command: ['claude', '-p'],
+    })
   })
 })
 

@@ -53,16 +53,51 @@ describe('liveness', () => {
     await expect(registryOver(fake).liveness(recordFor(4711))).resolves.toBe('gone')
   })
 
-  it('is unknown, never gone, when nothing can be compared', async () => {
+  it('is unknown, never gone, when the host says nothing at all', async () => {
     // Both mistakes are not equal: a live turn called dead frees its checkout for a retry.
     const fake = fakeHost()
     fake.place({ pid: 4711 })
-    await expect(registryOver(fake).liveness(recordFor(4711, { kernelStartedAt: undefined })))
-      .resolves
-      .toBe('unknown')
-
     fake.psWorks = false
     await expect(registryOver(fake).liveness(recordFor(4711))).resolves.toBe('unknown')
+  })
+
+  it('is unknown when the command line is unreadable and no start time was recorded', async () => {
+    const fake = fakeHost()
+    fake.place({ pid: 4711, command: '' })
+    const state = await registryOver(fake).liveness(recordFor(4711, { kernelStartedAt: undefined }))
+    expect(state).toBe('unknown')
+  })
+
+  it('recognises its own wrapper by its marker, whatever the clock says', async () => {
+    // `ps -o lstart` resolves to one second, so a pid recycled inside that second reports an
+    // identical start time. The marker is what does not collide.
+    const fake = fakeHost()
+    placeWrapper(fake, 4711, 'p1')
+    const state = await registryOver(fake).liveness(recordFor(4711, { kernelStartedAt: 'a stale time' }))
+    expect(state).toBe('live')
+  })
+
+  it('reads a stranger holding the pid as gone, even when their start times agree', async () => {
+    // The same-second pid-reuse case: the times are equal and the command lines are not.
+    const fake = fakeHost()
+    placeWrapper(fake, 4711, 'a-different-process')
+    const reused = await registryOver(fake).liveness(recordFor(4711, { kernelStartedAt: 'start-4711' }))
+    expect(reused).toBe('gone')
+
+    const unrelated = fakeHost()
+    unrelated.place({ pid: 4711, command: '/usr/libexec/secretd -x' })
+    const stranger = await registryOver(unrelated).liveness(recordFor(4711, { kernelStartedAt: undefined }))
+    expect(stranger).toBe('gone')
+  })
+
+  it('falls back to the start time when the command line is unreadable', async () => {
+    // A row whose argv the host truncated is not evidence of a stranger, and answering 'gone'
+    // for one would declare a live turn dead.
+    const fake = fakeHost()
+    fake.place({ pid: 4711, command: '' })
+    await expect(registryOver(fake).liveness(recordFor(4711))).resolves.toBe('live')
+    const moved = await registryOver(fake).liveness(recordFor(4711, { kernelStartedAt: 'another day' }))
+    expect(moved).toBe('gone')
   })
 
   it('reuses one identity answer, and re-asks once it is stale', async () => {
@@ -73,11 +108,11 @@ describe('liveness', () => {
 
     await registry.liveness(recordFor(4711))
     await registry.liveness(recordFor(4711))
-    expect(fake.calls.startedAt).toBe(1)
+    expect(fake.calls.identify).toBe(1)
 
     elapsed.ms = 6_000
     await registry.liveness(recordFor(4711))
-    expect(fake.calls.startedAt).toBe(2)
+    expect(fake.calls.identify).toBe(2)
   })
 
   it('drops the cached identity the moment the pid goes free', async () => {
@@ -128,6 +163,16 @@ describe('signalGroup', () => {
   it('refuses a group id whose leader pid now belongs to someone else', async () => {
     const fake = fakeHost()
     fake.place({ pid: 4711, startedAt: 'a different day' })
+    await expect(registryOver(fake).signalGroup(recordFor(4711), 9)).resolves.toBe(false)
+    expect(fake.signals.filter(sent => sent.signal === 9)).toEqual([])
+  })
+
+  it('refuses a leader whose identity the host could not confirm', async () => {
+    // A group id *is* a leader's pid, so an unverified leader makes `-pid` a guess — and this
+    // call is the one that ends processes.
+    const fake = fakeHost()
+    fake.place({ pid: 4711 })
+    fake.psWorks = false
     await expect(registryOver(fake).signalGroup(recordFor(4711), 9)).resolves.toBe(false)
     expect(fake.signals.filter(sent => sent.signal === 9)).toEqual([])
   })

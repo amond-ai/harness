@@ -44,6 +44,28 @@ describe('waitForExit', () => {
     await expect(handle?.waitForExit()).resolves.toEqual({ code: 143, timedOut: true })
   })
 
+  it('returns the exit it already read, even once the budget has elapsed', async () => {
+    // The wait did not end before the process did — the process was over before the wait began
+    // — so a rejection here would say 'still running' about something already finished, and the
+    // callers act on that claim: an unconfirmed kill, a clone destroyed, a step failed. The last
+    // poll of every bounded wait lands exactly here, because `remaining` is capped at what is
+    // left of the budget and the loop is designed to wake at the deadline.
+    const fake = fakeHost()
+    fake.put(PATHS.meta, serializeProcessRecord({ id: 'p1', pid: 4711, command: ['claude'], startedAt: AT }))
+    fake.put(PATHS.exit, '0')
+    const handle = await sessionOver(fake, { monotonicNowMs: ticking(10) }).getProcess('p1')
+    await expect(handle?.waitForExit({ timeout: 5 })).resolves.toEqual({ code: 0, timedOut: false })
+  })
+
+  it('says the process journalled nothing rather than that it is still running', async () => {
+    // The same ordering: 'gone, nothing recorded' tells the caller not to wait again, and a
+    // timeout that expired in the same tick would have hidden it behind 'wait longer or kill it'.
+    const fake = fakeHost()
+    fake.put(PATHS.meta, serializeProcessRecord({ id: 'p1', pid: 4711, command: ['claude'], startedAt: AT }))
+    const handle = await sessionOver(fake, { monotonicNowMs: ticking(10) }).getProcess('p1')
+    await expect(handle?.waitForExit({ timeout: 5 })).rejects.toBeInstanceOf(SandboxNoExitRecordError)
+  })
+
   it('rejects rather than resolving when the wait ends before the process does', async () => {
     // The caller's `catch` is the timeout path: a synthetic exit here would be read as a
     // confirmed death, and the caller would proceed over a process that is still running.
@@ -137,6 +159,26 @@ describe('kill', () => {
     const handle = await sessionOver(fake).getProcess('p1')
     await handle?.kill()
     expect(fake.signals.filter(sent => sent.signal === 15)).toEqual([{ pid: 4712, signal: 15 }])
+  })
+
+  it('signals nothing, and says so, when the host cannot confirm the pid is still ours', async () => {
+    // The recorded command pid is only meaningful while the wrapper is verifiably alive to hold
+    // it. With that unconfirmed, the number may belong to anything on the machine by now.
+    const fake = fakeHost()
+    running(fake)
+    fake.psWorks = false
+    const warnings: unknown[] = []
+    const warn = console.warn
+    console.warn = (...args: unknown[]) => warnings.push(args[0])
+    try {
+      const handle = await sessionOver(fake).getProcess('p1')
+      await handle?.kill(2)
+    }
+    finally {
+      console.warn = warn
+    }
+    expect(fake.signals.filter(sent => sent.signal === 2)).toEqual([])
+    expect(String(warnings[0])).toMatch(/signalled nothing/)
   })
 
   it('falls back to the group when only orphans are left to signal', async () => {

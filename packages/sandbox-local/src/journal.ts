@@ -35,6 +35,29 @@ import { quoteArg, quoteArgv, unquoteArgv } from './shell-quote'
 export const SCRIPT_OPEN = `: '`
 const SCRIPT_OPEN_CLOSE = `' ; `
 
+/**
+ * The shell every wrapper runs under.
+ *
+ * Exported so `node-host.ts` spawns exactly what {@link parseJournalScript} expects to find at
+ * the head of a process-table row. The two have to agree: recovery identifies a wrapper by the
+ * whole `<shell> -c <marker>` prefix, and a host that spawned a different shell would leave
+ * every one of its processes unrecoverable — silently, and only after a crash.
+ */
+export const WRAPPER_SHELL = '/bin/sh'
+
+/** What a wrapper's process-table row begins with, and nothing else on the machine does. */
+const WRAPPER_PREFIX = `${WRAPPER_SHELL} -c ${SCRIPT_OPEN}`
+
+/**
+ * How long a timed-out command is given to end on its own before it is killed outright.
+ *
+ * The watchdog asks with SIGTERM first because a command that handles it exits cleanly and
+ * flushes what it was writing. A command that ignores it would otherwise run forever with the
+ * wrapper still waiting on it — the timeout enforcing nothing at all — so the ask has a
+ * deadline of its own.
+ */
+const TIMEOUT_GRACE_SECONDS = 5
+
 export interface JournalPaths {
   stdout: string
   stderr: string
@@ -108,7 +131,31 @@ export function journalledScript(
     `__e=$?`,
     ...(timeoutMs === undefined ? [] : [`kill $__w 2> /dev/null`]),
     `printf '%s' "$__e" > ${quoteArg(paths.exit)}`,
+    ...reapAfterTimeout(paths, timeoutMs),
   ].join(' ; ')
+}
+
+/**
+ * After a timeout, end what the command left running — and only after a timeout.
+ *
+ * Signalling the command alone does not bound anything: `sh -c 'sleep 300 & wait'` answers
+ * SIGTERM with exit 143 while its child keeps running in the wrapper's group, and this
+ * backend's own liveness rule then reports the process as still alive — correctly, since
+ * something of it is — so the caller's wait carries on past the deadline it set. The group is
+ * the only handle on that remainder.
+ *
+ * Two details are load-bearing. The exit record is written *before* the signal, because the
+ * group includes the wrapper and the record would otherwise never be written. And the group is
+ * named as `-$$` rather than `0`: both mean "my process group" when the wrapper leads one, but
+ * a host that neglected to spawn it detached would have `0` name the *orchestrator's* group and
+ * kill the application. `-$$` on a wrapper that leads no group names a group that does not
+ * exist, which fails harmlessly.
+ */
+function reapAfterTimeout(paths: JournalPaths, timeoutMs?: number): string[] {
+  if (timeoutMs === undefined) {
+    return []
+  }
+  return [`[ -f ${quoteArg(paths.timeout)} ] && kill -KILL -$$ 2> /dev/null`]
 }
 
 /** The redirection both streams take, and the anchor {@link parseJournalScript} matches on. */
@@ -131,7 +178,8 @@ function watchdog(paths: JournalPaths, timeoutMs?: number): string[] {
   const seconds = Math.max(0, timeoutMs) / 1000
   return [
     `{ sleep ${seconds} ; kill -0 $__c 2> /dev/null`
-    + ` && { printf t > ${quoteArg(paths.timeout)} ; kill -TERM $__c 2> /dev/null ; } ; } & __w=$!`,
+    + ` && { printf t > ${quoteArg(paths.timeout)} ; kill -TERM $__c 2> /dev/null`
+    + ` ; sleep ${TIMEOUT_GRACE_SECONDS} ; kill -KILL $__c 2> /dev/null ; } ; } & __w=$!`,
   ]
 }
 
@@ -161,13 +209,28 @@ export interface RecoveredScript {
  * carries an issue body, an issue body can quote any marker this module emits, and the check
  * that survives that is "the redirection targets the files this state directory would give
  * that id" — a string the wrapper cannot be talked into containing unless it really is ours.
+ *
+ * **The argv it hands back is the process table's rendering, not the bytes that were passed.**
+ * Measured on macOS 2026-09-13: `ps` escapes a newline in an argument as the four characters
+ * `\012` and a tab as `\011`, and Linux sanitises too, so a recovered multi-line prompt is not
+ * byte-identical to the one that was spawned. That is a real limit of recovering from the table
+ * and it is not worth encoding around — carrying an encoded copy of the argv in the wrapper's
+ * own command line would double a prompt that is already the largest thing in it, against an
+ * `ARG_MAX` of 256KB on macOS. It costs nothing in the ordinary case, because a process that
+ * still has its record is read from the record: this path is reached only for one whose record
+ * was never written or was deleted. The escaping does mean a wrapper's row never spans two
+ * lines, which is what makes the table parseable line by line at all.
  */
 export function parseJournalScript(line: string, stateDir: string): RecoveredScript | undefined {
-  const opened = line.indexOf(SCRIPT_OPEN)
-  if (opened < 0) {
+  // Anchored at the start of the row, not searched for anywhere in it. A marker *found* in a
+  // command line says only that some process has this text among its arguments — an editor
+  // holding the file open, a `grep` for it, or the turn's own `claude` carrying it inside a
+  // prompt. Recovery hands what it finds to `destroy()`, which signals the process group, so
+  // matching a stranger is not a wrong label but a killed bystander.
+  if (!line.startsWith(WRAPPER_PREFIX)) {
     return undefined
   }
-  const from = opened + SCRIPT_OPEN.length
+  const from = WRAPPER_PREFIX.length
   const idEnd = line.indexOf(SCRIPT_OPEN_CLOSE, from)
   if (idEnd < 0) {
     return undefined

@@ -23,7 +23,7 @@
  * is where the group id's own reuse hazard is reasoned about.
  */
 import type { ProcessRecord } from './journal'
-import type { LocalHost } from './local-surface'
+import type { LocalHost, LocalProcessRow } from './local-surface'
 import { journalPaths, parseJournalScript, parseProcessRecord, serializeProcessRecord } from './journal'
 import { isProcessId } from './paths'
 
@@ -69,7 +69,7 @@ export interface ProcessRegistry {
    * pid now belongs to someone else: a group id is a leader's pid, so signalling `-pid` after
    * that number has been reissued would reach a stranger's process group. Refusing is the only
    * safe answer, and it costs nothing real — a group that could be confused this way is one
-   * that had already emptied out.
+   * that had already emptied out. It refuses an *unverified* leader for the same reason.
    */
   signalGroup: (record: ProcessRecord, signal: number) => Promise<boolean>
 }
@@ -106,6 +106,36 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
   /** Per process id: whether the pid was ours when last asked, and when that was. */
   const identity = new Map<string, { ours: boolean, at: number }>()
 
+  /**
+   * Is the process now holding this pid the one the record was written for?
+   *
+   * `undefined` means the host did not say enough to tell, which the caller reports as
+   * `'unknown'` rather than resolving either way.
+   *
+   * The wrapper's own marker settles it wherever it can be read, and the start time is the
+   * fallback rather than the rule. That ordering is what the times cannot give on their own:
+   * `ps -o lstart` resolves to one second on both supported platforms (measured 2026-09-13 —
+   * two processes started in the same second report an identical string), so a pid recycled
+   * inside that second compares equal and a stranger reads as ours. The command line does not
+   * have that problem, and there is no portable finer clock to reach for instead: Linux has
+   * `/proc/<pid>/stat` start ticks and macOS has no `/proc` at all.
+   *
+   * An unreadable command line falls back to the time rather than to a verdict. A row whose
+   * argv the host truncated is not evidence of a stranger, and answering `'gone'` for one would
+   * declare a live turn dead — the asymmetric mistake this whole file is built to avoid.
+   */
+  function ownsPid(record: ProcessRecord, row: LocalProcessRow): boolean | undefined {
+    const wrapper = parseJournalScript(row.command, stateDir)
+    if (wrapper !== undefined) {
+      return wrapper.id === record.id
+    }
+    if (row.command !== '' && record.kernelStartedAt === undefined) {
+      // Someone else's process, holding a pid this record was never able to pin down.
+      return false
+    }
+    return record.kernelStartedAt === undefined ? undefined : row.startedAt === record.kernelStartedAt
+  }
+
   async function liveness(record: ProcessRecord): Promise<Liveness> {
     if (!isSignalablePid(record.pid)) {
       return 'gone'
@@ -116,22 +146,22 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
       identity.delete(record.id)
       return 'gone'
     }
-    if (record.kernelStartedAt === undefined) {
+    const cached = identity.get(record.id)
+    if (cached && elapsedMs() - cached.at < identityTtlMs) {
+      return cached.ours ? 'live' : 'gone'
+    }
+    const row = await host.identify(record.pid)
+    if (row === undefined) {
       // Nothing to compare against, so nothing can be ruled out. Reported as unknown rather
       // than as agreement: the callers read `'gone'` as a confirmed death and everything else
       // as possibly-running, and the two mistakes are not symmetric — a live turn misjudged
       // dead becomes a second `claude` in the same checkout.
       return 'unknown'
     }
-    const cached = identity.get(record.id)
-    if (cached && elapsedMs() - cached.at < identityTtlMs) {
-      return cached.ours ? 'live' : 'gone'
-    }
-    const startedAt = await host.startedAt(record.pid)
-    if (startedAt === undefined) {
+    const ours = ownsPid(record, row)
+    if (ours === undefined) {
       return 'unknown'
     }
-    const ours = startedAt === record.kernelStartedAt
     identity.set(record.id, { ours, at: elapsedMs() })
     return ours ? 'live' : 'gone'
   }
@@ -214,7 +244,16 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
       if (!isSignalablePid(record.pid)) {
         return false
       }
-      if (await liveness(record) === 'gone' && host.signal(record.pid, 0)) {
+      const state = await liveness(record)
+      // An unverified leader is not a licence to signal its group. A group id *is* a leader's
+      // pid, so when the host cannot say whether that pid is still ours, `-pid` may name a
+      // stranger's group — and this call is the one that ends processes. Declining costs an
+      // unconfirmed kill, which the contract already describes: the caller's bounded wait times
+      // out and escalates. Signalling costs someone else's work.
+      if (state === 'unknown') {
+        return false
+      }
+      if (state === 'gone' && host.signal(record.pid, 0)) {
         return false
       }
       return host.signal(-record.pid, signal)

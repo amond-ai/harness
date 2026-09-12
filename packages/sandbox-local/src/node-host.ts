@@ -17,7 +17,8 @@ import { execFile as execFileCallback, spawn } from 'node:child_process'
 import { mkdir, open, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import process from 'node:process'
 import { promisify } from 'node:util'
-import { parsePsTable, parseStartedAt } from './ps-table'
+import { WRAPPER_SHELL } from './journal'
+import { parsePsRow, parsePsTable } from './ps-table'
 
 const execFile = promisify(execFileCallback)
 
@@ -66,7 +67,19 @@ async function readSlice(path: string, offset: number, length?: number): Promise
     // the `Uint8Array` view built over it below would then alias whatever the pool is reused
     // for next — a transcript chunk that changes after it was handed to the caller.
     const buffer = Buffer.alloc(want)
-    const { bytesRead } = await handle.read(buffer, 0, want, offset)
+    // Read until the buffer is full or the file ends. `read()` is permitted to return fewer
+    // bytes than asked for, and a short read here is not a short *answer*: the caller pairs the
+    // bytes with the file's full length, and a follower's next cursor comes from that length —
+    // so the bytes the short read left behind would be skipped rather than served late, and
+    // that part of the transcript would be lost for good.
+    let bytesRead = 0
+    while (bytesRead < want) {
+      const read = await handle.read(buffer, bytesRead, want - bytesRead, offset + bytesRead)
+      if (read.bytesRead === 0) {
+        break
+      }
+      bytesRead += read.bytesRead
+    }
     return { data: new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead), total }
   }
   finally {
@@ -114,10 +127,13 @@ async function processes(): Promise<LocalProcessRow[]> {
   }
 }
 
-async function startedAt(pid: number): Promise<string | undefined> {
+async function identify(pid: number): Promise<LocalProcessRow | undefined> {
   try {
-    const { stdout } = await execFile('ps', ['-p', String(pid), '-o', 'lstart='])
-    return parseStartedAt(stdout)
+    // The same three columns the whole-table read asks for, so one parser serves both — and
+    // `-ww` for the same reason: the wrapper's marker is near the front of a long script, but a
+    // truncated line is one the registry cannot recognise as ours.
+    const { stdout } = await execFile('ps', ['-p', String(pid), '-ww', '-o', 'pid=,lstart=,args='])
+    return parsePsRow(stdout.split('\n')[0] ?? '')
   }
   catch {
     // `ps` exits non-zero when the pid is gone, which is indistinguishable here from `ps` being
@@ -129,7 +145,7 @@ async function startedAt(pid: number): Promise<string | undefined> {
 
 async function spawnDetached(spec: LocalSpawnSpec): Promise<LocalSpawned> {
   return new Promise<LocalSpawned>((resolve, reject) => {
-    const child = spawn('/bin/sh', ['-c', spec.script], {
+    const child = spawn(WRAPPER_SHELL, ['-c', spec.script], {
       cwd: spec.cwd,
       env: spec.env,
       // `detached` is the whole point: it puts the wrapper in a session and process group of
@@ -179,7 +195,7 @@ export function nodeLocalHost(): LocalHost {
     remove: async (path: string) => rm(path, { recursive: true, force: true }),
     spawn: spawnDetached,
     signal,
-    startedAt,
+    identify,
     processes,
   }
 }

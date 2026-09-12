@@ -74,11 +74,26 @@ export function sandboxPaths(layout: SandboxLayout, sandboxId: string): SandboxP
   const root = trimTrailingSlash(layout.root)
   const stateRoot = trimTrailingSlash(layout.stateRoot ?? `${root}/${STATE_DIRECTORY_NAME}`)
   const named = layout.resolveRoot?.(sandboxId)
-  return {
-    work: named === undefined ? `${root}/${sandboxId}` : trimTrailingSlash(named),
-    state: `${stateRoot}/${sandboxId}`,
-    owned: named === undefined,
+  const work = named === undefined ? `${root}/${sandboxId}` : trimTrailingSlash(named)
+  const state = `${stateRoot}/${sandboxId}`
+  // The two must not overlap, and the case that makes this a check rather than a comment is a
+  // `resolveRoot` that lands on the state path: `work` would be marked unowned, `destroy()`
+  // would spare it as promised — and then remove it anyway as bookkeeping, which it may always
+  // do. The consumer's own workspace, deleted by the branch written to protect it. A `state`
+  // that contains `work` fails the same way one step removed. Refused at resolution, where the
+  // ownership decision is already being made, rather than guarded at each removal.
+  if (state === work || contains(state, work)) {
+    throw new Error(
+      `sandbox '${sandboxId}' resolves its working directory '${work}' inside its own state`
+      + ` directory '${state}'; destroy() would remove the working directory as bookkeeping`,
+    )
   }
+  return { work, state, owned: named === undefined }
+}
+
+/** Is `parent` an ancestor of `path`? Both are already trimmed of trailing separators. */
+function contains(parent: string, path: string): boolean {
+  return path.startsWith(`${parent}/`)
 }
 
 /** The directory a resolved path lives in. */

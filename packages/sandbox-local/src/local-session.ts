@@ -140,10 +140,17 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
     const deadline = timeout === undefined ? undefined : startedAt + timeout
     while (true) {
       const exit = await io.readExit(paths)
-      const at = elapsedMs()
-      if (waitOptions?.signal?.aborted === true || (deadline !== undefined && at >= deadline)) {
-        throw new SandboxWaitTimeoutError(record.id, timeout ?? at - startedAt)
-      }
+      // How the process ended is settled *before* the wait's own budget is consulted, and the
+      // order is the whole of it. A rejection here is read as "still running": `killTurn` takes
+      // it as a kill it could not confirm, `materializationExit` as grounds to destroy a clone
+      // and fail a step. Deciding the budget first would let a process that has already exited
+      // — with its code sitting in `exit`, read this same iteration — be reported that way, and
+      // the last poll of every bounded wait is exactly where that lands: `remaining` is capped
+      // at what is left of the budget, so the loop is *designed* to wake at the deadline, and a
+      // process that finished during that sleep would always answer its caller with a false
+      // claim about itself. It also kept `SandboxNoExitRecordError` from ever being reported on
+      // a wait that expired in the same tick, which is the answer that tells a caller not to
+      // wait again.
       if (await isGone(record)) {
         // Re-read once: the wrapper's `printf` lands microseconds before its shell exits, so a
         // read taken just before the liveness check can miss a code that is there by now.
@@ -152,6 +159,10 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
           return settled
         }
         throw new SandboxNoExitRecordError(record.id)
+      }
+      const at = elapsedMs()
+      if (waitOptions?.signal?.aborted === true || (deadline !== undefined && at >= deadline)) {
+        throw new SandboxWaitTimeoutError(record.id, timeout ?? at - startedAt)
       }
       const remaining = deadline === undefined ? pollMs : Math.min(pollMs, deadline - elapsedMs())
       await new Promise(resolve => setTimeout(resolve, Math.max(0, remaining)))
@@ -174,12 +185,26 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
    */
   async function kill(record: ProcessRecord, signal?: number): Promise<void> {
     const sent = signal ?? SIGTERM
-    if (await registry.liveness(record) !== 'gone') {
+    const state = await registry.liveness(record)
+    if (state === 'live') {
       const commandPid = await io.readCommandPid(journalPaths(sandbox.state, record.id))
       if (commandPid !== undefined) {
         host.signal(commandPid, sent)
         return
       }
+    }
+    if (state === 'unknown') {
+      // Nothing is signalled, and it is said out loud. The recorded command pid is only
+      // meaningful while the wrapper is verifiably alive to hold it; with the wrapper's own
+      // identity unconfirmed, that number may belong to anything on the machine by now.
+      // `SandboxProcessHandle.kill` names this case: a backend that cannot deliver a named
+      // signal reports the non-delivery rather than doing nothing silently or reaching for a
+      // harsher one, and leaves the caller's bounded wait to time out and escalate.
+      console.warn(
+        `sandbox-local: kill of '${record.id}' (pid ${String(record.pid)}, signal ${String(sent)})`
+        + ` signalled nothing: the host could not confirm that pid still belongs to this process`,
+      )
+      return
     }
     await registry.signalGroup(record, sent)
   }
@@ -249,7 +274,7 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
         // Read straight after the spawn, before anything can be reused. Absence is tolerated —
         // the record is still worth more than nothing — and `liveness` treats a record without
         // one as unverifiable rather than as verified.
-        kernelStartedAt: await host.startedAt(spawned.pid),
+        kernelStartedAt: (await host.identify(spawned.pid))?.startedAt,
       }
       try {
         await registry.remember(record)

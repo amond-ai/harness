@@ -29,6 +29,31 @@ describe('sandboxPaths', () => {
     })
   })
 
+  it('refuses a working directory that is inside its own state directory', () => {
+    // Marked unowned, so destroy() spares it as the working directory — and then removes it
+    // anyway as bookkeeping, which it may always do. The consumer's own workspace, deleted by
+    // the branch written to protect it.
+    expect(() => sandboxPaths({
+      root: '/sandboxes',
+      resolveRoot: id => `/sandboxes/.state/${id}`,
+    }, 'run-42')).toThrow(/destroy\(\) would remove the working directory/)
+
+    expect(() => sandboxPaths({
+      root: '/sandboxes',
+      stateRoot: '/work',
+      resolveRoot: () => '/work/run-42/repo',
+    }, 'run-42')).toThrow(/destroy\(\) would remove the working directory/)
+  })
+
+  it('allows a state directory that lives inside the working tree', () => {
+    // The other direction is safe: removing state removes only what the provider created.
+    expect(sandboxPaths({
+      root: '/sandboxes',
+      stateRoot: '/work/run-42/.harness',
+      resolveRoot: () => '/work/run-42',
+    }, 'run-42')).toMatchObject({ work: '/work/run-42', owned: false })
+  })
+
   it('refuses an id that would resolve somewhere else', () => {
     for (const id of ['../escape', 'a/b', '', '.state', 'has space']) {
       expect(() => sandboxPaths({ root: '/sandboxes' }, id)).toThrow(/invalid sandbox id/)

@@ -76,6 +76,20 @@ describe.skipIf(!posix)('against a real machine', () => {
     await expect(handle.waitForExit({ timeout: 10_000 })).resolves.toMatchObject({ timedOut: true })
   })
 
+  it('bounds a timeout even when the command leaves a child running', async () => {
+    // Signalling the command alone bounds nothing here: `sh -c 'sleep 30 & wait'` answers
+    // SIGTERM with 143 while its child keeps running in the wrapper's group, and this backend
+    // reads a non-empty group as a live process — correctly — so the caller's wait would carry
+    // on past the deadline it set. The wrapper reaps its own group after recording the exit.
+    const session = providerFor('p-orphan').session('run-orphan')
+    const handle = await session.exec(['sh', '-c', 'sleep 30 & wait'], { timeout: 300 })
+
+    await expect(handle.waitForExit({ timeout: 15_000 })).resolves.toMatchObject({ timedOut: true })
+    // And the process really is over — the orphan went with it, rather than being left to write
+    // to the checkout while the caller believes the turn ended.
+    await expect(handle.status()).resolves.toMatchObject({ state: 'exited' })
+  })
+
   it('delivers a signal to the command while the wrapper lives to record the exit', async () => {
     // A group-wide kill would take the wrapper with it, and the exit would never be written.
     const session = providerFor('p-kill').session('run-kill')

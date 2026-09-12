@@ -36,6 +36,11 @@ export interface LocalProcessRow {
    * Never parsed, only compared: what makes it useful is that a *reused* pid reports a
    * different one, and equality answers that without this package having to agree with `ps`
    * about a date format that differs by platform and locale.
+   *
+   * It is the *weaker* half of the identity check, and measurably so: `ps -o lstart` resolves
+   * to one second on both supported platforms (two processes started in the same second report
+   * the same string, measured 2026-09-13), so a pid recycled inside that second would compare
+   * equal. {@link command} is what settles it — see {@link LocalHost.identify}.
    */
   startedAt: string
   /** The process's command line, joined the way the host's process table renders it. */
@@ -92,8 +97,16 @@ export interface LocalHost {
    * that has exited apart from a child it detached and left running.
    */
   signal: (pid: number, signal: number) => boolean
-  /** The kernel's start time for one pid, or `undefined` when it is gone or unreadable. */
-  startedAt: (pid: number) => Promise<string | undefined>
+  /**
+   * Who holds this pid right now, or `undefined` when it is gone or unreadable.
+   *
+   * Both fields together, from one read, because neither settles the question alone. The start
+   * time is second-resolution, so a pid recycled inside one second compares equal; the command
+   * line carries the wrapper's own marker, which a stranger's does not, so it identifies the
+   * process rather than merely dating it. A host that cannot report the command line still gets
+   * the weaker check rather than none — see `registry.ts`.
+   */
+  identify: (pid: number) => Promise<LocalProcessRow | undefined>
   /** The host's whole process table. Read only by recovery, which has no pid to ask about. */
   processes: () => Promise<LocalProcessRow[]>
 }

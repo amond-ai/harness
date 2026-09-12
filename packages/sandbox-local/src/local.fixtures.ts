@@ -49,7 +49,7 @@ export interface FakeHost {
   signals: { pid: number, signal: number }[]
   table: Map<number, FakeProcess>
   /** Call counts, so a test can pin how often a loop reaches for the process table. */
-  calls: { processes: number, startedAt: number }
+  calls: { processes: number, identify: number }
   /** Put a process in the table by hand — a stranger, or a child the wrapper detached. */
   place: (process: Partial<FakeProcess> & { pid: number }) => void
   /** Remove a process, the way exiting does. */
@@ -66,7 +66,7 @@ export function fakeHost(options: { nextPid?: number } = {}): FakeHost {
   const spawned: LocalSpawnSpec[] = []
   const signals: { pid: number, signal: number }[] = []
   const table = new Map<number, FakeProcess>()
-  const calls = { processes: 0, startedAt: 0 }
+  const calls = { processes: 0, identify: 0 }
   let nextPid = options.nextPid ?? 1000
 
   const fake: FakeHost = {
@@ -159,9 +159,12 @@ export function fakeHost(options: { nextPid?: number } = {}): FakeHost {
         }
         return found
       },
-      startedAt: async (pid: number) => {
-        calls.startedAt++
-        return fake.psWorks ? table.get(pid)?.startedAt : undefined
+      identify: async (pid: number) => {
+        calls.identify++
+        const found = table.get(pid)
+        return fake.psWorks && found
+          ? { pid: found.pid, startedAt: found.startedAt, command: found.command }
+          : undefined
       },
       processes: async (): Promise<LocalProcessRow[]> => {
         calls.processes++
