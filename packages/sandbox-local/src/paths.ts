@@ -81,6 +81,12 @@ export function sandboxPaths(layout: SandboxLayout, sandboxId: string): SandboxP
   }
 }
 
+/** The directory a resolved path lives in. */
+export function parentOf(path: string): string {
+  const at = path.lastIndexOf('/')
+  return at <= 0 ? '/' : path.slice(0, at)
+}
+
 /**
  * A caller's path, resolved inside the sandbox's working directory.
  *

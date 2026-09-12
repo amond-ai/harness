@@ -17,7 +17,10 @@
  * - **files as bytes**, because the journal is read at byte offsets and a string-keyed stub
  *   would hide every cursor bug there is.
  */
+import type { SandboxSession } from '@amond-ai/sandbox'
+import type { LocalSessionOptions } from './local-session'
 import type { LocalHost, LocalProcessRow, LocalSlice, LocalSpawnSpec } from './local-surface'
+import { createLocalSession } from './local-session'
 
 export const ROOT = '/sandboxes'
 export const SANDBOX_ID = 'run-42'
@@ -169,4 +172,18 @@ export function fakeHost(options: { nextPid?: number } = {}): FakeHost {
     },
   }
   return fake
+}
+
+/** A session over the fake, addressing the sandbox {@link SANDBOX_ID} names. */
+export function sessionOver(fake: FakeHost, overrides: Partial<LocalSessionOptions> = {}): SandboxSession {
+  return createLocalSession({
+    host: fake.host,
+    paths: { work: WORK, state: STATE, owned: true },
+    env: { PATH: '/usr/bin' },
+    newProcessId: () => 'p1',
+    now: () => AT,
+    pollIntervalMs: 0,
+    followIntervalMs: 0,
+    ...overrides,
+  })
 }

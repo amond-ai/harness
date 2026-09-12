@@ -16,7 +16,7 @@
 import type { SandboxFileContent, SandboxFiles, SandboxFileStream } from '@amond-ai/sandbox'
 import type { JournalIo } from './journal-io'
 import type { LocalHost } from './local-surface'
-import { resolveWithin } from './paths'
+import { parentOf, resolveWithin } from './paths'
 
 function decode(bytes: Uint8Array, encoding: string | undefined): SandboxFileContent {
   if (encoding === 'base64') {
@@ -76,6 +76,11 @@ export function createLocalFiles(host: LocalHost, io: JournalIo, root: string): 
     readFile,
     writeFile: async (path, content, options) => {
       const resolved = resolveWithin(root, path)
+      // The parent is created first, because both sibling backends create one: e2b's
+      // `files.write` and the Cloudflare client both write a path into a tree that does not
+      // exist yet, and a caller that works on those and fails here with a bare `ENOENT` would
+      // have found a difference between backends where the contract promises none.
+      await host.mkdir(parentOf(resolved))
       if (typeof content !== 'string') {
         // Collected rather than piped: the host surface writes a path in one call, and a
         // streaming write would be a second primitive for the one caller that has none.
