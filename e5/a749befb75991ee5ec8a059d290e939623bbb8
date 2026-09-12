@@ -1,0 +1,93 @@
+packages/harness-claude-code-bridge/scripts/assert-cli-pairing.sh
+  s_1b30189dc4b2a9::t_84f8d8551bf72c 9,57
+packages/harness-claude-code-bridge/tsconfig.json
+  s_1b30189dc4b2a9::t_5bcc2abf371628 2
+packages/harness-claude-code-bridge/vitest.config.ts
+  s_1b30189dc4b2a9::t_bd4d1cf4c7d20e 2
+packages/harness-claude-code/src/cli-turn-kill.ts
+  s_1b30189dc4b2a9::t_452f6f47dccd64 78
+packages/harness-claude-code/src/closure.test.ts
+  s_1b30189dc4b2a9::t_e9888826c8d86e 4-8,32,36,38-39
+packages/harness-claude-code/src/sdk/sdk-turn-driver.ts
+  s_1b30189dc4b2a9::t_cebabccb9c7762 85
+packages/harness-claude-code/tsconfig.json
+  s_1b30189dc4b2a9::t_74aa40d9d0fffa 2
+packages/harness-claude-code/vitest.config.ts
+  s_1b30189dc4b2a9::t_a83362d6fda0a1 2
+packages/harness-protocol/tsconfig.json
+  s_1b30189dc4b2a9::t_96e5225895c4fb 2
+packages/harness-protocol/vitest.config.ts
+  s_1b30189dc4b2a9::t_61657ad52d3458 2
+packages/harness-sandbox/src/process.test.ts
+  s_1b30189dc4b2a9::t_3e1bf839cc7cc1 115
+packages/harness-sandbox/src/process.ts
+  s_1b30189dc4b2a9::t_b6250395c9c293 8
+packages/harness-sandbox/src/provider.ts
+  s_1b30189dc4b2a9::t_f24d6aec430b53 5
+packages/harness-sandbox/src/session.test.ts
+  s_1b30189dc4b2a9::t_4a71f8acc46854 89
+packages/harness-sandbox/src/session.ts
+  s_1b30189dc4b2a9::t_f8e109a2f5c479 18
+packages/harness-sandbox/tsconfig.json
+  s_1b30189dc4b2a9::t_31a41921ca44bb 2
+packages/harness-sandbox/vitest.config.ts
+  s_1b30189dc4b2a9::t_dc4ba304ba66d1 2
+packages/harness-transport-cloudflare/tsconfig.json
+  s_1b30189dc4b2a9::t_6204a218140015 2
+packages/harness-transport-cloudflare/vitest.config.ts
+  s_1b30189dc4b2a9::t_05e577314ed527 2
+packages/harness-transport/src/upgrade.test.ts
+  s_1b30189dc4b2a9::t_e9c12f75ee6cf5 97
+packages/harness-transport/src/upgrade.ts
+  s_1b30189dc4b2a9::t_db486ffed3e378 83
+packages/harness-transport/tsconfig.json
+  s_1b30189dc4b2a9::t_fe40c1915aca8a 2
+packages/harness-transport/vitest.config.ts
+  s_1b30189dc4b2a9::t_d50cd5c692cf04 2
+packages/redact/tsconfig.json
+  s_1b30189dc4b2a9::t_975ecdc07c83a3 2
+packages/redact/vitest.config.ts
+  s_1b30189dc4b2a9::t_d08df0d5daf38b 2
+packages/sandbox-daytona/src/provider.test.ts
+  s_1b30189dc4b2a9::t_9d214942d21dec 350
+packages/sandbox-daytona/src/provider.ts
+  s_1b30189dc4b2a9::t_393ec0cdda1ae8 434
+packages/sandbox-daytona/tsconfig.json
+  s_1b30189dc4b2a9::t_4772cb3afa73e4 2
+packages/sandbox-daytona/vitest.config.ts
+  s_1b30189dc4b2a9::t_8d14cdcf30fe69 2
+packages/sandbox-e2b/README.md
+  s_1b30189dc4b2a9::t_0b0e52622a52a6 54,56,59
+packages/sandbox-e2b/scripts/build-template.ts
+  s_1b30189dc4b2a9::t_ea6464c41d707c 12,16
+packages/sandbox-e2b/scripts/check-template.ts
+  s_1b30189dc4b2a9::t_67040a1bd17e09 5
+packages/sandbox-e2b/src/provider.test.ts
+  s_1b30189dc4b2a9::t_430889c0e5258d 145
+packages/sandbox-e2b/src/provider.ts
+  s_1b30189dc4b2a9::t_fdd7078cd65600 285
+packages/sandbox-e2b/tsconfig.json
+  s_1b30189dc4b2a9::t_76b795c4c67438 2
+packages/sandbox-e2b/vitest.config.ts
+  s_1b30189dc4b2a9::t_00fd30bcab3f0c 2
+packages/sandbox/tsconfig.json
+  s_1b30189dc4b2a9::t_51d17895bfb8e2 2
+packages/sandbox/vitest.config.ts
+  s_1b30189dc4b2a9::t_d17132c84f94b2 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "e5a749befb75991ee5ec8a059d290e939623bbb8",
+  "prompts": {},
+  "sessions": {
+    "s_1b30189dc4b2a9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a624a0-ca2b-44b7-ae21-69443b770ba1",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
