@@ -1,0 +1,76 @@
+packages/sandbox-local/src/local.fixtures.ts
+  s_86f5abf516419a::t_3f3b4b265fdac6 188-191,196
+  s_86f5abf516419a::t_8dbc89087f2c30 111-116
+packages/sandbox-local/src/registry.ts
+  s_86f5abf516419a::t_9a84a43649d33d 106-120
+  s_86f5abf516419a::t_b6ac627be872e8 229-237
+  s_86f5abf516419a::t_e8933063885f00 159,162-164,178-185
+packages/sandbox-local/src/log-replay.ts
+  s_86f5abf516419a::t_0ce201af062e09 47-53,61-67,70-75
+packages/sandbox-local/src/shell-quote.ts
+  s_86f5abf516419a::t_a252066fe3d674 14-26,41
+packages/sandbox-local/src/journal-io.ts
+  s_86f5abf516419a::t_309fa41048ee19 76-83
+  s_86f5abf516419a::t_a856778b7b9760 85-92
+  s_86f5abf516419a::t_e1ec74ccaa0414 22-32,49,51-58,63-67
+packages/sandbox-local/src/local.real.test.ts
+  s_86f5abf516419a::t_b403fbf2481bd3 14
+  s_86f5abf516419a::t_dd9ced284588ff 64-71,77
+packages/sandbox-local/src/shell-quote.test.ts
+  s_86f5abf516419a::t_c209178e29e2de 19-26
+packages/sandbox-local/src/journal.ts
+  s_86f5abf516419a::t_e1ec74ccaa0414 61,63-68,142,147,149-151,157-158,161-162,175-176,190-191,217-221,346,348-355
+  s_86f5abf516419a::t_2a33f8e9956add 137,202,207,230
+  s_86f5abf516419a::t_5fe763a296ab2c 148,152-156,159-160,163-174
+  s_86f5abf516419a::t_48ac10858f4845 177-178
+  s_86f5abf516419a::t_bec1ae55fd1dd0 120-121
+  s_86f5abf516419a::t_c20d9d2be7add4 62
+  s_86f5abf516419a::t_681a9aedc63d4c 179-180
+packages/sandbox-local/src/local-session.logs.test.ts
+  s_86f5abf516419a::t_e95f886372ba93 50-82
+packages/sandbox-local/src/registry.test.ts
+  s_86f5abf516419a::t_ee805d3cc300d3 246-253
+  s_86f5abf516419a::t_6f4033895a88ca 103-106,109,113-141,145
+packages/sandbox-local/src/log-reads.ts
+  s_86f5abf516419a::t_478a32b86e50de 164-188
+packages/sandbox-local/src/local-session.process.test.ts
+  s_86f5abf516419a::t_2004ee8281dfe7 165-180
+  s_86f5abf516419a::t_84b34b7aba0e59 53-65
+packages/sandbox-local/src/provider.test.ts
+  s_86f5abf516419a::t_aab516ce1b9927 79-89
+packages/sandbox-local/src/node-host.ts
+  s_86f5abf516419a::t_6b79c24bd659cf 27-32
+  s_86f5abf516419a::t_d1ff94a0322bb8 35-42,44-45
+  s_86f5abf516419a::t_2a6765c3ca731d 148-154
+packages/sandbox-local/src/journal.test.ts
+  s_86f5abf516419a::t_9cc973c478c6f7 39,43,47-50
+  s_86f5abf516419a::t_77849a89484972 189
+  s_86f5abf516419a::t_e1ec74ccaa0414 34-35,40-42,44-46,51-52,56,76-79,176-188
+packages/sandbox-local/src/provider.ts
+  s_86f5abf516419a::t_50874620d3ea83 82-94
+  s_86f5abf516419a::t_d3d8fe875e666e 175
+packages/sandbox-local/src/local-session.ts
+  s_86f5abf516419a::t_3e1d0d50d7d07b 44-55
+  s_86f5abf516419a::t_9a4339460ab8f6 263,266-268
+  s_86f5abf516419a::t_89caf327c3ff1c 231,233,237,240
+  s_86f5abf516419a::t_cc53f9e9a0748f 232,234-236,238-239,241,244-245
+  s_86f5abf516419a::t_ccbba84c60316d 340,342-348
+  s_86f5abf516419a::t_4e25b985a1c6ef 400,402-418
+  s_86f5abf516419a::t_cf3afb2af0a33a 198-226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "934002d9f9913fbf2e68032b03ae966b44d1b759",
+  "prompts": {},
+  "sessions": {
+    "s_86f5abf516419a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "136baca2-af61-40fb-916b-7cf988dd2170",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
