@@ -1,5 +1,7 @@
 # harness
 
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+
 Run an agent harness inside an isolated sandbox, from any JavaScript runtime.
 
 `harness` is a set of TypeScript packages that start one Claude Code turn in a sandbox, watch
@@ -10,17 +12,17 @@ runs through the Agent SDK in a small host process inside the sandbox, so the ca
 typed result, can interrupt a turn cleanly, and can answer a tool approval or send a message
 while the turn is running.
 
-The code is being extracted from
-[chatbot-pf/pleaseworks](https://github.com/chatbot-pf/pleaseworks), where it runs in
-production behind a Cloudflare Workflows run loop. Until the move lands, the sources live there
-under `packages/`; this repository holds the packages once they are lifted out.
+The code is being extracted from software-factory, an internal PassionFactory project, where
+it runs in production behind a Cloudflare Workflows run loop. Until the move lands, the
+sources live there under `packages/`; this repository holds the packages once they are lifted
+out.
 
 ## Packages
 
 | Package | Runs where | What it does |
 | --- | --- | --- |
 | `@amond-ai/harness-claude-code` | the orchestrator | The `TurnDriver` seam and both Claude Code drivers: `sdk` (drives the turn host over the bridge socket, one bounded attach round at a time) and `cli` (execs `claude -p` in the sandbox and watches its log cursor). Runtime-neutral. |
-| `@amond-ai/harness-claude-code-host` | inside the sandbox image | The per-turn Node process that hosts the Agent SDK `query()` and serves the orchestrator over a WebSocket with a sequence-numbered, disk-first journal. A fork of Vercel's `@ai-sdk/harness-claude-code` bridge (Apache-2.0). |
+| `@amond-ai/harness-claude-code-bridge` | inside the sandbox image | The per-turn Node process that hosts the Agent SDK `query()` and serves the orchestrator over a WebSocket with a sequence-numbered, disk-first journal. A fork of Vercel's `@ai-sdk/harness-claude-code` bridge (Apache-2.0). |
 | `@amond-ai/harness-protocol` | both | The bridge wire schema: every frame the host emits and the orchestrator sends, as zod schemas. |
 | `@amond-ai/harness-transport` | the orchestrator | The `WsLike` socket shape, the upgrade headers, and a socket opener built on the standard `WebSocket` constructor. Deno, Node 22+, Bun, and browsers dial with this. |
 | `@amond-ai/harness-transport-cloudflare` | Cloudflare Workers | The opener for a Cloudflare Sandbox, whose ports are private and reached through `Sandbox.wsConnect`, plus the workerd `fetch` upgrade path. |
@@ -37,7 +39,7 @@ without a rewrite.
 ```text
 orchestrator (any JS runtime)                  sandbox (e2b, Cloudflare, ...)
 ┌──────────────────────────────┐               ┌──────────────────────────────┐
-│ TurnDriver.start(turn)  ───── exec ─────────▶ │ harness-claude-code-host     │
+│ TurnDriver.start(turn)  ───── exec ─────────▶ │ harness-claude-code-bridge   │
 │   waits for bridge-ready     │               │   query() from the Agent SDK │
 │ TurnDriver.awaitRound(...) ── WebSocket ────▶ │   ws server, token-gated     │
 │   frames in, commands out    │ ◀── frames ── │   event-log.ndjson (seq)     │
@@ -106,7 +108,9 @@ const handle = await driver.start({
 let previous
 for (let round = 0; ; round++) {
   const state = await driver.awaitRound(handle, { config, mirror: undefined, round, previous })
-  if (state.outcome) break
+  if (state.outcome) {
+    break
+  }
   previous = state
 }
 ```
@@ -145,7 +149,7 @@ in argv on the `sdk` path.
 
 ## Status
 
-Pre-1.0. The packages are exercised by the pleaseworks orchestrator on Cloudflare with e2b
+Pre-1.0. The packages are exercised by the software-factory orchestrator on Cloudflare with e2b
 and Cloudflare Sandbox backends. Vercel Sandbox, Docker, and local-process providers, and a
 harness-neutral core package, are planned once a second harness exists.
 
@@ -162,9 +166,17 @@ The host bundle for the sandbox image is built with `bun build` targeting Node; 
 build asserts that `claude --version` equals the Agent SDK's bundled version and fails on a
 mismatch.
 
+## Contributing
+
+Bugs go to [Issues](https://github.com/amond-ai/harness/issues/new/choose); feature proposals go
+to [Discussions](https://github.com/amond-ai/harness/discussions/categories/ideas). See
+[CONTRIBUTING.md](./CONTRIBUTING.md) for the setup, commit, and pull-request process, and
+[CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) for community standards. Report vulnerabilities
+privately through [SECURITY.md](./SECURITY.md), not a public issue.
+
 ## License
 
-Apache-2.0. `harness-claude-code-host` and `harness-protocol` contain code derived from
+Apache-2.0. `harness-claude-code-bridge` and `harness-protocol` contain code derived from
 [vercel/ai](https://github.com/vercel/ai) (`@ai-sdk/harness-claude-code`, `@ai-sdk/harness`),
 Apache-2.0; the exact upstream commit and the patches carried on top are listed in each
 package's `UPSTREAM.md`.
