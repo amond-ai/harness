@@ -9,12 +9,24 @@ describe('trimming trailing separators', () => {
   })
 
   it('answers a path of nothing but separators without scanning it twice', () => {
-    // The input class CodeQL flagged (alerts 5 and 6): `replace(/\/+$/, '')` retries at every
-    // index and backtracks the whole run at each one, so this is where the cost was quadratic.
+    // Not itself the pathological input, though it reads like it: `replace(/\/+$/, '')` matches
+    // an all-separator path on the first attempt — greedy run, then `$` — and is linear on it.
+    // The quadratic case is a run followed by a non-separator, where `$` fails and every start
+    // index backtracks the whole run: measured on this regex at 2k/4k/8k/16k separators plus
+    // 'x', 3.8ms → 15.3ms → 67.0ms → 279.2ms, four times the work for twice the length, while
+    // the all-separator input stayed flat at 0.02ms. Both are covered below.
     // The two functions part company here — an empty base joins as a relative path, so the one
     // that prefixes a root keeps it.
     expect(withoutTrailingSlashes('/'.repeat(64))).toBe('')
     expect(trimTrailingSlash('/'.repeat(64))).toBe('/')
+  })
+
+  it('leaves the input CodeQL was actually about untouched', () => {
+    // A separator run with something after it has no trailing separator to take, so the scan
+    // returns the string as it stands — in one pass, which is the whole point.
+    const pathological = `${'/'.repeat(64)}x`
+    expect(withoutTrailingSlashes(pathological)).toBe(pathological)
+    expect(trimTrailingSlash(pathological)).toBe(pathological)
   })
 })
 

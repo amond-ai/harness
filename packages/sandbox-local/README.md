@@ -145,8 +145,11 @@ Process groups, signal numbers and `ps` all mean something specific here, and Wi
 equivalent for any of the three. macOS and Linux are supported; the real-machine suite
 (`src/local.real.test.ts`) skips itself elsewhere rather than pretending.
 
-`src/node-host.ts` is the only module that imports a `node:` builtin, and it uses specifiers
-rather than any one engine's API, so it runs on Node, Bun and Deno alike. Everything else in
-the package is written against the structural `LocalHost` surface it satisfies — which is what
-makes pid reuse, a lost record and an orphaned child testable at all, and what
-`closure.test.ts` asserts on every run.
+`src/node-host.ts` is the only *shipped* module that imports a `node:` builtin, and it uses
+specifiers rather than any one engine's API, so it runs on Node, Bun and Deno alike. Everything
+else in the package is written against the structural `LocalHost` surface it satisfies — which
+is what makes pid reuse, a lost record and an orphaned child testable at all, and what
+`closure.test.ts` asserts on every run. The real-machine suite is the exception the qualifier
+is for: `src/local.real.test.ts` imports `node:fs/promises`, `node:os`, `node:path` and
+`node:process` to build the temp directories it drives a real `/bin/sh` in. It is a test, so
+`closure.test.ts` never scans it — the claim above is about what a consumer installs.
