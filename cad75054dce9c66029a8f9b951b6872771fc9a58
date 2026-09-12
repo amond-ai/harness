@@ -1,0 +1,19 @@
+README.md
+  s_e75b99a2757750::t_2c63b0246371e5 1-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "cad75054dce9c66029a8f9b951b6872771fc9a58",
+  "prompts": {},
+  "sessions": {
+    "s_e75b99a2757750": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e9a44dcc-3300-44aa-8533-82ac37ad799a",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
