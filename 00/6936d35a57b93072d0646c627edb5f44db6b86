@@ -1,0 +1,76 @@
+packages/sandbox-local/src/index.ts
+  s_86f5abf516419a::t_51b2525e1baa91 1-45
+packages/sandbox-local/src/paths.ts
+  s_86f5abf516419a::t_194e36fee962f4 1-119
+packages/sandbox-local/src/ps-table.ts
+  s_86f5abf516419a::t_1deccbe702a5e5 14
+  s_86f5abf516419a::t_995009b4a059e1 1-13,15-50
+packages/sandbox-local/src/journal.test.ts
+  s_86f5abf516419a::t_96e8ca01b35ac4 46-48
+  s_86f5abf516419a::t_0e8c5fd98a333e 1-45,49-111
+packages/sandbox-local/src/log-reads.ts
+  s_86f5abf516419a::t_b85c5f3c0cebaa 1-70,72-75,80-245
+  s_86f5abf516419a::t_1deccbe702a5e5 71,76-79
+packages/sandbox-local/src/shell-quote.ts
+  s_86f5abf516419a::t_03eb5b98ebf359 1-75
+packages/sandbox-local/src/local-surface.ts
+  s_86f5abf516419a::t_2109c0a9cc1080 1-99
+packages/sandbox-local/package.json
+  s_86f5abf516419a::t_840fe955bfdaca 1-28
+packages/sandbox-local/src/journal-io.ts
+  s_86f5abf516419a::t_b67fe7039fce82 25-26,54-61
+  s_86f5abf516419a::t_70235326569959 1-24,27-53,62-64,66-80
+  s_86f5abf516419a::t_ff9ba0ee793b98 65
+packages/sandbox-local/src/node-host.ts
+  s_86f5abf516419a::t_712029760f4cb7 1-14,16-185
+  s_86f5abf516419a::t_1deccbe702a5e5 15
+packages/sandbox-local/src/provider.ts
+  s_86f5abf516419a::t_51b2525e1baa91 1-31,33-139
+  s_86f5abf516419a::t_ff9ba0ee793b98 32
+packages/sandbox-local/src/local-files.ts
+  s_86f5abf516419a::t_b6afd0712b2552 1-96
+packages/sandbox-local/src/registry.ts
+  s_86f5abf516419a::t_a2fbab2b4e5dc5 32-43,110-112,207,214-216
+  s_86f5abf516419a::t_4249ad801ea31a 1-31,44-64,75-81,86-87,102-103,108-109,113,117-124,129-130,137-169,171-185,187-206,208-212,222-224,233-252
+  s_86f5abf516419a::t_c2becb3b9c5aa1 82-85,88-101,104-107,114-116,125-128,131-136
+  s_86f5abf516419a::t_64e351fd866a3e 170,186,225-232
+  s_86f5abf516419a::t_c88a811167d97b 65-74,213,217-221
+packages/sandbox-local/src/local.fixtures.ts
+  s_86f5abf516419a::t_62faa1e68c67a0 1-172
+packages/sandbox-local/src/paths.test.ts
+  s_86f5abf516419a::t_34584acc4797c7 1-61
+packages/sandbox-local/src/ps-table.test.ts
+  s_86f5abf516419a::t_34584acc4797c7 1-37
+packages/sandbox-local/src/shell-quote.test.ts
+  s_86f5abf516419a::t_34584acc4797c7 1-38
+packages/sandbox-local/src/local-session.ts
+  s_86f5abf516419a::t_a2fbab2b4e5dc5 187-205
+  s_86f5abf516419a::t_3c1026d98d7ef8 1-186,206-330
+packages/sandbox-local/vitest.config.ts
+  s_86f5abf516419a::t_840fe955bfdaca 1-10
+packages/sandbox-local/src/log-replay.ts
+  s_86f5abf516419a::t_4d9c9926d3bb5f 1-61
+packages/sandbox-local/src/journal.ts
+  s_86f5abf516419a::t_5bb6760403edf2 2-3,9,15,25-36,43-54,69,75-78,80-86,88-90,92,95-125,127-141,155,159-163,166-167,170-172,175-176,179-181,184-185,235-236
+  s_86f5abf516419a::t_26b755707e1c88 1,4-8,10-14,16-24,37-42,55-68,70-74,79,87,91,93-94,126,142-154,156-158,164-165,168-169,173-174,177-178,182-183,186-234,237-245
+packages/sandbox-local/tsconfig.json
+  s_86f5abf516419a::t_840fe955bfdaca 1-9
+bun.lock
+  s_86f5abf516419a::t_452cb8cc6f48fa 169-182,238-239
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "006936d35a57b93072d0646c627edb5f44db6b86",
+  "prompts": {},
+  "sessions": {
+    "s_86f5abf516419a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "136baca2-af61-40fb-916b-7cf988dd2170",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
