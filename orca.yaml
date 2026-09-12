@@ -1,0 +1,17 @@
+# orca.yaml — Orca worktree 생성 시 실행되는 setup 스크립트
+# 상세: Skill("standards:dev-tooling") → references/worktree-setup.md
+#
+# 환경 변수:
+#   $ORCA_ROOT_PATH     — 메인 체크아웃(루트 저장소) 경로 (복사 원본)
+#   $ORCA_WORKTREE_PATH — 새로 생성된 worktree 경로 (복사 대상)
+#
+# ⚠️ bun 워크스페이스 모노레포이므로 node_modules는 공유하지 않는다.
+# 워크스페이스 링크가 상대 symlink라 공유 트리에서는 메인 체크아웃의 소스로 해석된다.
+
+scripts:
+  setup: |
+    set -e
+    mise trust --quiet
+    mise install
+    mise exec -- bunx @pleaseai/worktreeinclude "$ORCA_ROOT_PATH" "$ORCA_WORKTREE_PATH"
+    mise exec -- bun install

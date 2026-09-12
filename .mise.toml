@@ -1,18 +1,7 @@
 [tools]
-bun = "1.4.0"
+bun = "1.4.2"
 node = "24"
 
 [tasks.setup]
 description = "Initialize project (dependencies + git hooks)"
-run = "bun install && mise generate git-pre-commit --write"
-
-[tasks.pre-commit]
-description = "Block direct commits to main"
-run = '''
-branch=$(git rev-parse --abbrev-ref HEAD)
-if [ "$branch" = "main" ]; then
-  echo "Direct commits to main branch are not allowed." >&2
-  echo "Please create a feature branch and submit a PR." >&2
-  exit 1
-fi
-'''
+run = "bun install"

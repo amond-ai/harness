@@ -1,0 +1,18 @@
+# .worktreeinclude — worktree로 복사할 gitignored 파일 목록
+# 문법은 .gitignore와 동일하며, 패턴에 매칭되고 동시에 git이 ignore하는 파일만 복사된다.
+# 상세: Skill("standards:dev-tooling") → references/worktree-setup.md
+
+# 루트 환경 변수
+.env
+.env.local
+.env.*.local
+
+# 워크스페이스 패키지별 환경 변수 (한 단계 매칭)
+packages/*/.env
+packages/*/.env.local
+
+# Claude Code 로컬 설정 (permissions, env, 텔레메트리 라벨)
+.claude/settings.local.json
+
+# Turborepo 원격 캐시 팀 링크 (.turbo/cache 등 로컬 캐시는 제외)
+.turbo/config.json

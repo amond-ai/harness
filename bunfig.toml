@@ -1,0 +1,4 @@
+# bunfig.toml — PassionFactory 표준 bun 설정
+[install]
+# node_modules 호환성 (Turborepo/일부 툴이 요구)
+linker = "hoisted"
