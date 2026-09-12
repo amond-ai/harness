@@ -44,6 +44,30 @@ describe('createLocalProvider', () => {
     expect(fake.files.has(`${ROOT}/shared-bootstrap/node`)).toBe(true)
   })
 
+  it('stops caching a sandbox it has destroyed', async () => {
+    // A provider outlives its sandboxes — made once at launch, asked for a session per turn —
+    // so a map that only grew would hold a registry and an identity cache for every id the app
+    // had ever used, all of them naming directories that are no longer there.
+    const fake = fakeHost()
+    const provider = createLocalProvider({ root: ROOT, host: fake.host })
+    const first = provider.session('run-42')
+    await first.destroy()
+    expect(provider.session('run-42')).not.toBe(first)
+  })
+
+  it('stops caching it even when the destroy failed', async () => {
+    // The one path that would otherwise leak for good — and a half-torn-down sandbox is exactly
+    // when the cached session's memory of the disk is worth the least.
+    const fake = fakeHost()
+    const provider = createLocalProvider({ root: ROOT, host: fake.host })
+    const first = provider.session('run-42')
+    fake.host.remove = async () => {
+      throw new Error('EBUSY')
+    }
+    await expect(first.destroy()).rejects.toThrow('EBUSY')
+    expect(provider.session('run-42')).not.toBe(first)
+  })
+
   it('answers a port with the loopback address, in the scheme it was asked for', async () => {
     // The opposite of the e2b backend's default, for the same reason: there is no TLS edge in
     // front of a loopback port, so upgrading the request could only produce a dead URL.

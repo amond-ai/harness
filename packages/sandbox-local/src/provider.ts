@@ -90,6 +90,11 @@ export function createLocalProvider(options: LocalProviderOptions): SandboxProvi
    * is no round trip to save. It is the registry's identity cache that wants to survive: a
    * fresh session per call would re-read the process table for every liveness question, and
    * the orchestrator asks one per workflow step.
+   *
+   * Held until the sandbox is destroyed, and no longer. A provider outlives any one sandbox —
+   * in a desktop app it is made once at launch and asked for a session per turn — so a map
+   * that only ever grew would keep a registry, an identity cache and a closed-over path set
+   * alive for every id the app had ever used, none of which name anything on disk any more.
    */
   const sessions = new Map<string, SandboxSession>()
 
@@ -111,8 +116,29 @@ export function createLocalProvider(options: LocalProviderOptions): SandboxProvi
         followIntervalMs: options.followIntervalMs,
         identityTtlMs: options.identityTtlMs,
       })
-      sessions.set(sandboxId, created)
-      return created
+      /**
+       * The session, with the cache's own release attached to the contract's release call.
+       *
+       * Wrapped here rather than handed to the session as a callback because the map is this
+       * file's: a session has no cache to know about. `finally`, and deliberately — a
+       * `destroy()` that threw part way through is precisely when the cached session's memory
+       * of the sandbox has stopped matching the disk, so keeping it would serve a stale
+       * registry to the next caller *and* make the leak permanent on the one path that leaks.
+       * Re-deriving from disk on the next `session()` call costs a path resolution.
+       */
+      const session: SandboxSession = {
+        ...created,
+        destroy: async () => {
+          try {
+            await created.destroy()
+          }
+          finally {
+            sessions.delete(sandboxId)
+          }
+        },
+      }
+      sessions.set(sandboxId, session)
+      return session
     },
     /**
      * Where a port inside the sandbox can be reached — which is simply where it is.
