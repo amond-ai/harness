@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # GitHub Actions only.
+  #
+  # The JavaScript ecosystem is deliberately absent: this repository's `bun.lock` is
+  # `lockfileVersion: 2`, and Dependabot's updater hardcodes
+  # `MAX_SUPPORTED_LOCKFILE_VERSION = 1`, so a `bun` entry would fail every run. Most
+  # dependencies here are declared through bun workspace `catalog:` specifiers, which
+  # neither Dependabot nor Renovate resolves today — bump those in `package.json`'s
+  # `catalog` block by hand.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    labels:
+      - dependencies
