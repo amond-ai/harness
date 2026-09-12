@@ -17,7 +17,7 @@ host. Most runtimes need neither package — `createStandardSocketOpener()` from
 - **`cli`** — the `claude` CLI exec'd in the container, watched by sampling its log cursor and
   stopped with SIGINT escalating to the backend's kill. It waits once (`mode: 'single'`,
   `await`), racing the process's exit against a liveness watchdog.
-- **`sdk`** — the Agent SDK turn host (`@amond-ai/harness-claude-code-host`), attached to over a WebSocket for
+- **`sdk`** — the Agent SDK turn host (`@amond-ai/harness-claude-code-bridge`), attached to over a WebSocket for
   one bounded round at a time (`mode: 'rounds'`, `awaitRound`), so a six-hour turn stays under a
   per-step CPU meter and an eviction costs one round rather than the turn.
 
@@ -97,7 +97,7 @@ whole set depends only on itself plus external (catalog) dependencies:
 | `@amond-ai/harness-transport` | The `WsLike` socket shape, the upgrade handshake, and the standard-`WebSocket` opener. |
 | `@amond-ai/harness-transport-cloudflare` | The opener a Worker needs instead, because a Sandbox port is private. |
 | `@amond-ai/redact` | Credential masking, applied to every diagnostic any of this emits. |
-| `@amond-ai/harness-claude-code-host` | The process the `sdk` driver drives, running inside the sandbox image. |
+| `@amond-ai/harness-claude-code-bridge` | The process the `sdk` driver drives, running inside the sandbox image. |
 | `@amond-ai/sandbox-e2b` | One backend satisfying `@amond-ai/sandbox`, so the set is runnable off Cloudflare. |
 
 Nothing in the set may depend on `apps/*`, `@pleaseai/agent-core`, `@pleaseai/sandbox-bridge`,
@@ -105,7 +105,7 @@ Nothing in the set may depend on `apps/*`, `@pleaseai/agent-core`, `@pleaseai/sa
 every run. External dependencies are unconstrained — `harness-transport-cloudflare` keeps
 `@cloudflare/sandbox` and `sandbox-e2b` keeps `e2b`, both of which travel with their manifests.
 Runtime coupling is constrained, though: only `harness-transport-cloudflare` and
-`harness-claude-code-host` may name a runtime, and the same test holds every other member to no
+`harness-claude-code-bridge` may name a runtime, and the same test holds every other member to no
 `@cloudflare/*` dependency and no `cloudflare:`/`node:`/`bun:` import.
 
 Everything Pleaseworks-specific stays in `apps/cf-orchestrator` and arrives through the

@@ -1,5 +1,5 @@
 {
-  "name": "@amond-ai/harness-claude-code-host",
+  "name": "@amond-ai/harness-claude-code-bridge",
   "type": "module",
   "version": "0.1.0",
   "private": true,

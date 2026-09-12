@@ -14,7 +14,7 @@
  *
  * The third assertion is the one the transport split exists to keep true. Only two members are
  * allowed to know what they run on: `harness-transport-cloudflare`, whose whole subject is
- * workerd, and `harness-claude-code-host`, which is a Node process inside the sandbox image.
+ * workerd, and `harness-claude-code-bridge`, which is a Node process inside the sandbox image.
  * Every other member has to run wherever a `WebSocket` and a `fetch` do — that is what makes the
  * driver usable off Cloudflare — so a `@cloudflare/*` dependency or a `cloudflare:`/`node:`/`bun:`
  * import in one of them is the regression, and it is the kind that typechecks perfectly until
@@ -35,7 +35,7 @@ const PACKAGES = join(dirname(fileURLToPath(import.meta.url)), '../..')
 /** Each member's directory, which is not always its unscoped name — `sandbox` is `@amond-ai/sandbox`. */
 const CLOSED_SET = [
   'harness-claude-code',
-  'harness-claude-code-host',
+  'harness-claude-code-bridge',
   'harness-transport',
   'harness-transport-cloudflare',
   'harness-protocol',
@@ -47,7 +47,7 @@ const CLOSED_SET = [
 ] as const
 
 /** The two members whose subject *is* a runtime: workerd, and the Node process in the image. */
-const RUNTIME_SPECIFIC = new Set<string>(['harness-transport-cloudflare', 'harness-claude-code-host'])
+const RUNTIME_SPECIFIC = new Set<string>(['harness-transport-cloudflare', 'harness-claude-code-bridge'])
 
 /**
  * The one `@pleaseai` name allowed inside the set: the shared ESLint config, which is a published
