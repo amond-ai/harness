@@ -51,12 +51,12 @@ Build it by hand only when CI cannot — the same two scripts, from a machine th
 ```sh
 # The image is private, so e2b's builder needs a GHCR login of its own.
 infisical run --silent -- env GHCR_USERNAME=<login> GHCR_TOKEN=<read:packages token> \
-  E2B_TEMPLATE_ALIAS=pleaseworks-candidate bun packages/sandbox-e2b/scripts/build-template.ts
+  E2B_TEMPLATE_ALIAS=pleaseworks-candidate bun packages/amond-ai/sandbox-e2b/scripts/build-template.ts
 infisical run --silent -- env E2B_TEMPLATE=pleaseworks-candidate \
-  bun packages/sandbox-e2b/scripts/check-template.ts
+  bun packages/amond-ai/sandbox-e2b/scripts/check-template.ts
 # Promote only once the candidate has passed.
 infisical run --silent -- env E2B_TEMPLATE_ALIAS=pleaseworks \
-  E2B_TEMPLATE_FROM=pleaseworks-candidate bun packages/sandbox-e2b/scripts/build-template.ts
+  E2B_TEMPLATE_FROM=pleaseworks-candidate bun packages/amond-ai/sandbox-e2b/scripts/build-template.ts
 ```
 
 | Variable | Default | Read by |

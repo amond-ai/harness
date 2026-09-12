@@ -9,11 +9,11 @@
  * ```sh
  * # From the published image. Private, so e2b's builder needs a GHCR login of its own.
  * infisical run --silent -- env GHCR_USERNAME=<login> GHCR_TOKEN=<read:packages token> \
- *   E2B_TEMPLATE_ALIAS=pleaseworks-candidate bun packages/sandbox-e2b/scripts/build-template.ts
+ *   E2B_TEMPLATE_ALIAS=pleaseworks-candidate bun packages/amond-ai/sandbox-e2b/scripts/build-template.ts
  *
  * # Promote: repoint the live alias at a candidate that has already booted. No registry.
  * infisical run --silent -- env E2B_TEMPLATE_ALIAS=pleaseworks \
- *   E2B_TEMPLATE_FROM=pleaseworks-candidate bun packages/sandbox-e2b/scripts/build-template.ts
+ *   E2B_TEMPLATE_FROM=pleaseworks-candidate bun packages/amond-ai/sandbox-e2b/scripts/build-template.ts
  * ```
  *
  * The alias it prints is what `E2B_TEMPLATE` in `apps/cf-orchestrator/wrangler.jsonc` must

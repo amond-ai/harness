@@ -347,7 +347,7 @@ describe('createDaytonaProvider', () => {
   })
 
   /**
-   * `packages/sandbox/src/types.ts` gives `exists` the job of booting and calls
+   * `packages/amond-ai/sandbox/src/types.ts` gives `exists` the job of booting and calls
    * `getProcess`/`listProcesses` non-waking discovery that answers from cold state. Recovery asks
    * them about a run it may never have started, so acquiring here would create a billable sandbox
    * purely to be told nothing is running in it (Codex review, PR #463).

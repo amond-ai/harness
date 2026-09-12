@@ -2,7 +2,7 @@
  * A {@link HarnessV1SandboxProvider} over any {@link SandboxProvider}.
  *
  * Written once, over the contract, it serves every backend at once — which is what
- * `packages/sandbox/src/types.ts` says of this translation when it explains why the
+ * `packages/amond-ai/sandbox/src/types.ts` says of this translation when it explains why the
  * file surface is declared in Cloudflare's shape rather than the harness's: "the harness's
  * own shape is a further translation, and it belongs in the harness provider — written once,
  * over the contract, for every backend at once." This is that file.

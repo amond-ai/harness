@@ -431,7 +431,7 @@ function lazySession(options: LazySessionOptions): SandboxSession {
     /**
      * Discovery, which the contract says must not wake anything.
      *
-     * `packages/sandbox/src/types.ts` names `getProcess`/`listProcesses` non-waking calls that
+     * `packages/amond-ai/sandbox/src/types.ts` names `getProcess`/`listProcesses` non-waking calls that
      * answer from cold state, and gives `exists` the job of booting — so routing these two through
      * the acquisition would break the contract twice over on this backend: recovery asking whether
      * a stale turn is still there would *create* a billable sandbox merely to be told `null`, and

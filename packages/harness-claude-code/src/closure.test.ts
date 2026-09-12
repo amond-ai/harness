@@ -1,11 +1,12 @@
 /**
  * The seam's dependency closure, asserted rather than remembered.
  *
- * These ten packages are meant to be liftable into a repository of their own, which only holds
- * while none of them reaches for anything outside the set: an `apps/*` import, the orchestrator's
- * `agent-core`, the CLI-spawning `sandbox-bridge`, a dashboard schema. Each of those would be
- * invisible until the split, and then it would be a rewrite rather than a move — so the check
- * runs here, on every test run, where a `workspace:*` line added by hand fails immediately.
+ * The packages under `packages/amond-ai` are meant to be liftable into a repository of their own,
+ * which only holds while none of them reaches for anything outside the set: an `apps/*` import,
+ * the orchestrator's `agent-core`, the CLI-spawning `sandbox-bridge`, a dashboard schema. Each of
+ * those would be invisible until the split, and then it would be a rewrite rather than a move —
+ * so the check runs here, on every test run, where a `workspace:*` line added by hand fails
+ * immediately.
  *
  * The set carries its own scope, `@amond-ai`, which makes the second assertion below possible and
  * necessary at once: inside the set a dependency is named by scope, so a `@pleaseai/…` line in one
@@ -24,27 +25,23 @@
  * catalog and travel with a `package.json`, so `@cloudflare/sandbox` under
  * `harness-transport-cloudflare` costs the split nothing.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-/** `packages/harness-claude-code/src` → `packages`, two levels up. */
-const PACKAGES = join(dirname(fileURLToPath(import.meta.url)), '../..')
+/** `packages/amond-ai/harness-claude-code/src` → `packages/amond-ai`, two levels up. */
+const SET_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
-/** Each member's directory, which is not always its unscoped name — `sandbox` is `@amond-ai/sandbox`. */
-const CLOSED_SET = [
-  'harness-claude-code',
-  'harness-claude-code-bridge',
-  'harness-transport',
-  'harness-transport-cloudflare',
-  'harness-protocol',
-  'harness-sandbox',
-  'sandbox',
-  'sandbox-e2b',
-  'sandbox-daytona',
-  'redact',
-] as const
+/**
+ * The set is the directory. Every package under `packages/amond-ai` is a member, so a new one is
+ * held to the assertions below from the moment it exists, rather than from whenever somebody
+ * remembers to name it here — the omission a hand-kept list invites, and one that would surface
+ * only at the split.
+ */
+const CLOSED_SET = readdirSync(SET_ROOT)
+  .filter(entry => existsSync(join(SET_ROOT, entry, 'package.json')))
+  .sort()
 
 /** The two members whose subject *is* a runtime: workerd, and the Node process in the image. */
 const RUNTIME_SPECIFIC = new Set<string>(['harness-transport-cloudflare', 'harness-claude-code-bridge'])
@@ -62,7 +59,7 @@ const MEMBER_NAMES = new Set(CLOSED_SET.map(name => `@amond-ai/${name}`))
 const RUNTIME_IMPORT = /from\s+'(cloudflare:[^']*|node:[^']*|bun:[^']*)'/g
 
 function manifestOf(pkg: string): { dependencies?: Record<string, string>, devDependencies?: Record<string, string>, peerDependencies?: Record<string, string> } {
-  return JSON.parse(readFileSync(join(PACKAGES, pkg, 'package.json'), 'utf8')) as never
+  return JSON.parse(readFileSync(join(SET_ROOT, pkg, 'package.json'), 'utf8')) as never
 }
 
 function dependencyNamesOf(pkg: string): string[] {
@@ -88,7 +85,7 @@ function sourceFilesOf(pkg: string): string[] {
     }
     return path.endsWith('.ts') && !path.endsWith('.test.ts') ? [path] : []
   })
-  return walk(join(PACKAGES, pkg, 'src'))
+  return walk(join(SET_ROOT, pkg, 'src'))
 }
 
 describe('the turn seam\'s dependency closure', () => {
@@ -114,5 +111,14 @@ describe('the turn seam\'s dependency closure', () => {
       [...readFileSync(file, 'utf8').matchAll(RUNTIME_IMPORT)].map(match => `${file}: ${match[1]}`))
 
     expect({ cloudflareDeps, runtimeImports }).toEqual({ cloudflareDeps: [], runtimeImports: [] })
+  })
+
+  /*
+   * The set is scanned rather than listed, and an empty scan would leave every assertion above
+   * with nothing to run and the suite green. This is what fails in that case instead.
+   */
+  it('finds the whole set on disk', () => {
+    expect(CLOSED_SET).toContain('harness-claude-code')
+    expect(CLOSED_SET.length).toBeGreaterThanOrEqual(10)
   })
 })

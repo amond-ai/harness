@@ -2,7 +2,7 @@
  * Prove a built e2b template can actually run a turn (#385).
  *
  * ```sh
- * infisical run --silent -- bun packages/sandbox-e2b/scripts/check-template.ts
+ * infisical run --silent -- bun packages/amond-ai/sandbox-e2b/scripts/check-template.ts
  * ```
  *
  * It boots `E2B_TEMPLATE` (default `pleaseworks`) with the plain e2b SDK — no provider, no

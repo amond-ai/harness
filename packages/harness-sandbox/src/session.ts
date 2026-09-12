@@ -15,7 +15,7 @@
  *   reaching the backend again, so one transient RPC error would outlive itself and leave the
  *   sandbox unreapable for the life of the session. That is the bug `lazySession` already
  *   fixed once — "Memoise the acquisition, not its failure"
- *   (`packages/sandbox-e2b/src/provider.ts`, codex review, PR #260). Retrying is safe by the
+ *   (`packages/amond-ai/sandbox-e2b/src/provider.ts`, codex review, PR #260). Retrying is safe by the
  *   harness's own rule that `destroy` must handle an already-stopped sandbox, so a redundant
  *   second `destroy()` after a partial first is the right trade against a leaked sandbox.
  * - **`restricted()` is a separate object**, not this one narrowed by a type. The harness

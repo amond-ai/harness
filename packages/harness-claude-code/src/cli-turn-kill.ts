@@ -75,7 +75,7 @@ export async function killTurn(sandbox: SandboxSession, processId: string): Prom
       // the turn is gone, it just never recorded `$?` — and a second signal at a dead process
       // confirms nothing. Everything else leaves liveness unknown and must escalate, as the
       // pre-phase-0 code did unconditionally: the contract's two error classes are explicitly
-      // not an exhaustive union (`packages/sandbox/src/types.ts`), and the default
+      // not an exhaustive union (`packages/amond-ai/sandbox/src/types.ts`), and the default
       // Cloudflare backend rejects with `@cloudflare/sandbox`'s own `ProcessWaitTimeoutError`,
       // which is neither of them — gating on `SandboxWaitTimeoutError` left every production
       // interrupt at SIGINT, never terminating a wedged turn.

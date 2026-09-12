@@ -80,7 +80,7 @@ export function upgradeHeaders(headers?: Readonly<Record<string, string>>): Reco
  * leave one behind. Not measured, and not claimed to be: it costs one call.
  *
  * The cancel is best-effort and swallowed, the same way the kills in
- * `packages/harness-sandbox/src/process.ts` are: the upgrade error is the cause worth having,
+ * `packages/amond-ai/harness-sandbox/src/process.ts` are: the upgrade error is the cause worth having,
  * and a `cancel()` that rejected with nothing catching it would surface separately as an
  * unhandled rejection in the Worker — a second failure, reported after the first and naming
  * the wrong call.

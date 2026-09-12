@@ -5,7 +5,7 @@
  * deliberately — `claude-argv.ts` depends on no shell being involved. So the shell is named
  * explicitly, `['sh', '-c', command]`, which puts the whole command in one argv element. A
  * backend that has to render argv back into a shell word list quotes each element
- * conservatively (`packages/sandbox-e2b/src/shell-quote.ts`), and the wrapping survives that:
+ * conservatively (`packages/amond-ai/sandbox-e2b/src/shell-quote.ts`), and the wrapping survives that:
  * `quoteArgv(['sh', '-c', `echo 'hi' && printf "%s\n" $HOME; false`])` renders
  * `'sh' '-c' 'echo '\''hi'\'' && printf "%s\n" $HOME; false'`, which run through `sh -c`
  * prints `hi` and the expanded `$HOME` and exits 1 — the operators, the nested quotes and the
