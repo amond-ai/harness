@@ -1,0 +1,45 @@
+.gitignore
+  s_1b30189dc4b2a9::t_6cc747532a2a95 1-11
+.mise.toml
+  s_1b30189dc4b2a9::t_86714f1de004b1 1-18
+.nvmrc
+  s_1b30189dc4b2a9::t_10b2845a9fcfaf 1
+bun.lock
+  s_3c717078f19fc1::t_51056ec42d7856 1-1680
+eslint.config.ts
+  s_1b30189dc4b2a9::t_14fd6ab4f16bd4 1-13
+eslint.rules.ts
+  s_1b30189dc4b2a9::t_3bb9f39cdc7c97 1-18
+package.json
+  s_1b30189dc4b2a9::t_27d88973d26769 1-47
+tsconfig.json
+  s_1b30189dc4b2a9::t_3aee30890e7c6a 1-17
+turbo.json
+  s_1b30189dc4b2a9::t_60b5e8fea9a21b 1-22
+vitest.shared.ts
+  s_1b30189dc4b2a9::t_702600ce337145 1-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "d4fef2d2caf1f907ca4ccf30f5e41a97118270cf",
+  "prompts": {},
+  "sessions": {
+    "s_1b30189dc4b2a9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a624a0-ca2b-44b7-ae21-69443b770ba1",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    },
+    "s_3c717078f19fc1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f4c84e03-898a-47dc-ba45-53314c5b3abd",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
