@@ -223,6 +223,14 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
     while (true) {
       const pid = await io.readCommandPid(paths)
       if (pid !== undefined || elapsedMs() >= until) {
+        // Deliberately not re-probed here. `state` is at most one `readCommandPid` old — 0.14ms
+        // measured — while the probe that would refresh it is a `ps` fork at 17ms, so its own
+        // answer is already staler on arrival than the one it replaces. The race it appears to
+        // close is not closable at all: the wrapper can end between any verification and the
+        // `kill(2)` that follows it, and moving the check later only relocates the window. What
+        // a refresh would buy is a second chance to answer `'unknown'`, which `kill` reads as a
+        // non-delivery — doubling the odds that a transient `ps` failure drops a user's
+        // interrupt, on the path where an interrupt is what is being delivered.
         return { pid, state }
       }
       await new Promise(resolve => setTimeout(resolve, PID_POLL_MS))
