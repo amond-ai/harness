@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { isSandboxId, resolveWithin, sandboxPaths, STATE_DIRECTORY_NAME } from './paths'
+import { isSandboxId, resolveWithin, sandboxPaths, STATE_DIRECTORY_NAME, trimTrailingSlash, withoutTrailingSlashes } from './paths'
+
+describe('trimming trailing separators', () => {
+  it('takes every separator off the end, and only off the end', () => {
+    expect(withoutTrailingSlashes('/sandboxes/run-42///')).toBe('/sandboxes/run-42')
+    expect(withoutTrailingSlashes('//sandboxes//run-42')).toBe('//sandboxes//run-42')
+    expect(withoutTrailingSlashes('')).toBe('')
+  })
+
+  it('answers a path of nothing but separators without scanning it twice', () => {
+    // The input class CodeQL flagged (alerts 5 and 6): `replace(/\/+$/, '')` retries at every
+    // index and backtracks the whole run at each one, so this is where the cost was quadratic.
+    // The two functions part company here — an empty base joins as a relative path, so the one
+    // that prefixes a root keeps it.
+    expect(withoutTrailingSlashes('/'.repeat(64))).toBe('')
+    expect(trimTrailingSlash('/'.repeat(64))).toBe('/')
+  })
+})
 
 describe('sandboxPaths', () => {
   it('owns the directory it named itself', () => {

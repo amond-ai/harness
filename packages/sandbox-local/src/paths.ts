@@ -60,9 +60,33 @@ export interface SandboxLayout {
   resolveRoot?: (sandboxId: string) => string
 }
 
-/** Strip trailing separators so a joined path never doubles them. */
+/**
+ * Every trailing separator removed — `/` included, so an all-separator path becomes empty.
+ *
+ * A scan rather than `replace(/\/+$/, '')`, and not as a matter of taste. That pattern gives
+ * the engine no position to anchor at, so it retries the match at every index and backtracks
+ * the whole run of separators at each one: quadratic in the length of a path that is mostly
+ * `/`. CodeQL reports it as a polynomial regular expression on uncontrolled data (alerts 5
+ * and 6 on PR #3), and "uncontrolled" is right — every path here arrives through an exported
+ * function, so its length is the caller's to choose.
+ */
+export function withoutTrailingSlashes(path: string): string {
+  let end = path.length
+  while (end > 0 && path[end - 1] === '/') {
+    end--
+  }
+  return path.slice(0, end)
+}
+
+/**
+ * Strip trailing separators so a joined path never doubles them, keeping the root itself.
+ *
+ * The one difference from {@link withoutTrailingSlashes}, and the reason both exist: a path
+ * of nothing but separators is the filesystem root, and returning `''` for it would turn
+ * every path joined onto it into a relative one.
+ */
 export function trimTrailingSlash(path: string): string {
-  const trimmed = path.replace(/\/+$/, '')
+  const trimmed = withoutTrailingSlashes(path)
   // `/` trims to the empty string, which would then join as a relative path.
   return trimmed === '' ? path.slice(0, 1) : trimmed
 }

@@ -19,7 +19,7 @@
  * NDJSON a turn writes must not be interleaved with whatever the CLI prints beside it.
  */
 import type { SandboxCommand } from '@amond-ai/sandbox'
-import { isProcessId } from './paths'
+import { isProcessId, withoutTrailingSlashes } from './paths'
 import { quoteArg, quoteArgv, unquoteArgv } from './shell-quote'
 
 /**
@@ -83,7 +83,7 @@ export function journalPaths(stateDir: string, processId: string): JournalPaths 
   if (!isProcessId(processId)) {
     throw new Error(`invalid process id '${processId}': expected [A-Za-z0-9_-]+`)
   }
-  const base = stateDir.replace(/\/+$/, '')
+  const base = withoutTrailingSlashes(stateDir)
   return {
     stdout: `${base}/${processId}.out`,
     stderr: `${base}/${processId}.err`,

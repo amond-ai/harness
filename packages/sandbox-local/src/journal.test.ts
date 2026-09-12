@@ -13,6 +13,14 @@ describe('journalPaths', () => {
   it('refuses an id that would resolve outside the state directory', () => {
     expect(() => journalPaths('/state', '../../etc/passwd')).toThrow(/invalid process id/)
   })
+
+  it('joins onto a state directory however many separators it ends with', () => {
+    // The trailing-separator trim is a scan rather than `/\/+$/` (CodeQL alert 5), and the
+    // filesystem root is the case that separates it from `trimTrailingSlash`: here an empty
+    // base is what keeps the join from doubling the leading separator.
+    expect(journalPaths('/state///', 'p1').exit).toBe('/state/p1.exit')
+    expect(journalPaths('/', 'p1').exit).toBe('/p1.exit')
+  })
 })
 
 describe('journalledScript', () => {
