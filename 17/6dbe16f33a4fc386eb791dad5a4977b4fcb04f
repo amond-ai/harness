@@ -1,0 +1,41 @@
+CONTRIBUTING.md
+  s_abf630454a904c::t_45436a0292a1cf 1-11,14-24,26-34,38-56
+  s_abf630454a904c::t_0edc783b195d7b 25,35-37
+  s_abf630454a904c::t_11ae9eb991790a 12-13
+SECURITY.md
+  s_abf630454a904c::t_034b4d2ed77d01 1-39
+.github/ISSUE_TEMPLATE/config.yml
+  s_abf630454a904c::t_45436a0292a1cf 1-11
+.github/PULL_REQUEST_TEMPLATE.md
+  s_abf630454a904c::t_034b4d2ed77d01 1-15,17-18
+  s_abf630454a904c::t_0edc783b195d7b 16
+README.md
+  s_abf630454a904c::t_fb74b195a14eee 25,42,179
+  s_abf630454a904c::t_810701e74dcc14 3-4,169-175
+  s_abf630454a904c::t_6a596bdd5e24bb 111-113
+  s_abf630454a904c::t_5a169de8bb70ca 152
+  s_abf630454a904c::t_d1e92e2346ae11 15-18
+  s_abf630454a904c::t_b14a44466f7a16 176
+.github/DISCUSSION_TEMPLATE/ideas.yml
+  s_abf630454a904c::t_45436a0292a1cf 1-27
+.github/ISSUE_TEMPLATE/bug_report.md
+  s_abf630454a904c::t_034b4d2ed77d01 1-31
+CODE_OF_CONDUCT.md
+  s_abf630454a904c::t_034b4d2ed77d01 1-132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "176dbe16f33a4fc386eb791dad5a4977b4fcb04f",
+  "prompts": {},
+  "sessions": {
+    "s_abf630454a904c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9731ebaa-dbed-4eb2-9776-49cdbc895fb6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
