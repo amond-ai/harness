@@ -1,0 +1,47 @@
+packages/sandbox-local/src/local-session.ts
+  s_86f5abf516419a::t_1367b0633ab248 143-153,163-166,188-189,196-208,277
+packages/sandbox-local/src/local.fixtures.ts
+  s_86f5abf516419a::t_1367b0633ab248 52,69,162-167
+packages/sandbox-local/README.md
+  s_86f5abf516419a::t_82517072f3859b 99-108,114-127
+packages/sandbox-local/src/paths.ts
+  s_86f5abf516419a::t_0b50a4ba78d321 77-89,91-96
+packages/sandbox-local/src/local-surface.ts
+  s_86f5abf516419a::t_389cb9cb57e88c 39-43,100-109
+packages/sandbox-local/src/node-host.ts
+  s_86f5abf516419a::t_389cb9cb57e88c 20-21,70-82,130,132-136,148,198
+packages/sandbox-local/src/registry.ts
+  s_86f5abf516419a::t_f7617030b97fb4 26
+  s_86f5abf516419a::t_20a235a19f3688 72,109-138,149-154,161-162,247-256
+packages/sandbox-local/src/local.real.test.ts
+  s_86f5abf516419a::t_0d1da175396bac 79-92
+packages/sandbox-local/src/journal.ts
+  s_86f5abf516419a::t_308ccd975c44f1 38-60,134,138-160,181-182,212-222,225-230,233
+packages/sandbox-local/src/registry.test.ts
+  s_86f5abf516419a::t_7f2e5daff295ae 56,64-101,170-175,178
+  s_86f5abf516419a::t_0b50a4ba78d321 111,115
+  s_86f5abf516419a::t_bdd4dcfc9dc526 102,176-177,179
+packages/sandbox-local/src/local-session.wait.test.ts
+  s_86f5abf516419a::t_f7617030b97fb4 47-68,164-182
+  s_86f5abf516419a::t_9a269d8be3d8a2 183
+packages/sandbox-local/src/journal.test.ts
+  s_86f5abf516419a::t_f7617030b97fb4 45-64,97-117
+packages/sandbox-local/src/paths.test.ts
+  s_86f5abf516419a::t_f7617030b97fb4 32-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "e6c16d5102e59c985f1eecc808f203be6d33a692",
+  "prompts": {},
+  "sessions": {
+    "s_86f5abf516419a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "136baca2-af61-40fb-916b-7cf988dd2170",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
