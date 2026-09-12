@@ -223,14 +223,17 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
     while (true) {
       const pid = await io.readCommandPid(paths)
       if (pid !== undefined || elapsedMs() >= until) {
-        // Deliberately not re-probed here. `state` is at most one `readCommandPid` old — 0.14ms
-        // measured — while the probe that would refresh it is a `ps` fork at 17ms, so its own
-        // answer is already staler on arrival than the one it replaces. The race it appears to
-        // close is not closable at all: the wrapper can end between any verification and the
-        // `kill(2)` that follows it, and moving the check later only relocates the window. What
-        // a refresh would buy is a second chance to answer `'unknown'`, which `kill` reads as a
-        // non-delivery — doubling the odds that a transient `ps` failure drops a user's
-        // interrupt, on the path where an interrupt is what is being delivered.
+        // Deliberately not re-probed here. Both ways into this return have the same shape — a
+        // liveness probe, then one `readCommandPid` — `kill`'s own probe on the first iteration
+        // and the loop's on any later one, so `state` is 0.14ms past a `ps` fork that took 17ms
+        // to answer. A refresh therefore buys exactly that 0.14ms: a verification 17ms old on
+        // arrival, replacing one 17.14ms old. Not nothing, but 17ms of added latency on the
+        // interrupt path for 0.8% of verification age, and the race stays open either way — the
+        // wrapper can end between any verification and the `kill(2)` that follows it.
+        // What decides it is the second probe's other outcome. `kill` reads `'unknown'` as a
+        // non-delivery, so adding one doubles the chance that a transient `ps` failure drops a
+        // user's interrupt — on the path whose whole job is delivering that interrupt, under
+        // exactly the fork pressure that makes `ps` fail.
         return { pid, state }
       }
       await new Promise(resolve => setTimeout(resolve, PID_POLL_MS))
