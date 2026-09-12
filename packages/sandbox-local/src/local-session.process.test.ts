@@ -178,6 +178,29 @@ describe('destroy', () => {
     expect(fake.files.has(`${WORK}/repo/file.txt`)).toBe(true)
   })
 
+  it('removes nothing when the probe that refused the kill recovers and reports the process alive', async () => {
+    // The group signal is declined whenever the host cannot verify the leader, and `ps` failing
+    // for one call is exactly that. Reading only the unverifiable case as unconfirmed leaves
+    // the worse one open: the very next probe succeeds, says `'live'`, and the journal of a
+    // process that is demonstrably still running is deleted out from under it.
+    const fake = fakeHost({ nextPid: 4711 })
+    fake.put(`${WORK}/repo/file.txt`, 'work')
+    let armed = false
+    let refusals = 1
+    const host = {
+      ...fake.host,
+      identify: async (pid: number) => (armed && refusals-- > 0 ? undefined : fake.host.identify(pid)),
+    }
+    const session = sessionOver(fake, { host })
+    await session.exec(['claude', '-p'])
+    armed = true
+
+    await expect(session.destroy()).rejects.toThrow(/could not be confirmed killed/)
+    expect(fake.table.has(4711)).toBe(true)
+    expect(fake.files.has(journalPaths(STATE, 'p1').meta)).toBe(true)
+    expect(fake.files.has(`${WORK}/repo/file.txt`)).toBe(true)
+  })
+
   it('leaves a working directory it was merely pointed at', async () => {
     const fake = fakeHost({ nextPid: 4711 })
     fake.put('/Users/me/project/file.txt', 'the user\'s own work')

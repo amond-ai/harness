@@ -31,6 +31,7 @@ import type {
 import type { ProcessRecord } from './journal'
 import type { LocalHost } from './local-surface'
 import type { SandboxPaths } from './paths'
+import type { Liveness } from './registry'
 import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@amond-ai/sandbox'
 import { journalledScript, journalPaths } from './journal'
 import { createJournalIo } from './journal-io'
@@ -196,53 +197,67 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
    * outlived the wrapper is in it.
    */
   /**
-   * The command's own pid, waited for briefly rather than asked for once.
+   * The command's own pid, waited for briefly rather than asked for once — and the wrapper's
+   * liveness as of that answer, because the two have to be read together.
    *
    * `exec` returns as soon as the shell is spawned, so a caller that kills immediately — a
-   * turn cancelled the moment it starts — arrives before the wrapper has run the two commands
-   * that publish `$!`. That is a publication window, not an absence: the wrapper has already
-   * been confirmed alive, so the pid is coming. Asking once and giving up would report a
+   * turn cancelled the moment it starts — arrives before the wrapper has run the command that
+   * publishes `$!`. That is a publication window, not an absence: the wrapper has already been
+   * confirmed alive, so the pid is coming. Asking once and giving up would report a
    * non-delivery for a process that is perfectly signallable a millisecond later.
    *
+   * The liveness travels back with it because a pid that arrives *after* the wrapper has
+   * ended is not a target. The command is gone by then and the number may already name
+   * something else, so handing it to `kill` as though the wrapper were still live is how a
+   * signal reaches a stranger — the same mistake `ownsPid` exists to prevent, one level up.
+   *
    * Bounded, because the other reading of a missing pid is a wrapper whose journal was removed
-   * under it, and that one never resolves. The budget is short enough to stay inside what a
-   * caller expects `kill` to cost, and the wrapper is re-checked each time so a command that
-   * exits during the wait ends the wait rather than running it out.
+   * under it, and that one never resolves.
    */
-  async function publishedCommandPid(record: ProcessRecord): Promise<number | undefined> {
+  async function publishedCommandPid(
+    record: ProcessRecord,
+  ): Promise<{ pid: number | undefined, state: Liveness }> {
     const paths = journalPaths(sandbox.state, record.id)
     const until = elapsedMs() + PID_PUBLICATION_MS
+    let state: Liveness = 'live'
     while (true) {
       const pid = await io.readCommandPid(paths)
       if (pid !== undefined || elapsedMs() >= until) {
-        return pid
+        return { pid, state }
       }
       await new Promise(resolve => setTimeout(resolve, PID_POLL_MS))
-      if (await registry.liveness(record) !== 'live') {
-        return io.readCommandPid(paths)
+      state = await registry.liveness(record)
+      if (state !== 'live') {
+        return { pid: await io.readCommandPid(paths), state }
       }
     }
   }
 
   async function kill(record: ProcessRecord, signal?: number): Promise<void> {
     const sent = signal ?? SIGTERM
-    const state = await registry.liveness(record)
+    let state = await registry.liveness(record)
     if (state === 'live') {
-      const commandPid = await publishedCommandPid(record)
-      if (commandPid === undefined) {
-        // The wrapper is alive but never published its command's pid within the window above.
-        // Falling through to the group here is what {@link JournalPaths.pid} exists to
-        // prevent: the group contains the wrapper, which dies on SIGINT or SIGTERM without
-        // running the `printf` that records the exit, so the turn would end with neither the
-        // `result` the interrupt was for nor an exit code. Reported as non-delivery instead.
-        console.warn(
-          `sandbox-local: kill of '${record.id}' (signal ${String(sent)}) signalled nothing:`
-          + ` its wrapper is running but has not recorded the command's pid`,
-        )
+      const published = await publishedCommandPid(record)
+      state = published.state
+      if (state === 'live') {
+        if (published.pid === undefined) {
+          // The wrapper is alive and never published within the window above. Falling through
+          // to the group here is what {@link JournalPaths.pid} exists to prevent: the group
+          // contains the wrapper, which dies on SIGINT or SIGTERM without running the `printf`
+          // that records the exit, so the turn would end with neither the `result` the
+          // interrupt was for nor an exit code. Reported as non-delivery instead.
+          console.warn(
+            `sandbox-local: kill of '${record.id}' (signal ${String(sent)}) signalled nothing:`
+            + ` its wrapper is running but has not recorded the command's pid`,
+          )
+          return
+        }
+        host.signal(published.pid, sent)
         return
       }
-      host.signal(commandPid, sent)
-      return
+      // The wrapper ended while we waited. Whatever the journal says now describes a command
+      // that is over, so it falls through to the same handling as any other ended process
+      // rather than being signalled on the strength of a number nobody re-verified.
     }
     if (state === 'unknown') {
       // Nothing is signalled, and it is said out loud. The recorded command pid is only
@@ -399,10 +414,13 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
     destroy: async () => {
       const unconfirmed: string[] = []
       for (const record of await registry.list()) {
-        // `signalGroup` declines a leader it cannot verify *and* one whose pid was reissued,
-        // and only the first of those is a reason to stop: a reissued pid means the process is
-        // genuinely gone, while an unverifiable one may be running this instant.
-        if (!await registry.signalGroup(record, SIGKILL) && await registry.liveness(record) === 'unknown') {
+        // `signalGroup` declines a leader whose pid was reissued as well as one it could not
+        // verify, and only the first of those is safe to proceed over — a reissued pid means
+        // the process is genuinely gone. So the question asked of the refusal is not "was the
+        // host unsure" but "is this thing confirmed dead": anything short of `'gone'` counts
+        // as still running, including a probe that comes back `'live'` because host
+        // verification recovered between the refusal and this check.
+        if (!await registry.signalGroup(record, SIGKILL) && await registry.liveness(record) !== 'gone') {
           unconfirmed.push(record.id)
         }
       }

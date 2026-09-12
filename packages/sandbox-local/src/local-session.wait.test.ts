@@ -181,6 +181,43 @@ describe('kill', () => {
     expect(String(warnings[0])).toMatch(/signalled nothing/)
   })
 
+  it('does not signal a pid the journal published as its wrapper was ending', async () => {
+    // `.pid` lands a few milliseconds after `exec` returns, so a `kill()` in that window waits
+    // for it. A wrapper that ends inside the wait leaves the number behind and it stops
+    // describing anything: the command it named is over, and the kernel is free to reissue it.
+    const fake = fakeHost()
+    fake.place({ pid: 4711 })
+    fake.put(PATHS.meta, serializeProcessRecord({
+      id: 'p1',
+      pid: 4711,
+      command: ['claude', '-p'],
+      startedAt: AT,
+      kernelStartedAt: 'start-4711',
+    }))
+    // Whatever holds 4712 by the time the wait ends is a stranger, not the command.
+    fake.place({ pid: 4712, command: 'someone-elses-work' })
+    let pidReads = 0
+    const host = {
+      ...fake.host,
+      readSlice: async (path: string, offset: number, length?: number) => {
+        const slice = await fake.host.readSlice(path, offset, length)
+        if (path === PATHS.pid && ++pidReads === 1) {
+          // The wrapper publishes and dies, between the wait's first read and its next probe.
+          fake.end(4711)
+          fake.put(PATHS.pid, '4712')
+        }
+        return slice
+      },
+    }
+
+    const handle = await sessionOver(fake, { host }).getProcess('p1')
+    await handle?.kill(2)
+
+    // The group, which is empty and reaches nobody — never the number the journal now holds.
+    expect(fake.signals.filter(sent => sent.signal === 2)).toEqual([{ pid: -4711, signal: 2 }])
+    expect(fake.table.has(4712)).toBe(true)
+  })
+
   it('falls back to the group when only orphans are left to signal', async () => {
     const fake = fakeHost()
     fake.put(PATHS.meta, serializeProcessRecord({

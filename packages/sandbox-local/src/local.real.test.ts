@@ -107,6 +107,20 @@ describe.skipIf(!posix)('against a real machine', () => {
     await expect(handle.waitForExit({ timeout: 10_000 })).resolves.toEqual({ code: 143, timedOut: false })
   })
 
+  it('publishes the exit under an environment that carries no PATH at all', async () => {
+    // `mv` is the wrapper's one unrecoverable dependency: an exit that is never renamed into
+    // place is a turn that reads as still running forever, and `waitForExit` only ever times
+    // out. Resolving it on the caller's PATH puts that outcome one narrowed `env` away, so the
+    // wrapper asks for the system default one instead — which is what `command -p` is for.
+    // `echo` is a shell builtin, so the command itself needs no PATH to prove the point.
+    const session = createLocalProvider({ root, env: {}, newProcessId: () => 'p-no-path' })
+      .session('run-no-path')
+    const handle = await session.exec(['echo', 'ok'])
+
+    await expect(handle.waitForExit({ timeout: 10_000 })).resolves.toEqual({ code: 0, timedOut: false })
+    expect((await transcript(await handle.logs())).out).toBe('ok\n')
+  })
+
   it('finds and reads a process a different provider started', async () => {
     // The case the backend exists for: the desktop app was quit mid-turn and relaunched, and
     // nothing in this process ever held a handle to what is running.

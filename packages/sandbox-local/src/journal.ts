@@ -175,7 +175,17 @@ export function journalledScript(
  */
 function publish(variable: string, path: string): string[] {
   const pending = quoteArg(`${path}${PENDING_SUFFIX}`, 'the exit journal path')
-  return [`printf '%s' "${variable}" > ${pending}`, `mv ${pending} ${quoteArg(path, 'the exit journal path')}`]
+  // Two things about this `mv` are not incidental. `command -p` resolves it on the system
+  // default PATH rather than on the command's own: `LocalSessionOptions.env` exists to be
+  // narrowed — its docblock invites exactly that — and an env without a usable PATH would
+  // otherwise leave every command in the sandbox unable to publish, so turns that ended fine
+  // would all come back as `no_exit_record`. And `--`, because a state root beginning with `-`
+  // makes the pending path an option rather than an operand, which quoting does not change:
+  // `mv: illegal option -- w` (measured on macOS 2026-09-13).
+  return [
+    `printf '%s' "${variable}" > ${pending}`,
+    `command -p mv -- ${pending} ${quoteArg(path, 'the exit journal path')}`,
+  ]
 }
 
 /**

@@ -32,7 +32,8 @@ describe('journalledScript', () => {
       `: 'p1' ; 'echo' 'hi' > '/state/p1.out' 2> '/state/p1.err' & __c=$!`
       + ` ; printf '%s' "$__c" > '/state/p1.pid'`
       + ` ; wait $__c ; __e=$?`
-      + ` ; printf '%s' "$__e" > '/state/p1.exit.pending' ; mv '/state/p1.exit.pending' '/state/p1.exit'`,
+      + ` ; printf '%s' "$__e" > '/state/p1.exit.pending'`
+      + ` ; command -p mv -- '/state/p1.exit.pending' '/state/p1.exit'`,
     )
   })
 
@@ -40,7 +41,13 @@ describe('journalledScript', () => {
     const script = journalledScript(['echo', 'hi'], PATHS)
     // Same directory, or `mv` is a copy across filesystems and the atomicity POSIX gives
     // `rename(2)` is gone — reintroducing the torn read the two-step write is here to remove.
-    expect(script).toContain(`> '/state/p1.exit.pending' ; mv '/state/p1.exit.pending' '/state/p1.exit'`)
+    expect(script).toContain(`> '/state/p1.exit.pending' ; command -p mv -- '/state/p1.exit.pending' '/state/p1.exit'`)
+    // `command -p` resolves `mv` on the system default PATH, not the command's own: a caller
+    // that passes a narrowed `env` without a usable PATH would otherwise leave every command
+    // in the sandbox unable to publish an exit at all — the wrapper's one unrecoverable failure.
+    // `--` ends the options, because a state root beginning with `-` makes the pending path
+    // read as a flag (`mv: illegal option -- w`) rather than as an operand.
+    expect(script).toContain('command -p mv -- ')
     // And the pending name is invisible to the state directory's scan, which reads records by
     // their `.meta.json` suffix and would otherwise take `p1.exit.pending` for a process.
     expect(script).not.toContain('.meta.json')
@@ -53,7 +60,14 @@ describe('journalledScript', () => {
   it('records the exit from inside the tree, after the command has been waited on', () => {
     const script = journalledScript(['false'], PATHS)
     // The order is the durability guarantee: whoever spawned this may be gone by now.
-    expect(script.indexOf('wait $__c')).toBeLessThan(script.indexOf(`mv '/state/p1.exit.pending'`))
+    expect(script.indexOf('wait $__c')).toBeLessThan(script.indexOf(`mv -- '/state/p1.exit.pending'`))
+  })
+
+  it('keeps a state root that begins with a dash out of mv\'s option list', () => {
+    // Without the operand separator the pending path is read as flags — `mv: illegal option
+    // -- w` — so every command under such a root would finish without ever publishing an exit.
+    const script = journalledScript(['echo', 'hi'], journalPaths('-state', 'p1'))
+    expect(script).toContain(`command -p mv -- '-state/p1.exit.pending' '-state/p1.exit'`)
   })
 
   it('carries its own deadline, so a timeout outlives the orchestrator too', () => {
@@ -75,7 +89,7 @@ describe('journalledScript', () => {
     expect(script).toContain(`[ -f '/state/p1.timeout' ] && kill -KILL -$$`)
     // The exit is recorded before the group signal, which reaches the wrapper too — the
     // rename included, since a record still under its pending name is one no reader can find.
-    expect(script.indexOf(`mv '/state/p1.exit.pending' '/state/p1.exit'`))
+    expect(script.indexOf(`mv -- '/state/p1.exit.pending' '/state/p1.exit'`))
       .toBeLessThan(script.indexOf('kill -KILL -$$'))
     // `-$$`, never `0`: both name this group when the wrapper leads one, but on a host that
     // failed to detach it, `0` would name the orchestrator's group and kill the application.
