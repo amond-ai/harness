@@ -1,0 +1,21 @@
+packages/sandbox-local/src/local-session.process.test.ts
+  s_86f5abf516419a::t_5c49ae49b7003b 102-107
+packages/sandbox-local/src/local-session.ts
+  s_86f5abf516419a::t_5c49ae49b7003b 39,279-284
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "67d8386ccd42510ec0a3057129f562484101e179",
+  "prompts": {},
+  "sessions": {
+    "s_86f5abf516419a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "136baca2-af61-40fb-916b-7cf988dd2170",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
