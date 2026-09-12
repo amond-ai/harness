@@ -1,0 +1,28 @@
+{
+  "name": "@amond-ai/sandbox-local",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-process backend for @amond-ai/sandbox — runs the command on this machine and journals it to disk, so a desktop app that was killed and relaunched can still find the turn it started",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@amond-ai/sandbox": "workspace:*"
+  },
+  "devDependencies": {
+    "@pleaseai/eslint-config": "catalog:",
+    "bun-types": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -20,12 +20,18 @@
  * import in one of them is the regression, and it is the kind that typechecks perfectly until
  * somebody tries the other runtime.
  *
+ * {@link RUNTIME_SPECIFIC_MODULES} is the same allowance at a finer grain, and it exists so that
+ * a member whose *subject* is the machine does not have to be exempted whole. `sandbox-local`
+ * runs a process on the host, which no portable API can do; confining that to one module keeps
+ * the assertion running over the other dozen files in the package, which is strictly more
+ * coverage than adding the package to {@link RUNTIME_SPECIFIC} would leave.
+ *
  * External dependencies are otherwise unconstrained on purpose: they are declared through the root
  * catalog and travel with a `package.json`, so `@cloudflare/sandbox` under
  * `harness-transport-cloudflare` costs the split nothing.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
@@ -44,6 +50,17 @@ const CLOSED_SET = readdirSync(SET_ROOT)
 
 /** The two members whose subject *is* a runtime: workerd, and the Node process in the image. */
 const RUNTIME_SPECIFIC = new Set<string>(['harness-transport-cloudflare', 'harness-claude-code-bridge'])
+
+/**
+ * The individual modules allowed a runtime import inside an otherwise portable member.
+ *
+ * One entry, and it should stay hard to add to: `sandbox-local`'s host binding is the only
+ * place in the set where the portable answer does not exist — spawning a process, signalling a
+ * process group, and reading a process table have no `WebSocket`-and-`fetch` equivalent. Every
+ * other file in that package is written against the structural `LocalHost` surface it exports,
+ * and this assertion is what keeps them that way.
+ */
+const RUNTIME_SPECIFIC_MODULES = new Set<string>([join('sandbox-local', 'src', 'node-host.ts')])
 
 /**
  * The one `@pleaseai` name allowed inside the set: the shared ESLint config, which is a published
@@ -106,10 +123,21 @@ describe('the turn seam\'s dependency closure', () => {
 
   it.each(CLOSED_SET.filter(pkg => !RUNTIME_SPECIFIC.has(pkg)))('leaves %s able to run on any runtime', (pkg) => {
     const cloudflareDeps = dependencyNamesOf(pkg).filter(name => name.startsWith('@cloudflare/'))
-    const runtimeImports = sourceFilesOf(pkg).flatMap(file =>
-      [...readFileSync(file, 'utf8').matchAll(RUNTIME_IMPORT)].map(match => `${file}: ${match[1]}`))
+    const runtimeImports = sourceFilesOf(pkg)
+      .filter(file => !RUNTIME_SPECIFIC_MODULES.has(relative(SET_ROOT, file)))
+      .flatMap(file =>
+        [...readFileSync(file, 'utf8').matchAll(RUNTIME_IMPORT)].map(match => `${file}: ${match[1]}`))
 
     expect({ cloudflareDeps, runtimeImports }).toEqual({ cloudflareDeps: [], runtimeImports: [] })
+  })
+
+  /*
+   * A path in the exemption list that no longer names a file is worse than a missing exemption:
+   * it reads as coverage that is still being paid for, while the module it referred to has been
+   * renamed and is being scanned — or, more quietly, has been split in two and only one half is.
+   */
+  it.each([...RUNTIME_SPECIFIC_MODULES])('still has %s to exempt', (module) => {
+    expect(existsSync(join(SET_ROOT, module))).toBe(true)
   })
 
   /*

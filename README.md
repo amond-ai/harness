@@ -28,9 +28,10 @@ out.
 | `@amond-ai/harness-transport-cloudflare` | Cloudflare Workers | The opener for a Cloudflare Sandbox, whose ports are private and reached through `Sandbox.wsConnect`, plus the workerd `fetch` upgrade path. |
 | `@amond-ai/sandbox` | both | The sandbox contract: `SandboxProvider`, `SandboxSession`, `SandboxProcessHandle`, files, logs, and `portEndpoint`. No dependencies. |
 | `@amond-ai/sandbox-e2b` | the orchestrator | An e2b backend for the contract. Journals a process's output to the sandbox filesystem so it survives the process and a reconnect. |
+| `@amond-ai/sandbox-local` | the orchestrator | A local-process backend for the contract, for a desktop app that runs on the user's own machine. Journals the transcript, pid and exit status to disk and verifies liveness against the kernel, so a relaunched app finds the turn it started. Not an isolation boundary. |
 | `@amond-ai/redact` | both | Credential masking for every diagnostic the packages emit, and the bound-then-scrub used for stored error summaries. |
 
-The eight packages depend only on each other and on published external packages. A test in
+The packages depend only on each other and on published external packages. A test in
 `harness-claude-code` asserts that on every run, so the set can move between repositories
 without a rewrite.
 
@@ -126,11 +127,13 @@ whose version equals the CLI's.
 | --- | --- | --- | --- |
 | Cloudflare Workers | `harness-claude-code` | `harness-transport-cloudflare` | Cloudflare Sandbox (in the consuming app today), e2b |
 | Vercel (Node) | `harness-claude-code` | `harness-transport` | e2b; Vercel Sandbox is planned |
-| Deno desktop | `harness-claude-code` | `harness-transport` | e2b; local process and Docker are planned |
-| Node, Bun | `harness-claude-code` | `harness-transport` | e2b |
+| Deno desktop | `harness-claude-code` | `harness-transport` | local process, e2b; Docker is planned |
+| Node, Bun | `harness-claude-code` | `harness-transport` | local process, e2b |
 
 The only runtime-specific packages are the Cloudflare transport and the host, which runs on
-Node inside the image. Everything else has no `node:`, `bun:`, or `cloudflare:` import.
+Node inside the image — plus one module of `sandbox-local`, whose subject is the machine and
+which therefore cannot be written without host primitives. Everything else has no `node:`,
+`bun:`, or `cloudflare:` import, and `closure.test.ts` asserts exactly that on every run.
 
 ## What a consumer injects
 
