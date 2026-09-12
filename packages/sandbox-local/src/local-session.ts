@@ -36,7 +36,7 @@ import { journalledScript, journalPaths } from './journal'
 import { createJournalIo } from './journal-io'
 import { createLocalFiles } from './local-files'
 import { createProcessLogs } from './log-reads'
-import { resolveWithin } from './paths'
+import { isProcessId, resolveWithin } from './paths'
 import { createProcessRegistry } from './registry'
 
 /** How often `waitForExit` re-reads the journal. A local read, so it can afford to be brisk. */
@@ -276,6 +276,12 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
      * directories behind every recovery sweep that asked about a run this machine never had.
      */
     getProcess: async (id: string) => {
+      // An id that could not name a journal file cannot name a process either, and this is a
+      // discovery call: it answers `null` rather than throwing a path error at a caller that
+      // was only asking whether anything was there.
+      if (!isProcessId(id)) {
+        return null
+      }
       const record = await registry.read(id)
       if (record) {
         return handleFor(record)

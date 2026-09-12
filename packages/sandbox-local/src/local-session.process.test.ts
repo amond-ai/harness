@@ -99,6 +99,12 @@ describe('discovery', () => {
     await expect(sessionOver(fakeHost()).getProcess('p1')).resolves.toBeNull()
   })
 
+  it('answers null for an id that could not name a journal file at all', async () => {
+    // Discovery, not a path operation: a caller asking whether anything is there gets an
+    // answer rather than an error about the shape of the id it asked with.
+    await expect(sessionOver(fakeHost()).getProcess('../../etc/passwd')).resolves.toBeNull()
+  })
+
   it('creates nothing while answering', async () => {
     const fake = fakeHost()
     const session = sessionOver(fake)
