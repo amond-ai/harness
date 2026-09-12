@@ -1,0 +1,26 @@
+release-please-config.json
+  s_abf630454a904c::t_eaf9b2ee18b140 1-63
+.release-please-manifest.json
+  s_abf630454a904c::t_eaf9b2ee18b140 1-12
+.github/dependabot.yml
+  s_abf630454a904c::t_f65dfa98763ede 11-18
+  s_abf630454a904c::t_8292f30c43a4a4 1-10
+.github/workflows/release-please.yml
+  s_abf630454a904c::t_2ce8c3cab31840 1-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "0fbbac7e27495cfd1231275149be18cda3e00728",
+  "prompts": {},
+  "sessions": {
+    "s_abf630454a904c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9731ebaa-dbed-4eb2-9776-49cdbc895fb6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
