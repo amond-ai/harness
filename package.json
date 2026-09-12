@@ -1,0 +1,47 @@
+{
+  "name": "harness",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "check": "turbo run check",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage"
+  },
+  "devDependencies": {
+    "@pleaseai/eslint-config": "catalog:",
+    "eslint": "catalog:",
+    "jiti": "^2.6.1",
+    "turbo": "^2.8.0",
+    "typescript": "catalog:"
+  },
+  "catalog": {
+    "@ai-sdk/harness": "1.0.87",
+    "@cloudflare/sandbox": "0.13.0-next.724.1",
+    "@daytona/sdk": "^0.211.2",
+    "@pleaseai/eslint-config": "^0.0.4",
+    "@types/ws": "^8.18.1",
+    "@vitest/coverage-istanbul": "^4.1.10",
+    "bun-types": "^1.4.0",
+    "e2b": "^2.45.0",
+    "eslint": "^10.7.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10",
+    "zod": "4.5.2"
+  },
+  "catalogs": {
+    "sandbox-image": {
+      "@anthropic-ai/claude-agent-sdk": "0.3.263",
+      "ws": "8.21.0"
+    },
+    "workers-v5": {
+      "@cloudflare/workers-types": "^5.20260825.1"
+    }
+  }
+}
