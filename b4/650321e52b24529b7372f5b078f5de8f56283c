@@ -1,0 +1,26 @@
+packages/sandbox-local/src/paths.test.ts
+  s_86f5abf516419a::t_9a1275dbc65eac 2-19
+packages/sandbox-local/src/paths.ts
+  s_86f5abf516419a::t_f9e10a654cff87 63-87,89
+packages/sandbox-local/src/journal.test.ts
+  s_86f5abf516419a::t_0024216faddbb2 16-23
+packages/sandbox-local/src/journal.ts
+  s_86f5abf516419a::t_35cb70c63fead5 86
+  s_86f5abf516419a::t_b4f22ad1b3ab0c 22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "b4650321e52b24529b7372f5b078f5de8f56283c",
+  "prompts": {},
+  "sessions": {
+    "s_86f5abf516419a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "136baca2-af61-40fb-916b-7cf988dd2170",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
