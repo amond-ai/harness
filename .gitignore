@@ -9,4 +9,6 @@ coverage/
 .env.*
 !.env.example
 
+.claude/settings.local.json
+
 .DS_Store
