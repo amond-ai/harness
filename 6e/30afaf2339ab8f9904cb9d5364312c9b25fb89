@@ -1,0 +1,24 @@
+packages/sandbox-vercel/src/vercel-kill.test.ts
+  s_1f7cf591f7a2f5::t_a993df67f14584 204-206
+  s_1f7cf591f7a2f5::t_16d38b9680582d 3
+  s_1f7cf591f7a2f5::t_6e93b54d4cd26c 143-163
+packages/sandbox-vercel/src/vercel-kill.ts
+  s_1f7cf591f7a2f5::t_f31e293e3dd431 135-171,180
+  s_1f7cf591f7a2f5::t_3c8fb81d7c62c5 38-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "6e30afaf2339ab8f9904cb9d5364312c9b25fb89",
+  "prompts": {},
+  "sessions": {
+    "s_1f7cf591f7a2f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "972d8524-f9d7-4ecd-9399-c8425f5039d6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
