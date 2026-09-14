@@ -6,10 +6,10 @@ harness-shaped code in any of them.
 
 ```ts
 import { createHarnessSandboxProvider } from '@amond-ai/harness-sandbox'
-import { createE2bProvider } from '@amond-ai/sandbox-e2b'
+import { createE2bProvider, e2bSandboxApi } from '@amond-ai/sandbox-e2b'
 
 const harnessSandbox = createHarnessSandboxProvider({
-  sandboxes: createE2bProvider({ apiKey: process.env.E2B_API_KEY }),
+  sandboxes: createE2bProvider({ api: e2bSandboxApi({ apiKey: process.env.E2B_API_KEY }) }),
   defaultWorkingDirectory: '/workspace',
   ports: [30_000],
 })
@@ -25,7 +25,7 @@ shape a backend can satisfy with no mapping. The harness's own shape is a *furth
 translation — and this package is where it lives, so the dozen modules of a backend never see
 it.
 
-Three surfaces make up the provider, and each is exported on its own for a backend that needs
+Four surfaces make up the provider, and each is exported on its own for a backend that needs
 only part of it:
 
 | Export | What it translates |

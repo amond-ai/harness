@@ -63,13 +63,16 @@ orchestrator (any JS runtime)                  sandbox (e2b, Cloudflare, ...)
 
 ## Quick start
 
-Every package is published to npm under `@amond-ai`, as ESM, for Node 22 or newer (and for
-Deno, Bun, and workerd). Install the driver, a socket opener for your runtime, and a sandbox
-backend:
+Install the driver, a socket opener for your runtime, and a sandbox backend:
 
 ```bash
 bun add @amond-ai/harness-claude-code @amond-ai/harness-transport @amond-ai/sandbox-e2b
 ```
+
+Every package is published under `@amond-ai`, as ESM, for Node 22 or newer. Which *other*
+runtimes a package runs on differs by package — [Runtimes](#runtimes) is the authority. Two
+members do not travel: the bridge is a Node process for the sandbox image, and `sandbox-local`
+spawns processes on the host, so neither belongs in a Worker.
 
 The driver decides nothing about your platform. You give it a sandbox provider, a way to open
 a socket, how to invoke `claude`, where to publish the transcript, and the thresholds to judge
@@ -174,10 +177,12 @@ bun run lint
 bun run test
 ```
 
-A package's `exports` point at `dist/`, so `build` runs ahead of `check` and `test` — turbo
-orders that for you. The host bundle for the sandbox image is built with `bun build` targeting
-Node instead; the image build asserts that `claude --version` equals the Agent SDK's bundled
-version and fails on a mismatch.
+A package's `exports` point at `dist/`, so a package has to be built before anything resolves
+it. `test` depends on its own package's `build`; `check` depends only on its **dependencies'**
+builds, so `bun run check` alone does not build the package you are checking — run `build`
+yourself when you want to inspect what a package ships. The host bundle for the sandbox image
+is built with `bun build` targeting Node instead; the image build asserts that
+`claude --version` equals the Agent SDK's bundled version and fails on a mismatch.
 
 ## Releasing
 
@@ -186,18 +191,25 @@ Versions and changelogs are release-please's, driven by
 tags every package it bumped, and the same workflow then publishes exactly those packages to
 npm — the tarball packed by bun, published by the npm CLI through npm's trusted publishing, so
 each version carries a provenance attestation tied to this repository, the release commit, and
-that workflow run. Nothing is published from a laptop, and there is no npm token to hold.
+that workflow run. There is no npm token to hold: the registry mints the credential from the
+workflow's own OIDC identity.
 
 ```bash
 npm view @amond-ai/harness-claude-code dist.attestations   # provenance present?
 ```
 
-`scripts/publish.ts` is what that workflow runs, and it is the same command by hand:
+[`scripts/publish.ts`](scripts/publish.ts) is what that workflow runs, and it is the same
+command by hand:
 
 ```bash
 bun scripts/publish.ts --dry-run    # pack every package, publish nothing
 bun scripts/publish.ts              # publish what is not on the registry yet
 ```
+
+A publish run by hand needs `npm login` and produces **no attestation** — provenance requires
+the OIDC token only GitHub Actions can mint, so the script requests it there and nowhere else.
+Use the local path for the first release of a package, before npm has a trusted publisher to
+mint a credential from; everything after that belongs to the workflow.
 
 ## Contributing
 

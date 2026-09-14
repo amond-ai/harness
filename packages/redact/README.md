@@ -10,21 +10,24 @@ pasted into a prompt or echoed by a failing command can surface. They all reach 
 here.
 
 ```ts
-import { sanitizeDiagnostic, sanitizeErrorSummary } from '@amond-ai/redact'
+import { sanitizeDiagnostic, sanitizePersistedDiagnostic } from '@amond-ai/redact'
 
 // The protected values are the ones that carry no shape of their own — an
 // operator-typed webhook secret is whatever they typed.
 console.error(sanitizeDiagnostic(stderr, [webhookSecret], 2_000))
 
-await store.put(runId, { error: sanitizeErrorSummary(stderr) })
+await store.put(runId, { error: sanitizePersistedDiagnostic(stderr, [webhookSecret], 500) })
 ```
+
+`sanitizeErrorSummary(stderr)` is the shorter durable path, and it takes no protected
+values — reach for it only when the diagnostic carries nothing shapeless.
 
 ## What it covers
 
 | Export | Signature |
 | --- | --- |
 | `maskSecretShapes` | `(text)` — the shape list, applied to one string |
-| `maskCredentialLines` | `(text)` — the shapes, plus the line-level `name=value` rule |
+| `maskCredentialLines` | `(text)` — the shapes, plus the line rule: a line naming a credential is dropped whole |
 | `maskPersistedText` | `(raw)` — the line rule for durable text; `null` for blank input |
 | `sanitizeDiagnostic` | `(diagnostic, protectedValues, maxLength)` — protected values, then shapes, then the bound |
 | `sanitizePersistedDiagnostic` | the same three arguments, with the line rule instead of the shapes alone |
@@ -41,7 +44,9 @@ part that is kept. So every bounded entry point masks first and slices second.
 **But never scan unbounded input.** `sanitizeErrorSummary` can be handed megabytes of
 accumulated stderr for a 500-character column. It bounds the raw text to 64 KiB *before*
 redaction, which is generous enough that no realistic log line is cut by it, and turns an
-unbounded scan into a bounded one.
+unbounded redaction pass into a bounded one. The blank check ahead of that bound is the one
+thing that still reads past it — `raw.trim()` walks in from both ends, so input that is
+whitespace all the way through is scanned in full before anything is cut.
 
 **One `maskSecretShapes` run per pass.** Chaining two masking passes is its own defect: the
 second pass cuts the first one's replacements in half. `sanitizePersistedDiagnostic` exists so

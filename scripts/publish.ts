@@ -69,12 +69,14 @@ const selected = requested.length > 0
  * and the job that calls this script is gated on that already.
  */
 function releasedPaths(): string[] | null {
-  const raw = process.env.PATHS_RELEASED?.trim()
-  if (!raw) {
+  const raw = process.env.PATHS_RELEASED
+  if (raw === undefined) {
     return null
   }
-  const paths = JSON.parse(raw) as string[]
-  return paths.length > 0 ? paths : []
+  if (!raw.trim()) {
+    return []
+  }
+  return JSON.parse(raw) as string[]
 }
 
 /**
@@ -132,12 +134,17 @@ if (selected.length === 0) {
   process.exit(0)
 }
 
+const order = inDependencyOrder(selected)
+
+// Scoped to the selection rather than the workspace: `turbo run build` would let a
+// broken build in a package nobody is publishing block a one-package run. `--filter`
+// still pulls in each selected package's own dependencies, which is what `dist/` needs.
 // turbo caches this, so the build CI already ran costs nothing the second time.
-execFileSync('bun', ['run', 'build'], { stdio: 'inherit' })
+execFileSync('bun', ['run', 'build', ...order.map(path => `--filter=${manifestOf(path).name}`)], { stdio: 'inherit' })
 
 const destination = mkdtempSync(join(tmpdir(), 'harness-publish-'))
 
-for (const path of inDependencyOrder(selected)) {
+for (const path of order) {
   const { name, version } = manifestOf(path)
 
   if (!dryRun && alreadyPublished(name, version)) {

@@ -5,6 +5,9 @@ coverage/
 .turbo/
 *.tsbuildinfo
 
+# Local tooling state — PR snapshots, review-bot thread bodies, session caches.
+.please/
+
 .env
 .env.*
 !.env.example

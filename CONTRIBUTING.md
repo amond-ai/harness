@@ -27,8 +27,9 @@ bun run check       # type-check every package (tsc --noEmit)
 bun run test        # run the test suite
 ```
 
-`check` and `test` depend on `build`, so turbo runs it for you; run it on its own when you want
-to inspect what a package would ship.
+`test` depends on its own package's `build`, so turbo runs that for you. `check` depends only on
+its **dependencies'** builds — it does not build the package being checked — so run `build`
+yourself when you want to inspect what a package would ship.
 
 ## Commit messages
 

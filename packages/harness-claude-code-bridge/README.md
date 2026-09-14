@@ -1,8 +1,10 @@
 # @amond-ai/harness-claude-code-bridge
 
 The per-turn host that runs **inside the sandbox image**: it hosts the Claude Agent SDK's
-`query()` and serves the orchestrator over a WebSocket, appending every frame to a
-sequence-numbered journal on disk before it sends it.
+`query()` and serves the orchestrator over a WebSocket, appending each transcript frame to a
+sequence-numbered journal on disk before it sends it. Stream-event deltas are the exception —
+they are emitted live-only (`{ journal: false }`), so they take a `seq` but a reconnect does
+not replay them.
 
 This package ships one artifact — `dist/bridge.mjs`, a Node bundle. It is not a library: the
 orchestrator never imports it, it *execs* it. The Worker-side half is
@@ -20,7 +22,12 @@ The bundle leaves three dependencies external, so they resolve from the image's 
 ```dockerfile
 RUN npm install --global @amond-ai/harness-claude-code-bridge@<version> \
  && cp "$(npm root -g)/@amond-ai/harness-claude-code-bridge/dist/bridge.mjs" /opt/turn-host/bridge.mjs
-RUN npm install --prefix /opt/turn-host @anthropic-ai/claude-agent-sdk ws zod
+# Pin all three. Unpinned, a rebuild pairs this bundle with whatever npm calls latest,
+# and the SDK is the one dependency whose version has to match the `claude` CLI in the
+# image. The versions this bundle is built against are the repository root's
+# `sandbox-image` catalog (`@anthropic-ai/claude-agent-sdk`, `ws`) and its `zod` entry.
+RUN npm install --prefix /opt/turn-host \
+      @anthropic-ai/claude-agent-sdk@<version> ws@<version> zod@<version>
 
 # The image build's smoke test: loads the bundle and the real SDK, prints both versions, exits 0.
 RUN node /opt/turn-host/bridge.mjs --version
@@ -35,11 +42,15 @@ sandbox — when the bundle cannot resolve its runtime dependencies.
 The host takes `--workdir` and `--bridge-state-dir`, binds the port it is told to, prints
 `bridge-ready` with that port, and gates the socket on the per-turn token. From there the
 orchestrator sends `start`, consumes frames for one bounded round, and reconnects with
-`attach { since }` — the journal replays everything after that sequence, so a dropped socket
-loses nothing. The wire schema for all of it is
+`resume { lastSeenEventId }` — the journal replays every journaled frame after that sequence,
+so a dropped socket loses no transcript. The live-only deltas above are the exception, and
+nothing should be reconstructed from them. The wire schema for all of it is
 [`@amond-ai/harness-protocol`](../harness-protocol).
 
-The process **does not exit when a turn ends**: only `stop` and `destroy` end it.
+A turn ending **does not end the process**: `stop` and `destroy` are the ordinary way it
+exits, so the same host serves the next turn. Two paths end it anyway — an interrupt the turn
+does not answer escalates to an exit, and a startup that cannot parse its arguments or load
+the SDK exits before serving anything.
 
 ## Upstream
 
