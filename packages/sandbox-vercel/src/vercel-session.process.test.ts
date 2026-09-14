@@ -81,6 +81,22 @@ describe('exec', () => {
     writeFiles.mockRestore()
     warn.mockRestore()
   })
+
+  it('keeps the filesystem root a root when normalizing journalRoot', async () => {
+    const fake = fakeSandbox()
+    const handle = await createVercelSession(fake.sandbox, {
+      journalRoot: '/',
+      newProcessId: () => 'p1',
+      now: () => AT,
+      pollIntervalMs: 0,
+    }).exec(['claude'])
+
+    // Stripping the trailing slash from `/` leaves the empty string, which `createJournalIo`
+    // interpolates straight into `mkdir -p -- ''` and `test -d ''` — so the session could
+    // neither exec nor discover, while `journalPaths('/')` is explicitly supported.
+    expect(fake.ran).toContainEqual({ cmd: 'mkdir', args: ['-p', '--', '/'] })
+    expect(fake.files.has(journalPaths('/', handle.id).meta)).toBe(true)
+  })
 })
 
 describe('statusOf', () => {

@@ -118,7 +118,11 @@ export function createVercelSession(
   const elapsedMs = options.monotonicNowMs ?? (() => Date.now())
   // Trailing slashes stripped the way `journalPaths` strips them, so the prefix a recovered
   // wrapper's argv is matched against is the one that actually appears in it.
-  const root = options.journalRoot.replace(/\/+$/, '')
+  // The `|| '/'` keeps the filesystem root a root: stripping its only slash leaves the empty
+  // string, which `createJournalIo` interpolates straight into `mkdir -p -- ''` and `ls -1 -- ''`,
+  // so the session could neither exec nor discover. `journalPaths` reconstructs its paths as
+  // `${base}/${id}`, which is why it can strip the same slash and still be right.
+  const root = options.journalRoot.replace(/\/+$/, '') || '/'
 
   /**
    * Commands this isolate started, keyed by process id.
