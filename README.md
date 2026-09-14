@@ -192,6 +192,13 @@ that workflow run. Nothing is published from a laptop, and there is no npm token
 npm view @amond-ai/harness-claude-code dist.attestations   # provenance present?
 ```
 
+`scripts/publish.ts` is what that workflow runs, and it is the same command by hand:
+
+```bash
+bun scripts/publish.ts --dry-run    # pack every package, publish nothing
+bun scripts/publish.ts              # publish what is not on the registry yet
+```
+
 ## Contributing
 
 Bugs go to [Issues](https://github.com/amond-ai/harness/issues/new/choose); feature proposals go

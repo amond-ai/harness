@@ -62,24 +62,9 @@ jobs:
       - name: Build
         run: bun run build
 
-      # `bun publish` cannot request the OIDC token or emit an attestation, so
-      # the tarball is produced with bun and published with the npm CLI. npm
-      # 11.5.1+ is what implements trusted publishing; Node 24 ships past it.
+      # Publishes in dependency order, skipping any version already on the
+      # registry — see the script for why neither is optional here.
       - name: Publish to npm
         env:
           PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}
-        run: |
-          set -euo pipefail
-          npm --version
-          for package_path in $(echo "$PATHS_RELEASED" | jq -r '.[]'); do
-            manifest="$package_path/package.json"
-            # `bun pm pack` names the tarball after the manifest, with the scope
-            # flattened: @amond-ai/sandbox 0.1.0 -> amond-ai-sandbox-0.1.0.tgz.
-            slug="$(jq -r '.name | sub("^@"; "") | sub("/"; "-")' "$manifest")"
-            version="$(jq -r '.version' "$manifest")"
-            tarball="$RUNNER_TEMP/$slug-$version.tgz"
-
-            (cd "$package_path" && bun pm pack --destination "$RUNNER_TEMP")
-            echo "publishing $package_path -> $tarball"
-            npm publish "$tarball" --provenance --access public
-          done
+        run: bun scripts/publish.ts
