@@ -33,8 +33,12 @@
     "typescript": "catalog:"
   },
   "lint-staged": {
-    "*.{js,jsx,ts,tsx}": ["eslint --cache --fix"],
-    "*.{md,mdx,mjs,yml,yaml,json,jsonc}": ["eslint --cache --fix"]
+    "*.{js,jsx,ts,tsx}": [
+      "eslint --cache --fix"
+    ],
+    "*.{md,mdx,mjs,yml,yaml,json,jsonc}": [
+      "eslint --cache --fix"
+    ]
   },
   "catalog": {
     "@ai-sdk/harness": "1.0.87",
@@ -46,6 +50,7 @@
     "bun-types": "^1.4.2",
     "e2b": "^2.45.0",
     "eslint": "^10.7.0",
+    "tsdown": "^0.23.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10",
     "zod": "4.5.2"

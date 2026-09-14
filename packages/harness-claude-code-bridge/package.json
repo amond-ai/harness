@@ -2,14 +2,38 @@
   "name": "@amond-ai/harness-claude-code-bridge",
   "type": "module",
   "version": "0.1.0",
-  "private": true,
   "description": "The per-turn host that runs inside the sandbox image — hosts the Claude Agent SDK's query() and serves the Worker over a WebSocket",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/amond-ai/harness/tree/main/packages/harness-claude-code-bridge#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/amond-ai/harness.git",
     "directory": "packages/harness-claude-code-bridge"
+  },
+  "bugs": {
+    "url": "https://github.com/amond-ai/harness/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "agent",
+    "sandbox",
+    "agent-sdk",
+    "websocket",
+    "turn-host"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": "./dist/bridge.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
   },
   "scripts": {
     "build": "bun build src/main.ts --target=node --outfile=dist/bridge.mjs --external @anthropic-ai/claude-agent-sdk --external ws --external zod",
