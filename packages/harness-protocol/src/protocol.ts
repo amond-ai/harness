@@ -10,6 +10,13 @@
  */
 
 import { z } from 'zod/v4'
+import {
+  bridgeErrorPhaseSchema,
+  interruptInboundSchema,
+  interruptReasonSchema,
+  stoppedReasonSchema,
+  turnHostStartedSchema,
+} from './bridge-extensions'
 import { startMessageSchema as claudeCodeStartMessageSchema } from './claude-code-bridge-protocol'
 import {
   harnessV1BridgeInboundCommandSchemas,
@@ -20,6 +27,24 @@ import {
   harnessV1FinishPartSchema,
 } from './harness-v1/harness-v1-stream-part'
 
+/*
+ * The agent-agnostic half lives in `bridge-extensions.ts` and is re-exported here rather than
+ * moved out of reach: it was defined in this file until the bridge runtime became its own package,
+ * and every consumer imports it from the package root.
+ */
+export {
+  bridgeErrorPhaseSchema,
+  interruptInboundSchema,
+  interruptReasonSchema,
+  stoppedReasonSchema,
+  turnHostStartedSchema,
+} from './bridge-extensions'
+export type {
+  BridgeErrorPhase,
+  InterruptReason,
+  StoppedReason,
+  TurnHostStarted,
+} from './bridge-extensions'
 export {
   bridgeReadySchema,
   outboundMessageSchema,
@@ -155,27 +180,6 @@ export const startMessageSchema = claudeCodeStartMessageSchema.extend({
 
 export type StartMessage = z.infer<typeof startMessageSchema>
 
-/**
- * Why the client is stopping the turn — named on the `interrupt` command, and echoed back on
- * the ending the host answers it with (`turnHostFinishSchema` / `turnHostErrorSchema`).
- *
- * Shared by both directions on purpose: the client's memory of what it asked for is not
- * durable, so the host's echo is what a re-entered round reads the cause from.
- */
-export const interruptReasonSchema = z.enum(['watchdog', 'budget', 'operator'])
-
-export type InterruptReason = z.infer<typeof interruptReasonSchema>
-
-/**
- * End the running turn early but keep it a turn: the host calls
- * `Query.interrupt()`, so the SDK still produces a `result` and the bridge
- * still emits `finish`. `abort` tears the process down instead.
- */
-export const interruptInboundSchema = z.object({
-  type: z.literal('interrupt'),
-  reason: interruptReasonSchema,
-})
-
 export const inboundCommandSchemas = [
   ...harnessV1BridgeInboundCommandSchemas,
   interruptInboundSchema,
@@ -214,11 +218,6 @@ export const sessionArtifactsSchema = z.object({
 })
 
 export type SessionArtifacts = z.infer<typeof sessionArtifactsSchema>
-
-/** How the turn ended, as the host judged it from the SDK's `terminal_reason`. */
-export const stoppedReasonSchema = z.enum(['completed', 'interrupted', 'deferred'])
-
-export type StoppedReason = z.infer<typeof stoppedReasonSchema>
 
 /**
  * `finish`, with the fields this host adds — and the reason this extension exists at all.
@@ -275,11 +274,6 @@ export const turnHostFinishSchema = harnessV1FinishPartSchema.extend({
 
 export type TurnHostFinish = z.infer<typeof turnHostFinishSchema>
 
-/** Which stage of the turn an `error` came from — stripped by the upstream schema, as above. */
-export const bridgeErrorPhaseSchema = z.enum(['start', 'init', 'run'])
-
-export type BridgeErrorPhase = z.infer<typeof bridgeErrorPhaseSchema>
-
 export const turnHostErrorSchema = harnessV1ErrorPartSchema.extend({
   phase: bridgeErrorPhaseSchema.optional(),
   /**
@@ -305,15 +299,6 @@ export const turnHostErrorSchema = harnessV1ErrorPartSchema.extend({
 })
 
 export type TurnHostError = z.infer<typeof turnHostErrorSchema>
-
-/**
- * The host's acknowledgement that a `start` was taken: sent the moment the bridge enters
- * `running`, before `query()` produces anything, so a client can tell "the turn is starting" from
- * "the model has not spoken yet". Journaled like every other frame, so it carries a `seq`.
- */
-export const turnHostStartedSchema = z.object({ type: z.literal('bridge-started') })
-
-export type TurnHostStarted = z.infer<typeof turnHostStartedSchema>
 
 /**
  * Every frame this host can send, with `finish` and `error` in their extended form, plus
