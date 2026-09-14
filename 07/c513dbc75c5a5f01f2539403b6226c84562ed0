@@ -1,0 +1,155 @@
+packages/sandbox-vercel/src/journal.ts
+  s_8255f7389cc042::t_3727e9f578f543 1-52,69-204,206,231-428
+  s_8255f7389cc042::t_ae388e270a640f 53-68
+  s_8255f7389cc042::t_9cf684d22791de 205,207-230
+packages/sandbox-vercel/src/vercel-session.ts
+  s_8255f7389cc042::t_0baec9bb129ac1 96-103,447
+  s_8255f7389cc042::t_aad22418b472e8 1-87,89-90,104-135,138-446,448-461
+  s_8255f7389cc042::t_2db32a2bc2581d 88,91-95,136-137
+packages/sandbox-vercel/src/lifetime.ts
+  s_8255f7389cc042::t_65b27081852a9b 1-16,19,28-31,33-41,52,57,59-67,71-96,110-111,122-123,125-127,129,132-134,137,139-142,144-145,147-148,151-156
+  s_8255f7389cc042::t_2db32a2bc2581d 17-18,20-27,32,42-51,53-56,58,68-70,97-109,112-121,124,128,130-131,135-136,138,143,146,149-150
+packages/sandbox-vercel/src/vercel-session.wait.test.ts
+  s_8255f7389cc042::t_01995bbe3bdfbc 1-3,7-134
+  s_8255f7389cc042::t_bef0f82cc734b0 4,6
+  s_8255f7389cc042::t_aeab9668d18f7b 5
+packages/sandbox-vercel/src/shell-quote.test.ts
+  s_8255f7389cc042::t_e534fe01280675 1-76
+packages/sandbox-vercel/src/shell-quote.ts
+  s_8255f7389cc042::t_fbdf3ee33f8be4 1-93
+packages/sandbox-vercel/src/lifetime.test.ts
+  s_8255f7389cc042::t_57e834cd27bfdc 137
+  s_8255f7389cc042::t_bef0f82cc734b0 3
+  s_8255f7389cc042::t_1bf562c6b49f77 154-240
+  s_8255f7389cc042::t_89c9855965c2ed 78-79,81,100-101
+  s_8255f7389cc042::t_a00765534ac82f 10-15
+  s_8255f7389cc042::t_849ee7e3d3167a 1-2,4-9,16-35,37-48,50-69,71-77,80,82-91,93-99,102-113,115-136,138-153
+  s_8255f7389cc042::t_6443161f926c0e 36,49,70,92,114
+packages/sandbox-vercel/src/vercel-files.test.ts
+  s_8255f7389cc042::t_bef0f82cc734b0 4
+  s_8255f7389cc042::t_a00765534ac82f 1-3,5-111
+packages/sandbox-vercel/src/provider.test.ts
+  s_8255f7389cc042::t_0e65969387063a 85-89,92-97
+  s_8255f7389cc042::t_016f29c73ce297 203-219
+  s_8255f7389cc042::t_f3632c961991ae 159-160,202,231-232
+  s_8255f7389cc042::t_64ad21760dacc7 1-84,90-91,98-158,161-201,220-230,233-254
+packages/sandbox-vercel/src/vercel-session.process.test.ts
+  s_8255f7389cc042::t_bef0f82cc734b0 3,5
+  s_8255f7389cc042::t_aeab9668d18f7b 4
+  s_8255f7389cc042::t_69362e431cf22e 1-2,6-45,63,65-235
+  s_8255f7389cc042::t_786e0ab96aecf1 46-62,64
+README.md
+  s_8255f7389cc042::t_24fd10a3d22aa6 32
+  s_8255f7389cc042::t_7b7964dd74874d 141
+  s_8255f7389cc042::t_41a367bbaddfdd 168-170
+packages/sandbox-vercel/src/vercel-kill.test.ts
+  s_8255f7389cc042::t_467307966a7884 1-6,8-186
+  s_8255f7389cc042::t_bef0f82cc734b0 7
+packages/sandbox-vercel/src/vercel-files.ts
+  s_8255f7389cc042::t_e48a454c8361a9 1-126
+packages/sandbox-vercel/src/vercel-kill.ts
+  s_8255f7389cc042::t_a00765534ac82f 21
+  s_8255f7389cc042::t_72ef9b8c2c7974 130,148,157
+  s_8255f7389cc042::t_bc0c0be7e322f1 27-35
+  s_8255f7389cc042::t_9a7b04253207c0 1-20,22-26,36-129,131-147,149-156,158-167
+packages/sandbox-vercel/src/log-replay.test.ts
+  s_8255f7389cc042::t_897922acd234d2 1-53
+packages/sandbox-vercel/src/provider.ts
+  s_8255f7389cc042::t_0e65969387063a 156-159,161,164-165,167-175,177-178,184,188,193-194,196-200,202-204,206-208,215-216,218-219,226-227,306
+  s_8255f7389cc042::t_0baec9bb129ac1 272
+  s_8255f7389cc042::t_876400d03a0e79 1-155,160,162-163,166,176,179-183,185-187,189-192,195,201,205,209-214,217,220-225,228-265,273-305,307-398
+  s_8255f7389cc042::t_2db32a2bc2581d 266-271
+package.json
+  s_8255f7389cc042::t_ff658f9402a3a6 49
+packages/sandbox-vercel/src/vercel-probe.test.ts
+  s_8255f7389cc042::t_207a63beada55d 29-32,59-69
+  s_8255f7389cc042::t_bef0f82cc734b0 4
+  s_8255f7389cc042::t_3c9c871e473464 1-3,5-28,33-58,70-77,79-82,84-98,100-102,105,107-119,124-181,187-197,200-224
+  s_8255f7389cc042::t_f49088a406615c 78,83,99,103-104,106,120-123
+  s_8255f7389cc042::t_2480f4bdb409ea 182-186,198-199
+release-please-config.json
+  s_8255f7389cc042::t_38dff91e164d5f 54-58
+packages/sandbox-vercel/package.json
+  s_8255f7389cc042::t_b0594dad83ec22 1-62
+packages/sandbox-vercel/vitest.config.ts
+  s_8255f7389cc042::t_b0594dad83ec22 1-10
+packages/sandbox-vercel/src/log-follow.ts
+  s_8255f7389cc042::t_a32f24824cf106 1-50,52-67,69,72-74,76-169,173-194,196-219
+  s_8255f7389cc042::t_37bbad0495de3f 51,68,70-71,75,170-172,195
+packages/sandbox-vercel/src/vercel-session.fixtures.ts
+  s_8255f7389cc042::t_12cec44ecb1690 19-165
+  s_8255f7389cc042::t_cb816c71345416 1,13
+  s_8255f7389cc042::t_f2d505cc3777ff 14-15,17
+  s_8255f7389cc042::t_63cd2c04685000 2-12,16,18
+packages/sandbox-vercel/src/vercel-session.logs.test.ts
+  s_8255f7389cc042::t_bef0f82cc734b0 3,5
+  s_8255f7389cc042::t_bb00d44cd8c499 1-2,6-22,26-175,177-184,187-231
+  s_8255f7389cc042::t_aeab9668d18f7b 4,23-25
+  s_8255f7389cc042::t_ecd220a33914ee 176,185-186
+packages/sandbox-vercel/NOTICE
+  s_8255f7389cc042::t_b0594dad83ec22 1-2
+packages/sandbox-vercel/tsconfig.json
+  s_8255f7389cc042::t_b0594dad83ec22 1-9
+packages/sandbox-vercel/src/journal-io.ts
+  s_8255f7389cc042::t_8dc9221d9c711c 44-45,172-195,261
+  s_8255f7389cc042::t_1cca17a9dda322 1-43,46-111,113-171,196-260,262-264
+  s_8255f7389cc042::t_2a16c502066140 112
+packages/sandbox-vercel/src/vercel-surface.ts
+  s_8255f7389cc042::t_57dbc9575a53af 107-117
+  s_8255f7389cc042::t_7d4e227cc52fc9 1-106,118-166
+packages/sandbox-vercel/src/index.ts
+  s_8255f7389cc042::t_0baec9bb129ac1 1-11,14,17-19,26,28,30-36
+  s_8255f7389cc042::t_f3632c961991ae 12-13,15-16,20-25,27,29
+packages/sandbox-vercel/src/log-replay.ts
+  s_8255f7389cc042::t_2ee6104cc7ca67 1-72
+packages/sandbox-vercel/README.md
+  s_8255f7389cc042::t_f3632c961991ae 1-42,48,53-150,153-162,172-180,184,213-219,228-239
+  s_8255f7389cc042::t_a96553eeea9aa1 43-47,49-52
+  s_8255f7389cc042::t_8efb29dbc15ab6 181-183,185-212,220-227
+  s_8255f7389cc042::t_be4e8d8a2128e8 151-152,163-171
+.release-please-manifest.json
+  s_8255f7389cc042::t_52ec8d7a17e148 12
+packages/sandbox-vercel/src/vercel-api.test.ts
+  s_8255f7389cc042::t_cb4ebb4be03c1e 14-82
+  s_8255f7389cc042::t_35426570828b39 1-13,83-89
+packages/sandbox-vercel/src/log-reads.ts
+  s_8255f7389cc042::t_37bbad0495de3f 1-217
+packages/sandbox-vercel/src/vercel-api.ts
+  s_8255f7389cc042::t_1baae19119568e 15,196-197,224
+  s_8255f7389cc042::t_9f0e2f9880b54e 202-211
+  s_8255f7389cc042::t_4934a3bb9bf4b2 1-14,16-127,179-190,192-195,198-201,212-223,225-260
+  s_8255f7389cc042::t_5f59e69c9efad1 128-178
+  s_8255f7389cc042::t_06823993a08acc 191
+packages/sandbox-vercel/src/journal.test.ts
+  s_8255f7389cc042::t_ad5f49b598ec86 1-123,142-226
+  s_8255f7389cc042::t_849a8b9e4048c8 124-141
+packages/sandbox-vercel/src/vercel-sandbox.fake.ts
+  s_8255f7389cc042::t_63cd2c04685000 1-53,62-70,73-262,264-266,268-296,300-321,331-333,338-357,364-382
+  s_8255f7389cc042::t_9431e1e67cc89b 54-61,263,322-330
+  s_8255f7389cc042::t_9f0e2f9880b54e 71-72,267,297-299,334-337,358-363
+packages/sandbox-vercel/src/vercel-probe.ts
+  s_8255f7389cc042::t_8dc9221d9c711c 52-62,70-79,83-91,189,194,325-327
+  s_8255f7389cc042::t_07b47d4824c491 1-51,63-69,80-82,92-117,127-138,146,155-157,159-188,190-193,195-324,328-330
+  s_8255f7389cc042::t_1d5ac74ee0a64b 118-126,147-154
+  s_8255f7389cc042::t_1c562126859dcd 139-145,158
+packages/sandbox-vercel/LICENSE
+  s_8255f7389cc042::t_b0594dad83ec22 1-201
+bun.lock
+  s_8255f7389cc042::t_c2e0a7882bb95d 193-208,216,268-269,712-713,742,822-823,830-831,834-835,1082-1083,1100-1101,1266,1292-1293,1338,1494-1495,1592-1593,1666-1667,1686-1689,1782-1785,1816-1817,1820-1821,1840-1841,1928-1929
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "07c513dbc75c5a5f01f2539403b6226c84562ed0",
+  "prompts": {},
+  "sessions": {
+    "s_8255f7389cc042": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "29cb4648-246e-4190-b6b4-a73eae9bcf93",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
