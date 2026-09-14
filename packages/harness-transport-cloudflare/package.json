@@ -4,6 +4,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "Opens the harness bridge socket from workerd \u2014 through a Cloudflare Sandbox binding or straight over `fetch` \u2014 so the adapter never reaches for `ws`",
+  "author": "Passion Factory Corp.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amond-ai/harness.git",
+    "directory": "packages/harness-transport-cloudflare"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./ws": "./src/ws.ts"

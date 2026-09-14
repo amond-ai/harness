@@ -4,6 +4,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "The bridge wire protocol the turn host and its Worker client both speak — vendored from @ai-sdk/harness, extended with the fields this deployment adds",
+  "author": "Passion Factory Corp.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amond-ai/harness.git",
+    "directory": "packages/harness-protocol"
+  },
   "exports": {
     ".": "./src/index.ts"
   },

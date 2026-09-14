@@ -4,6 +4,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "The bridge socket a turn driver speaks over \u2014 the `ws`-shaped socket shim, the upgrade handshake, and a dialer built on the standard WebSocket constructor",
+  "author": "Passion Factory Corp.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amond-ai/harness.git",
+    "directory": "packages/harness-transport"
+  },
   "exports": {
     ".": "./src/index.ts"
   },

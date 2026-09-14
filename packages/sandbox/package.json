@@ -4,6 +4,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "The sandbox surface the orchestrator runs against — owned here, not borrowed, so a backend other than Cloudflare can satisfy it",
+  "author": "Passion Factory Corp.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amond-ai/harness.git",
+    "directory": "packages/sandbox"
+  },
   "exports": {
     ".": "./src/index.ts"
   },

@@ -4,6 +4,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "An e2b backend for @amond-ai/sandbox — journals process transcripts and exit status to the sandbox filesystem, because e2b forgets a process the moment it exits",
+  "author": "Passion Factory Corp.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amond-ai/harness.git",
+    "directory": "packages/sandbox-e2b"
+  },
   "exports": {
     ".": "./src/index.ts"
   },
