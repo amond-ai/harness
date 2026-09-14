@@ -1,0 +1,21 @@
+packages/sandbox-vercel/src/vercel-session.process.test.ts
+  s_1f7cf591f7a2f5::t_b2b35788dbbe95 84-99
+packages/sandbox-vercel/src/vercel-session.ts
+  s_1f7cf591f7a2f5::t_be0ca36da83c45 121-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "f82896e037140fe27795ef425a6f4cafbc65e1e9",
+  "prompts": {},
+  "sessions": {
+    "s_1f7cf591f7a2f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "972d8524-f9d7-4ecd-9399-c8425f5039d6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
