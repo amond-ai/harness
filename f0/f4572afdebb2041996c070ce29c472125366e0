@@ -1,0 +1,25 @@
+scripts/publish.ts
+  s_b1a78581ebd08f::t_3fdd0785d2be69 19-25,135-137,143
+.github/workflows/release-please.yml
+  s_b1a78581ebd08f::t_a58cda1a1b61c0 62-63
+packages/harness-protocol/package.json
+  s_b1a78581ebd08f::t_3fdd0785d2be69 5,39
+packages/harness-claude-code-bridge/package.json
+  s_b1a78581ebd08f::t_3fdd0785d2be69 5,34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "f0f4572afdebb2041996c070ce29c472125366e0",
+  "prompts": {},
+  "sessions": {
+    "s_b1a78581ebd08f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "159e8f3f-ece7-430a-8d17-bd14f6186bfd",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
