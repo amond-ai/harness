@@ -1,0 +1,27 @@
+README.md
+  s_b1a78581ebd08f::t_7827f5386a71b0 66-73,171,177-193
+.github/workflows/ci.yml
+  s_b1a78581ebd08f::t_e04e7532ba24be 37-41
+.github/workflows/release-please.yml
+  s_b1a78581ebd08f::t_5dbd841b0d38af 75-82
+  s_b1a78581ebd08f::t_05e7643de00531 14-16,30,36-74,83-85
+CONTRIBUTING.md
+  s_b1a78581ebd08f::t_6b29fdce0f448e 24,30-31
+  s_b1a78581ebd08f::t_57d8f56dab86b8 32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "d5e58862e9747d33c173528a716805d276de5859",
+  "prompts": {},
+  "sessions": {
+    "s_b1a78581ebd08f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "159e8f3f-ece7-430a-8d17-bd14f6186bfd",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
