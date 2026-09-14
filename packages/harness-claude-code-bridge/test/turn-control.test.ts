@@ -1,10 +1,5 @@
 import type { Host } from './harness'
-import { mkdtemp } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import process from 'node:process'
 import { afterEach, expect, it } from 'vitest'
-import { runBridge } from '../src/bridge-runtime'
 import {
   connect,
   createFakeQuery,
@@ -256,33 +251,6 @@ it('lets an explicit resume suppress the implicit continue', async () => {
   )
   expect(query.options?.resume).toBeUndefined()
   expect(query.options?.continue).toBe(true)
-})
-
-/**
- * The bridge binds `0.0.0.0`, so the channel token is the only thing between that
- * port and a turn. With none configured the check compared `''` to `''` and an
- * empty `agent_bridge_token` was accepted — a fail-open default. There is no
- * listener at all now.
- */
-it('refuses to start without a channel token', async () => {
-  const bridgeStateDir = await mkdtemp(join(tmpdir(), 'turn-host-test-'))
-  const inherited = process.env.BRIDGE_CHANNEL_TOKEN
-  delete process.env.BRIDGE_CHANNEL_TOKEN
-
-  try {
-    await expect(runBridge({
-      bridgeType: 'claude-code',
-      bridgeStateDir,
-      port: 0,
-      onStart: () => Promise.resolve(),
-      onExit: () => {},
-    })).rejects.toThrow('bridge channel token is required')
-  }
-  finally {
-    if (inherited !== undefined) {
-      process.env.BRIDGE_CHANNEL_TOKEN = inherited
-    }
-  }
 })
 
 /**

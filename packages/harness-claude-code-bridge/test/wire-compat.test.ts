@@ -31,8 +31,9 @@ it('emits only frames the upstream outbound schema accepts', async () => {
   // The host adds `seq` to every event, and `stopped`/`sessionArtifacts` to
   // `finish`. The vendored schemas are plain `z.object`s, so those pass — a
   // failure here is a frame whose *shape* upstream would reject.
-  // `bridge-started` is the one frame upstream does not know (UPSTREAM.md patch 18): it is
-  // added, not reshaped, so it is checked only against the Worker's union below.
+  // `bridge-started` is the one frame upstream does not know (patch 18, now in
+  // `harness-bridge-runtime/UPSTREAM.md`): it is added, not reshaped, so it is checked only
+  // against the Worker's union below.
   const upstreamFrames = client.frames.filter(frame => frame.type !== 'bridge-started')
   expect(rejectedBy(harnessV1BridgeOutboundMessageSchema, upstreamFrames)).toEqual([])
   expect(client.frames.some(frame => frame.type === 'bridge-started')).toBe(true)

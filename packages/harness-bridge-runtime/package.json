@@ -1,0 +1,30 @@
+{
+  "name": "@amond-ai/harness-bridge-runtime",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The transport every per-turn bridge process shares — a token-gated WebSocket server, a sequence-numbered disk-first journal and the resume replay built on it, with the agent left to the adapter",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "ws": "catalog:sandbox-image"
+  },
+  "devDependencies": {
+    "@amond-ai/harness-protocol": "workspace:*",
+    "@pleaseai/eslint-config": "catalog:",
+    "@types/ws": "catalog:",
+    "bun-types": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

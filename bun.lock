@@ -16,6 +16,22 @@
         "typescript": "catalog:",
       },
     },
+    "packages/harness-bridge-runtime": {
+      "name": "@amond-ai/harness-bridge-runtime",
+      "version": "0.1.0",
+      "dependencies": {
+        "ws": "catalog:sandbox-image",
+      },
+      "devDependencies": {
+        "@amond-ai/harness-protocol": "workspace:*",
+        "@pleaseai/eslint-config": "catalog:",
+        "@types/ws": "catalog:",
+        "bun-types": "catalog:",
+        "eslint": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/harness-claude-code": {
       "name": "@amond-ai/harness-claude-code",
       "version": "0.1.0",
@@ -41,6 +57,7 @@
       "name": "@amond-ai/harness-claude-code-bridge",
       "version": "0.1.0",
       "dependencies": {
+        "@amond-ai/harness-bridge-runtime": "workspace:*",
         "@amond-ai/harness-protocol": "workspace:*",
         "@anthropic-ai/claude-agent-sdk": "catalog:sandbox-image",
         "ws": "catalog:sandbox-image",
@@ -225,6 +242,8 @@
     "@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@5.0.30", "", { "dependencies": { "@ai-sdk/provider": "4.0.8", "@standard-schema/spec": "^1.1.0", "@workflow/serde": "4.1.0", "eventsource-parser": "^3.0.8", "undici": "^7.28.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-9TyxUXolql77ntHIeygLqt7PO1O0HZPB73cJhLG2OsPecSBRIZhNXLxT1T7rlL6Zpm1eDoLMFrMV99kAJ28/Sg=="],
 
     "@altano/repository-tools": ["@altano/repository-tools@2.1.1", "", {}, "sha512-YFVhwoSjwkERQoopw3lX/TaPIDud0m6ac/Z51FoQ3YEPf0OaxFxpofbcHO0E2mTJ0lvmuRArIMUP9Pz2jpTMhg=="],
+
+    "@amond-ai/harness-bridge-runtime": ["@amond-ai/harness-bridge-runtime@workspace:packages/harness-bridge-runtime"],
 
     "@amond-ai/harness-claude-code": ["@amond-ai/harness-claude-code@workspace:packages/harness-claude-code"],
 
