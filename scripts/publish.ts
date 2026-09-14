@@ -16,7 +16,13 @@
  * to nothing a consumer can use — the order is computed from the manifests rather than
  * listed, so a new package joins it by existing. And it skips a version already on the
  * registry, which is what makes a re-run after a failure safe: publishing eleven packages is
- * eleven chances to fail on the sixth.
+ * eleven chances to fail on the sixth. A dry run packs those too — inspecting the tarball is
+ * the point of it, and after the first release every version is an already-published one.
+ *
+ * It builds before it packs, rather than trusting whoever ran it to have built first. `dist/`
+ * is gitignored, and `bun pm pack` is perfectly happy to pack a manifest whose `files` name a
+ * directory that is not there — the result is a tarball carrying a README and no
+ * implementation, published and immutable before anyone notices.
  *
  * `bun publish` is not used, here or in CI: it cannot request the OIDC token npm's trusted
  * publishing mints a credential from, nor emit the provenance attestation that follows. So
@@ -126,12 +132,15 @@ if (selected.length === 0) {
   process.exit(0)
 }
 
+// turbo caches this, so the build CI already ran costs nothing the second time.
+execFileSync('bun', ['run', 'build'], { stdio: 'inherit' })
+
 const destination = mkdtempSync(join(tmpdir(), 'harness-publish-'))
 
 for (const path of inDependencyOrder(selected)) {
   const { name, version } = manifestOf(path)
 
-  if (alreadyPublished(name, version)) {
+  if (!dryRun && alreadyPublished(name, version)) {
     console.log(`skipping ${name}@${version} — already on the registry`)
     continue
   }

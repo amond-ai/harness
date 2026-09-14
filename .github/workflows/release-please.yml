@@ -59,11 +59,8 @@ jobs:
         env:
           HUSKY: 0 # git hooks are for developer machines, not CI
 
-      - name: Build
-        run: bun run build
-
-      # Publishes in dependency order, skipping any version already on the
-      # registry — see the script for why neither is optional here.
+      # Builds, then publishes in dependency order, skipping any version already
+      # on the registry — see the script for why none of the three is optional.
       - name: Publish to npm
         env:
           PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}
