@@ -2,21 +2,47 @@
   "name": "@amond-ai/harness-sandbox",
   "type": "module",
   "version": "0.1.0",
-  "private": true,
   "description": "The AI SDK harness's HarnessV1SandboxProvider, written once over @amond-ai/sandbox so every backend behind that contract gets one",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/amond-ai/harness/tree/main/packages/harness-sandbox#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/amond-ai/harness.git",
     "directory": "packages/harness-sandbox"
   },
-  "exports": {
-    ".": "./src/index.ts"
+  "bugs": {
+    "url": "https://github.com/amond-ai/harness/issues"
   },
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "keywords": [
+    "claude-code",
+    "agent",
+    "sandbox",
+    "ai-sdk",
+    "harness",
+    "provider"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "NOTICE",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "build": "tsdown src/index.ts --dts",
     "check": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -30,6 +56,7 @@
     "@pleaseai/eslint-config": "catalog:",
     "bun-types": "catalog:",
     "eslint": "catalog:",
+    "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

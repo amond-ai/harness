@@ -2,21 +2,46 @@
   "name": "@amond-ai/sandbox-e2b",
   "type": "module",
   "version": "0.1.0",
-  "private": true,
   "description": "An e2b backend for @amond-ai/sandbox — journals process transcripts and exit status to the sandbox filesystem, because e2b forgets a process the moment it exits",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/amond-ai/harness/tree/main/packages/sandbox-e2b#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/amond-ai/harness.git",
     "directory": "packages/sandbox-e2b"
   },
-  "exports": {
-    ".": "./src/index.ts"
+  "bugs": {
+    "url": "https://github.com/amond-ai/harness/issues"
   },
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "keywords": [
+    "claude-code",
+    "agent",
+    "sandbox",
+    "e2b",
+    "provider"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "NOTICE",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "build": "tsdown src/index.ts --dts",
     "check": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -30,6 +55,7 @@
     "@pleaseai/eslint-config": "catalog:",
     "bun-types": "catalog:",
     "eslint": "catalog:",
+    "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

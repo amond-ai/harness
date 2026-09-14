@@ -2,24 +2,59 @@
   "name": "@amond-ai/harness-claude-code",
   "type": "module",
   "version": "0.1.0",
-  "private": true,
-  "description": "Starts, watches, attaches to and stops one Claude Code turn in a sandbox \u2014 the Worker-side seam both the `claude` CLI exec and the Agent SDK turn host sit behind",
+  "description": "Starts, watches, attaches to and stops one Claude Code turn in a sandbox — the Worker-side seam both the `claude` CLI exec and the Agent SDK turn host sit behind",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/amond-ai/harness/tree/main/packages/harness-claude-code#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/amond-ai/harness.git",
     "directory": "packages/harness-claude-code"
   },
-  "exports": {
-    ".": "./src/index.ts",
-    "./outcome": "./src/outcome.ts",
-    "./permission-mode": "./src/permission-mode.ts",
-    "./turn-result": "./src/turn-result.ts"
+  "bugs": {
+    "url": "https://github.com/amond-ai/harness/issues"
   },
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "keywords": [
+    "claude-code",
+    "agent",
+    "sandbox",
+    "turn-driver",
+    "agent-sdk",
+    "ai-sdk"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./outcome": {
+      "types": "./dist/outcome.d.mts",
+      "default": "./dist/outcome.mjs"
+    },
+    "./permission-mode": {
+      "types": "./dist/permission-mode.d.mts",
+      "default": "./dist/permission-mode.mjs"
+    },
+    "./turn-result": {
+      "types": "./dist/turn-result.d.mts",
+      "default": "./dist/turn-result.mjs"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "NOTICE",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "build": "tsdown src/index.ts src/outcome.ts src/permission-mode.ts src/turn-result.ts --dts",
     "check": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -39,6 +74,7 @@
     "@vitest/coverage-istanbul": "catalog:",
     "bun-types": "catalog:",
     "eslint": "catalog:",
+    "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
