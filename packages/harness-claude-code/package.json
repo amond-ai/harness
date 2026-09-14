@@ -4,6 +4,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "Starts, watches, attaches to and stops one Claude Code turn in a sandbox \u2014 the Worker-side seam both the `claude` CLI exec and the Agent SDK turn host sit behind",
+  "author": "Passion Factory Corp.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amond-ai/harness.git",
+    "directory": "packages/harness-claude-code"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./outcome": "./src/outcome.ts",

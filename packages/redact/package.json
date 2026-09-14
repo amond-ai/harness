@@ -4,6 +4,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "Masks credential shapes out of diagnostics before they are logged, stored or shown — one list of shapes shared by every sink",
+  "author": "Passion Factory Corp.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amond-ai/harness.git",
+    "directory": "packages/redact"
+  },
   "exports": {
     ".": "./src/index.ts"
   },
