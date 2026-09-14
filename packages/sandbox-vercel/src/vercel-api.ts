@@ -240,8 +240,13 @@ export function vercelSandboxApi(options: VercelApiOptions = {}): VercelSandboxA
     : {}
 
   return {
+    // `resume: true` because this is acquisition for use, not discovery: `routes` is a plain
+    // getter over `currentSession()` and is not one of the SDK's auto-resuming members, so a
+    // stopped sandbox handed back unresumed throws "No active session" the moment the route
+    // repair reads it. `resume` only reaches the `Sandbox.get()` fallback inside `getOrCreate`;
+    // the not-found branch still creates.
     getOrCreate: async name => await withAuthDiagnosis(async () =>
-      surfaceOf(await Sandbox.getOrCreate({ ...options.create, ...credentials, name }))),
+      surfaceOf(await Sandbox.getOrCreate({ ...options.create, ...credentials, name, resume: true }))),
     // `resume: false` because this is discovery: the contract's `getProcess`/`listProcesses`
     // answer about a sandbox the caller may never have started, and must not be the call that
     // boots one merely to be told nothing is running in it.
