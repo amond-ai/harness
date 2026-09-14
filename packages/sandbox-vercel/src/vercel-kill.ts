@@ -35,6 +35,19 @@ import { journalPaths, WRAPPER_SHELL } from './journal'
  */
 const SIGNAL_NAMES: Record<number, string> = { 2: 'INT', 9: 'KILL', 15: 'TERM' }
 
+/**
+ * How long a named signal waits for a just-started wrapper to publish its command's pid.
+ *
+ * Sized against what the wrapper still has to do once `runCommand` has returned — the `&` that
+ * backgrounds the command and one `printf` builtin — with room for a loaded sandbox, and not
+ * against how long a caller might tolerate a wait: an interrupt that took a second would be its
+ * own bug. Matches `sandbox-local`'s window, for the same race.
+ */
+const PID_PUBLICATION_MS = 500
+
+/** How often that window is re-checked. */
+const PID_POLL_MS = 10
+
 export interface VercelKillOptions {
   /** Commands this isolate started, keyed by process id — see {@link JournalProbeOptions}. */
   execCommands?: Map<string, VercelCommandLike>
@@ -119,6 +132,43 @@ export function createVercelKill(
     )
   }
 
+  /**
+   * The command's own pid, waited for briefly rather than asked for once.
+   *
+   * `exec` returns as soon as the wrapper is spawned, and the wrapper writes `<id>.pgid` before
+   * it backgrounds the command and records `$!` — so a caller that interrupts a turn the moment
+   * it starts arrives inside a real publication window, not at an absence. Asking once and
+   * warning would report a non-delivery for a process that is perfectly signallable a
+   * millisecond later, and `killTurn` then waits out its whole settle timeout for an exit from a
+   * signal nobody sent.
+   *
+   * Only ever waits while the wrapper is demonstrably live: a pid that surfaces after the
+   * wrapper has gone is not a target, since the number may already name a stranger. An
+   * `'unknown'` probe ends the wait for the same reason — nothing has been established, and
+   * waiting on it is how a signal reaches a bystander.
+   *
+   * Bounded, because the other reading of a missing pid is a wrapper whose journal was removed
+   * under it, and that one never resolves.
+   */
+  async function publishedCommandPid(meta: JournalMeta, pidPath: string): Promise<number | undefined> {
+    const recorded = await io.readPid(pidPath)
+    if (recorded !== undefined) {
+      return recorded
+    }
+    const until = Date.now() + PID_PUBLICATION_MS
+    while ((await probe.read(meta)).liveness === 'live') {
+      const published = await io.readPid(pidPath)
+      if (published !== undefined) {
+        return published
+      }
+      if (Date.now() >= until) {
+        return undefined
+      }
+      await new Promise(resolve => setTimeout(resolve, PID_POLL_MS))
+    }
+    return undefined
+  }
+
   return async (meta, signal) => {
     const paths = journalPaths(root, meta.id)
 
@@ -127,7 +177,7 @@ export function createVercelKill(
       // print its `result`, and broadcasting it to the group would reach the wrapper shell,
       // which dies on it without running the `printf` that records the exit: the turn would end
       // with neither the result nor the exit code the interrupt exists to collect.
-      const pid = await io.readPid(paths.pid)
+      const pid = await publishedCommandPid(meta, paths.pid)
       if (pid === undefined) {
         // Deliberately *not* the warm fallback below. That one sends SIGKILL, and substituting
         // it for a named signal is the harsher substitution the contract forbids by name — a

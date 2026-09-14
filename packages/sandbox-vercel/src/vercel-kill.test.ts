@@ -1,6 +1,6 @@
 import type { JournalMeta } from './journal'
 import { describe, expect, it, vi } from 'vitest'
-import { journalPaths } from './journal'
+import { journalPaths, wrapperMarker } from './journal'
 import { createJournalIo } from './journal-io'
 import { createVercelKill } from './vercel-kill'
 import { createJournalProbe } from './vercel-probe'
@@ -140,6 +140,27 @@ describe('a named signal', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('signal 2 was not delivered'))
     warn.mockRestore()
   })
+
+  it('waits out the publication window of a wrapper that has not written its pid yet', async () => {
+    const fake = fakeSandbox()
+    const group = 601
+    // The wrapper as `exec` leaves it: `<id>.pgid` written, and the `printf` that records `$!`
+    // still to come — `runCommand` resolves as soon as the shell is spawned, so a turn cancelled
+    // the moment it starts arrives here.
+    fake.files.set(PATHS.pgid, encode(String(group)))
+    fake.procs.set(group, { cmdline: `${wrapperMarker('p1')}printf '%s' "$$"`, pgid: group })
+    const publishing = setTimeout(() => {
+      fake.files.set(PATHS.pid, encode('602'))
+      fake.procs.set(602, { cmdline: 'claude -p', pgid: group })
+    }, 30)
+
+    await killPath(fake)(META, 2)
+    clearTimeout(publishing)
+
+    // A publication window is not an absence: warning and returning here costs `killTurn` its
+    // whole settle timeout waiting for an exit from a signal that was never sent.
+    expect(fake.ran).toContainEqual({ cmd: 'sh', args: ['-c', 'kill -INT 602'] })
+  })
 })
 
 describe('a kill with no pid to aim at', () => {
@@ -180,7 +201,9 @@ describe('a kill with no pid to aim at', () => {
       await killPath(fake)(META, 2)
     }
 
-    expect(fake.ran).toEqual([])
+    // The liveness probe that distinguishes a publication window from an absence may run; a
+    // `kill` may not — a forged record is not a target, however the signal was spelled.
+    expect(fake.ran.some(ran => ran.args.some(arg => arg.startsWith('kill ')))).toBe(false)
     warn.mockRestore()
   })
 })
