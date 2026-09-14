@@ -63,6 +63,14 @@ orchestrator (any JS runtime)                  sandbox (e2b, Cloudflare, ...)
 
 ## Quick start
 
+Every package is published to npm under `@amond-ai`, as ESM, for Node 22 or newer (and for
+Deno, Bun, and workerd). Install the driver, a socket opener for your runtime, and a sandbox
+backend:
+
+```bash
+bun add @amond-ai/harness-claude-code @amond-ai/harness-transport @amond-ai/sandbox-e2b
+```
+
 The driver decides nothing about your platform. You give it a sandbox provider, a way to open
 a socket, how to invoke `claude`, where to publish the transcript, and the thresholds to judge
 a turn by.
@@ -160,14 +168,29 @@ harness-neutral core package, are planned once a second harness exists.
 
 ```bash
 bun install
+bun run build      # tsdown, per package, into dist/
 bun run check      # tsc across the workspace
 bun run lint
 bun run test
 ```
 
-The host bundle for the sandbox image is built with `bun build` targeting Node; the image
-build asserts that `claude --version` equals the Agent SDK's bundled version and fails on a
-mismatch.
+A package's `exports` point at `dist/`, so `build` runs ahead of `check` and `test` — turbo
+orders that for you. The host bundle for the sandbox image is built with `bun build` targeting
+Node instead; the image build asserts that `claude --version` equals the Agent SDK's bundled
+version and fails on a mismatch.
+
+## Releasing
+
+Versions and changelogs are release-please's, driven by
+[Conventional Commits](https://www.conventionalcommits.org/) on `main`. Merging the release PR
+tags every package it bumped, and the same workflow then publishes exactly those packages to
+npm — the tarball packed by bun, published by the npm CLI through npm's trusted publishing, so
+each version carries a provenance attestation tied to this repository, the release commit, and
+that workflow run. Nothing is published from a laptop, and there is no npm token to hold.
+
+```bash
+npm view @amond-ai/harness-claude-code dist.attestations   # provenance present?
+```
 
 ## Contributing
 

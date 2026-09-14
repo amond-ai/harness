@@ -34,6 +34,11 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # Every package's publishable output, built here rather than first at
+      # release time — `check` only builds what something else depends on.
+      - name: Build
+        run: bun run build
+
       - name: Type check
         run: bun run check
 

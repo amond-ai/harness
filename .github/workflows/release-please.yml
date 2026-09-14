@@ -11,6 +11,9 @@ permissions: {}
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      paths_released: ${{ steps.release.outputs.paths_released }}
     steps:
       - name: Create app token
         id: app-token
@@ -24,8 +27,59 @@ jobs:
           permission-pull-requests: write
 
       - name: Run release-please
+        id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # Publishes exactly the packages this run released, from the release commit
+  # release-please just tagged. One job rather than a matrix: a grouped release
+  # tags every package at once, and they share one install and one build.
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # npm's trusted publishing: the registry mints the credential from this
+      # OIDC token, so there is no npm token to hold, and the published version
+      # carries a provenance attestation tied to this workflow and commit.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          HUSKY: 0 # git hooks are for developer machines, not CI
+
+      - name: Build
+        run: bun run build
+
+      # `bun publish` cannot request the OIDC token or emit an attestation, so
+      # the tarball is produced with bun and published with the npm CLI. npm
+      # 11.5.1+ is what implements trusted publishing; Node 24 ships past it.
+      - name: Publish to npm
+        env:
+          PATHS_RELEASED: ${{ needs.release-please.outputs.paths_released }}
+        run: |
+          set -euo pipefail
+          npm --version
+          for package_path in $(echo "$PATHS_RELEASED" | jq -r '.[]'); do
+            manifest="$package_path/package.json"
+            # `bun pm pack` names the tarball after the manifest, with the scope
+            # flattened: @amond-ai/sandbox 0.1.0 -> amond-ai-sandbox-0.1.0.tgz.
+            slug="$(jq -r '.name | sub("^@"; "") | sub("/"; "-")' "$manifest")"
+            version="$(jq -r '.version' "$manifest")"
+            tarball="$RUNNER_TEMP/$slug-$version.tgz"
+
+            (cd "$package_path" && bun pm pack --destination "$RUNNER_TEMP")
+            echo "publishing $package_path -> $tarball"
+            npm publish "$tarball" --provenance --access public
+          done

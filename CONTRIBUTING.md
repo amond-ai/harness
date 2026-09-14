@@ -21,10 +21,14 @@ bun install         # install dependencies and the git hooks
 4. Open a pull request and fill out the template.
 
 ```bash
+bun run build       # build every package into dist/ (what gets published)
 bun run lint        # lint and format
 bun run check       # type-check every package (tsc --noEmit)
 bun run test        # run the test suite
 ```
+
+`check` and `test` depend on `build`, so turbo runs it for you; run it on its own when you want
+to inspect what a package would ship.
 
 ## Commit messages
 
