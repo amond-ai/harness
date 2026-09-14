@@ -1,0 +1,55 @@
+packages/harness-claude-code/package.json
+  s_73aecd75812293::t_d32223efac0ed8 7,9-13
+  s_73aecd75812293::t_e21ee34351fb66 8
+packages/harness-sandbox/package.json
+  s_73aecd75812293::t_d32223efac0ed8 7,9-13
+  s_73aecd75812293::t_e21ee34351fb66 8
+packages/harness-transport-cloudflare/package.json
+  s_73aecd75812293::t_d32223efac0ed8 7,9-13
+  s_73aecd75812293::t_e21ee34351fb66 8
+packages/redact/package.json
+  s_73aecd75812293::t_d32223efac0ed8 7,9-13
+  s_73aecd75812293::t_e21ee34351fb66 8
+packages/sandbox-e2b/package.json
+  s_73aecd75812293::t_e21ee34351fb66 8
+  s_73aecd75812293::t_d32223efac0ed8 7,9-13
+packages/sandbox-daytona/package.json
+  s_73aecd75812293::t_d32223efac0ed8 7,9-13
+  s_73aecd75812293::t_e21ee34351fb66 8
+packages/sandbox-local/package.json
+  s_73aecd75812293::t_d32223efac0ed8 7,9-13
+  s_73aecd75812293::t_e21ee34351fb66 8
+NOTICE
+  s_73aecd75812293::t_728dc8f334bdb3 1-10
+packages/harness-claude-code-bridge/package.json
+  s_73aecd75812293::t_e21ee34351fb66 8
+  s_73aecd75812293::t_d32223efac0ed8 7,9-13
+packages/harness-transport/package.json
+  s_73aecd75812293::t_d32223efac0ed8 7,9-13
+  s_73aecd75812293::t_e21ee34351fb66 8
+package.json
+  s_73aecd75812293::t_d32223efac0ed8 6,8-11
+  s_73aecd75812293::t_e21ee34351fb66 7
+packages/harness-protocol/package.json
+  s_73aecd75812293::t_e21ee34351fb66 8
+  s_73aecd75812293::t_d32223efac0ed8 7,9-13
+packages/sandbox/package.json
+  s_73aecd75812293::t_d32223efac0ed8 7,9-13
+  s_73aecd75812293::t_e21ee34351fb66 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "e77ab1e02f9cbce62ac089c49a98ee51d07bb8b5",
+  "prompts": {},
+  "sessions": {
+    "s_73aecd75812293": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa822bf9-f9ee-474b-b004-d3f9dd11dd1b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
