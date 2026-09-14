@@ -41,6 +41,7 @@ import {
   journalledScript,
   journalPaths,
   serializeJournalMeta,
+  trimTrailingSlash,
   WRAPPER_SHELL,
 } from './journal'
 import { createJournalIo } from './journal-io'
@@ -117,12 +118,18 @@ export function createVercelSession(
   const followMs = options.followIntervalMs ?? DEFAULT_POLL_MS
   const elapsedMs = options.monotonicNowMs ?? (() => Date.now())
   // Trailing slashes stripped the way `journalPaths` strips them, so the prefix a recovered
-  // wrapper's argv is matched against is the one that actually appears in it.
-  // The `|| '/'` keeps the filesystem root a root: stripping its only slash leaves the empty
-  // string, which `createJournalIo` interpolates straight into `mkdir -p -- ''` and `ls -1 -- ''`,
-  // so the session could neither exec nor discover. `journalPaths` reconstructs its paths as
-  // `${base}/${id}`, which is why it can strip the same slash and still be right.
-  const root = options.journalRoot.replace(/\/+$/, '') || '/'
+  // wrapper's argv is matched against is the one that actually appears in it — but keeping the
+  // filesystem root a root, because `createJournalIo` hands this string to a shell as one
+  // argument and `mkdir -p -- ''` is what an unkept root becomes. A scan rather than
+  // `replace(/\/+$/, '')`: that pattern retries at every index and backtracks the whole run of
+  // separators at each one, which CodeQL reports as a polynomial regular expression on
+  // uncontrolled data — and `journalRoot` arrives through an exported option.
+  //
+  // The `|| '/'` is this session's policy, not the trim's: an empty root has no trailing
+  // separator to take, so the primitive rightly returns it unchanged, and `provider.ts` reaches
+  // here with `??` rather than truthiness — `stateRoot: ''` bypasses the default and would
+  // otherwise arrive at the shell as that same unusable empty argument.
+  const root = trimTrailingSlash(options.journalRoot) || '/'
 
   /**
    * Commands this isolate started, keyed by process id.

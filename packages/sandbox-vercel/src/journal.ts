@@ -164,6 +164,25 @@ function withoutTrailingSlashes(path: string): string {
 }
 
 /**
+ * Trailing separators removed, keeping the root itself a root.
+ *
+ * The one difference from {@link withoutTrailingSlashes}, and the reason both exist: a path of
+ * nothing but separators is the filesystem root, and returning `''` for it would turn every path
+ * joined onto it into a relative one. {@link journalPaths} can strip the same separator and still
+ * be right because it rebuilds its paths as `${base}/${id}`, where the literal separator survives
+ * an empty base; a caller that hands the root to a shell as one argument has no such literal, so
+ * `mkdir -p -- ''` is what an unkept root becomes.
+ *
+ * Exported for that caller — see `createVercelSession`, which normalizes its `journalRoot` once
+ * and passes it to `createJournalIo`.
+ */
+export function trimTrailingSlash(path: string): string {
+  const trimmed = withoutTrailingSlashes(path)
+  // `/` trims to the empty string, which would then join as a relative path.
+  return trimmed === '' ? path.slice(0, 1) : trimmed
+}
+
+/**
  * Wrap an argv so its streams, its pids and its exit status land in the journal.
  *
  * The whole script is run as `setsid --wait sh -c '<script>'`, which the session builds. Two

@@ -97,6 +97,21 @@ describe('exec', () => {
     expect(fake.ran).toContainEqual({ cmd: 'mkdir', args: ['-p', '--', '/'] })
     expect(fake.files.has(journalPaths('/', handle.id).meta)).toBe(true)
   })
+
+  it('reads an empty journalRoot as the filesystem root', async () => {
+    const fake = fakeSandbox()
+    // `provider.ts` defaults `stateRoot` with `??`, not truthiness, so an explicitly empty
+    // option reaches the session instead of the default — and the shell has no use for `''`.
+    const handle = await createVercelSession(fake.sandbox, {
+      journalRoot: '',
+      newProcessId: () => 'p1',
+      now: () => AT,
+      pollIntervalMs: 0,
+    }).exec(['claude'])
+
+    expect(fake.ran).toContainEqual({ cmd: 'mkdir', args: ['-p', '--', '/'] })
+    expect(fake.files.has(journalPaths('/', handle.id).meta)).toBe(true)
+  })
 })
 
 describe('statusOf', () => {

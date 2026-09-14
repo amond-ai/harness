@@ -5,6 +5,7 @@ import {
   parseJournalMeta,
   parseJournalScript,
   serializeJournalMeta,
+  trimTrailingSlash,
   WRAPPER_SHELL,
 } from './journal'
 
@@ -34,6 +35,28 @@ describe('journalPaths', () => {
     expect(() => journalPaths(ROOT, '../../etc/passwd')).toThrow(/invalid process id/)
     expect(() => journalPaths(ROOT, 'a/b')).toThrow(/invalid process id/)
     expect(() => journalPaths(ROOT, '')).toThrow(/invalid process id/)
+  })
+})
+
+describe('trimTrailingSlash', () => {
+  it('strips trailing separators without taking the root with them', () => {
+    expect(trimTrailingSlash('/journal///')).toBe('/journal')
+    expect(trimTrailingSlash('/journal')).toBe('/journal')
+    // The case `journalPaths` can absorb and a shell argument cannot: an empty base still joins
+    // as `/p1.out` there, but `mkdir -p -- ''` is not a path.
+    expect(trimTrailingSlash('/')).toBe('/')
+    expect(trimTrailingSlash('/'.repeat(64))).toBe('/')
+    // An empty path has no trailing separator to take, so it comes back unchanged — the trim
+    // does not invent a root. Callers that need one say so; `createVercelSession` does.
+    expect(trimTrailingSlash('')).toBe('')
+  })
+
+  it('answers the input CodeQL was about in one pass', () => {
+    // A separator run followed by a non-separator is the quadratic case for
+    // `replace(/\/+$/, '')`: `$` fails, so every start index backtracks the whole run. The scan
+    // has no trailing separator to take and returns the string as it stands.
+    const pathological = `${'/'.repeat(64)}x`
+    expect(trimTrailingSlash(pathological)).toBe(pathological)
   })
 })
 
