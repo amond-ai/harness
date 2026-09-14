@@ -29,6 +29,7 @@ out.
 | `@amond-ai/sandbox` | both | The sandbox contract: `SandboxProvider`, `SandboxSession`, `SandboxProcessHandle`, files, logs, and `portEndpoint`. No dependencies. |
 | `@amond-ai/sandbox-e2b` | the orchestrator | An e2b backend for the contract. Journals a process's output to the sandbox filesystem so it survives the process and a reconnect. |
 | `@amond-ai/sandbox-local` | the orchestrator | A local-process backend for the contract, for a desktop app that runs on the user's own machine. Journals the transcript, pid and exit status to disk and verifies liveness against the kernel, so a relaunched app finds the turn it started. Not an isolation boundary. |
+| `@amond-ai/sandbox-vercel` | the orchestrator | A Vercel Sandbox backend for the contract. Journals a process's output to the sandbox filesystem, because Vercel forgets a command across a session resume and exposes no process list at all. |
 | `@amond-ai/redact` | both | Credential masking for every diagnostic the packages emit, and the bound-then-scrub used for stored error summaries. |
 
 The packages depend only on each other and on published external packages. A test in
@@ -137,7 +138,7 @@ whose version equals the CLI's.
 | Runtime | Driver | Socket opener | Sandbox provider |
 | --- | --- | --- | --- |
 | Cloudflare Workers | `harness-claude-code` | `harness-transport-cloudflare` | Cloudflare Sandbox (in the consuming app today), e2b |
-| Vercel (Node) | `harness-claude-code` | `harness-transport` | e2b; Vercel Sandbox is planned |
+| Vercel (Node) | `harness-claude-code` | `harness-transport` | Vercel Sandbox, e2b |
 | Deno desktop | `harness-claude-code` | `harness-transport` | local process, e2b; Docker is planned |
 | Node, Bun | `harness-claude-code` | `harness-transport` | local process, e2b |
 
@@ -164,8 +165,9 @@ in argv on the `sdk` path.
 ## Status
 
 Pre-1.0. The packages are exercised by the software-factory orchestrator on Cloudflare with e2b
-and Cloudflare Sandbox backends. Vercel Sandbox, Docker, and local-process providers, and a
-harness-neutral core package, are planned once a second harness exists.
+and Cloudflare Sandbox backends. The Vercel Sandbox backend satisfies the same contract and is
+covered by its own suite against a fake, but has not yet been run against a live Vercel sandbox.
+Docker and a harness-neutral core package are planned once a second harness exists.
 
 ## Development
 
