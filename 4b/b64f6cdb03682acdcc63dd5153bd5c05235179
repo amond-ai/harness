@@ -1,0 +1,34 @@
+.gitignore
+  s_b1a78581ebd08f::t_ff738610d06c0b 8-10
+README.md
+  s_b1a78581ebd08f::t_f86465228616f4 180-185,209-212
+  s_b1a78581ebd08f::t_cfacb716032e1e 66,72-76,194-195,201-202
+  s_b1a78581ebd08f::t_ca3772b41d3cd7 213
+packages/harness-sandbox/README.md
+  s_b1a78581ebd08f::t_dfd962855a63c5 9,12,28
+CONTRIBUTING.md
+  s_b1a78581ebd08f::t_f86465228616f4 30-32
+packages/harness-claude-code-bridge/README.md
+  s_b1a78581ebd08f::t_0d7ccf1ab80397 45-47
+  s_b1a78581ebd08f::t_114bf8ff1d37d4 4-7,25-30,50-53
+packages/redact/README.md
+  s_b1a78581ebd08f::t_07305930181a96 13,19,22-24,30,47-49
+scripts/publish.ts
+  s_b1a78581ebd08f::t_94d862e5f5d9e3 72-73,76-79,137-141,143,147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "4bb64f6cdb03682acdcc63dd5153bd5c05235179",
+  "prompts": {},
+  "sessions": {
+    "s_b1a78581ebd08f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "159e8f3f-ece7-430a-8d17-bd14f6186bfd",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
