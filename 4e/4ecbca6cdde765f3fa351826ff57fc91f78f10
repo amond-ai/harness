@@ -1,0 +1,19 @@
+packages/sandbox-vercel/src/vercel-api.ts
+  s_1f7cf591f7a2f5::t_a2cc2611fea173 243-247,249
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "4e4ecbca6cdde765f3fa351826ff57fc91f78f10",
+  "prompts": {},
+  "sessions": {
+    "s_1f7cf591f7a2f5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "972d8524-f9d7-4ecd-9399-c8425f5039d6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
