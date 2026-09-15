@@ -148,10 +148,23 @@ describe('the turn host\'s outbound union', () => {
   it('degrades an unknown echoed reason to no echo, and accepts an ending that names none', () => {
     const parsed = turnHostOutboundMessageSchema.parse({ ...finish, interruptedBy: 'the-operator' })
     expect(parsed).toMatchObject({ stopped: 'interrupted', sessionArtifacts: { sessionId: 'sess-1' } })
+    /*
+     * Narrowed on the discriminant rather than indexed straight through. The union's member types
+     * are declared, not inferred from the schema — a cast in the substitution would otherwise widen
+     * every member to a loose object — so reading a field of one member needs `type` established
+     * first. That this narrows at all is the property the declaration exists to keep.
+     */
+    if (parsed.type !== 'finish') {
+      throw new Error(`expected a finish frame, got ${parsed.type}`)
+    }
     expect(parsed.interruptedBy).toBeUndefined()
 
-    expect(turnHostOutboundMessageSchema.parse({ ...failed, interruptedBy: 'the-operator' }).interruptedBy)
-      .toBeUndefined()
+    const failedParsed = turnHostOutboundMessageSchema.parse({ ...failed, interruptedBy: 'the-operator' })
+    if (failedParsed.type !== 'error') {
+      throw new Error(`expected an error frame, got ${failedParsed.type}`)
+    }
+    expect(failedParsed.interruptedBy).toBeUndefined()
+
     expect(turnHostOutboundMessageSchema.parse(finish)).not.toHaveProperty('interruptedBy')
     expect(turnHostOutboundMessageSchema.parse(failed)).not.toHaveProperty('interruptedBy')
   })

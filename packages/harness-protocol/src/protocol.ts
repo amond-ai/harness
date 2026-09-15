@@ -308,7 +308,21 @@ export type TurnHostError = z.infer<typeof turnHostErrorSchema>
  * such method — so the two replaced members are removed by `type` and the extended ones added
  * back. A member added upstream therefore arrives here automatically; only the two this host
  * extends are named.
+ *
+ * The member type is written out instead of inferred, and that is load-bearing rather than
+ * stylistic. The cast the substitution needs widens every member to a `z.ZodObject` with a loose
+ * shape, and `z.infer` over the result resolves to `Record<string, unknown>`: `frame.type` types as
+ * `unknown` and `if (frame.type === 'finish')` narrows nothing, so a consumer of what the comment
+ * above calls a discriminated union gets none of the discrimination. Declaring the union and
+ * asserting the schema against it restores narrowing — collapsing this back to
+ * `z.infer<typeof turnHostOutboundMessageSchema>` would take it away again with no error.
  */
+export type TurnHostOutboundMessage
+  = | Exclude<z.infer<typeof harnessV1BridgeOutboundMessageSchema>, { type: 'error' | 'finish' }>
+    | TurnHostError
+    | TurnHostFinish
+    | z.infer<typeof turnHostStartedSchema>
+
 export const turnHostOutboundMessageSchema = z.discriminatedUnion('type', [
   ...harnessV1BridgeOutboundMessageSchema.options.filter(
     option => !['finish', 'error'].includes(option.shape.type.value as string),
@@ -316,6 +330,4 @@ export const turnHostOutboundMessageSchema = z.discriminatedUnion('type', [
   turnHostFinishSchema,
   turnHostErrorSchema,
   turnHostStartedSchema,
-] as unknown as [z.ZodObject, ...z.ZodObject[]])
-
-export type TurnHostOutboundMessage = z.infer<typeof turnHostOutboundMessageSchema>
+] as unknown as [z.ZodObject, ...z.ZodObject[]]) as unknown as z.ZodType<TurnHostOutboundMessage>
