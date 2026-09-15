@@ -28,6 +28,7 @@
         "@types/ws": "catalog:",
         "bun-types": "catalog:",
         "eslint": "catalog:",
+        "tsdown": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
       },
