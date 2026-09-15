@@ -1,0 +1,1 @@
+- [amond-ai/harness PR conventions](project_amond-ai-harness-pr-conventions.md) — draft-by-default basis outside chatbot-pf, template shape, no merge queue, no stack tool
