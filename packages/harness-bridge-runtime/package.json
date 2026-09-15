@@ -1,25 +1,24 @@
 {
-  "name": "@amond-ai/harness-protocol",
+  "name": "@amond-ai/harness-bridge-runtime",
   "type": "module",
   "version": "0.1.0",
-  "description": "The bridge wire protocol the turn host and its Worker client both speak \u2014 vendored from @ai-sdk/harness, extended with the fields this deployment adds",
+  "description": "The transport every per-turn bridge process shares — a token-gated WebSocket server, a sequence-numbered disk-first journal and the resume replay built on it, with the agent left to the adapter",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/amond-ai/harness/tree/main/packages/harness-protocol#readme",
+  "homepage": "https://github.com/amond-ai/harness/tree/main/packages/harness-bridge-runtime#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/amond-ai/harness.git",
-    "directory": "packages/harness-protocol"
+    "directory": "packages/harness-bridge-runtime"
   },
   "bugs": {
     "url": "https://github.com/amond-ai/harness/issues"
   },
   "keywords": [
-    "claude-code",
     "agent",
     "sandbox",
-    "protocol",
-    "zod",
+    "bridge",
+    "turn-host",
     "websocket"
   ],
   "sideEffects": false,
@@ -30,10 +29,6 @@
     ".": {
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
-    },
-    "./codex": {
-      "types": "./dist/codex.d.mts",
-      "default": "./dist/codex.mjs"
     }
   },
   "main": "./dist/index.mjs",
@@ -47,18 +42,19 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsdown src/index.ts src/codex.ts --dts",
+    "build": "tsdown src/index.ts --dts",
     "check": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "bun --bun vitest run"
   },
   "dependencies": {
-    "zod": "catalog:"
+    "ws": "catalog:sandbox-image"
   },
   "devDependencies": {
-    "@ai-sdk/provider": "4.0.8",
+    "@amond-ai/harness-protocol": "workspace:*",
     "@pleaseai/eslint-config": "catalog:",
+    "@types/ws": "catalog:",
     "bun-types": "catalog:",
     "eslint": "catalog:",
     "tsdown": "catalog:",

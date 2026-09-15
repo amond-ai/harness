@@ -8,8 +8,8 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import process, { argv, stdout } from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { runBridge } from '@amond-ai/harness-bridge-runtime'
 import { query } from '@anthropic-ai/claude-agent-sdk'
-import { runBridge } from './bridge-runtime'
 import { createTurnDriver } from './turn-driver'
 
 const args = parseArgs(argv.slice(2))

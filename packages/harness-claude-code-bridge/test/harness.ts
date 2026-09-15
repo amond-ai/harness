@@ -4,8 +4,8 @@ import type { QueryFn } from '../src/turn-driver'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { runBridge } from '@amond-ai/harness-bridge-runtime'
 import { WebSocket } from 'ws'
-import { runBridge } from '../src/bridge-runtime'
 import { createTurnDriver } from '../src/turn-driver'
 
 /** A frame as it arrives on the wire. */

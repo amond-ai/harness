@@ -4,7 +4,7 @@ Copyright 2026 Passion Factory Corp.
 This product includes software developed at Vercel, Inc.
 Copyright 2023 Vercel, Inc.
 
-The packages @amond-ai/harness-protocol and @amond-ai/harness-claude-code-bridge
-contain code derived from vercel/ai (@ai-sdk/harness, @ai-sdk/harness-claude-code),
-licensed under the Apache License, Version 2.0. See each package's UPSTREAM.md for
-the exact upstream commit and the patches carried on top.
+This package, @amond-ai/harness-claude-code-bridge, contains code derived from
+vercel/ai (@ai-sdk/harness-claude-code, @ai-sdk/harness), licensed under the
+Apache License, Version 2.0. See this package's UPSTREAM.md for the exact
+upstream commit and the patches carried on top.

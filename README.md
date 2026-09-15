@@ -22,8 +22,9 @@ out.
 | Package | Runs where | What it does |
 | --- | --- | --- |
 | `@amond-ai/harness-claude-code` | the orchestrator | The `TurnDriver` seam and both Claude Code drivers: `sdk` (drives the turn host over the bridge socket, one bounded attach round at a time) and `cli` (execs `claude -p` in the sandbox and watches its log cursor). Runtime-neutral. |
-| `@amond-ai/harness-claude-code-bridge` | inside the sandbox image | The per-turn Node process that hosts the Agent SDK `query()` and serves the orchestrator over a WebSocket with a sequence-numbered, disk-first journal. A fork of Vercel's `@ai-sdk/harness-claude-code` bridge (Apache-2.0). |
-| `@amond-ai/harness-protocol` | both | The bridge wire schema: every frame the host emits and the orchestrator sends, as zod schemas. |
+| `@amond-ai/harness-bridge-runtime` | inside the sandbox image | The transport every bridge shares: a token-gated WebSocket server, the monotonic `seq`, the disk-first journal and the resume replay over it, and the `abort`/`interrupt`/`stop`/`destroy` commands. Knows no agent — that arrives as `onStart`. A fork of Vercel's `@ai-sdk/harness` bridge (Apache-2.0). |
+| `@amond-ai/harness-claude-code-bridge` | inside the sandbox image | The Claude adapter on that runtime: the per-turn Node process that hosts the Agent SDK `query()`. A fork of Vercel's `@ai-sdk/harness-claude-code` bridge (Apache-2.0). |
+| `@amond-ai/harness-protocol` | both | The bridge wire schema: every frame a host emits and the orchestrator sends, as zod schemas. One entry point per harness — the root is Claude's, `./codex` is Codex's — so each sandbox bundle carries only its own adapter's schemas. |
 | `@amond-ai/harness-transport` | the orchestrator | The `WsLike` socket shape, the upgrade headers, and a socket opener built on the standard `WebSocket` constructor. Deno, Node 22+, Bun, and browsers dial with this. |
 | `@amond-ai/harness-transport-cloudflare` | Cloudflare Workers | The opener for a Cloudflare Sandbox, whose ports are private and reached through `Sandbox.wsConnect`, plus the workerd `fetch` upgrade path. |
 | `@amond-ai/sandbox` | both | The sandbox contract: `SandboxProvider`, `SandboxSession`, `SandboxProcessHandle`, files, logs, and `portEndpoint`. No dependencies. |
@@ -141,10 +142,11 @@ whose version equals the CLI's.
 | Deno desktop | `harness-claude-code` | `harness-transport` | local process, e2b; Docker is planned |
 | Node, Bun | `harness-claude-code` | `harness-transport` | local process, e2b |
 
-The only runtime-specific packages are the Cloudflare transport and the host, which runs on
-Node inside the image — plus one module of `sandbox-local`, whose subject is the machine and
-which therefore cannot be written without host primitives. Everything else has no `node:`,
-`bun:`, or `cloudflare:` import, and `closure.test.ts` asserts exactly that on every run.
+The only runtime-specific packages are the Cloudflare transport and the two halves of the host —
+the shared bridge runtime and the Claude adapter on it — which run on Node inside the image, plus
+one module of `sandbox-local`, whose subject is the machine and which therefore cannot be written
+without host primitives. Everything else has no `node:`, `bun:`, or `cloudflare:` import, and
+`closure.test.ts` asserts exactly that on every run.
 
 ## What a consumer injects
 
@@ -221,7 +223,7 @@ privately through [SECURITY.md](./SECURITY.md), not a public issue.
 
 ## License
 
-Apache-2.0. `harness-claude-code-bridge` and `harness-protocol` contain code derived from
-[vercel/ai](https://github.com/vercel/ai) (`@ai-sdk/harness-claude-code`, `@ai-sdk/harness`),
-Apache-2.0; the exact upstream commit and the patches carried on top are listed in each
-package's `UPSTREAM.md`.
+Apache-2.0. `harness-bridge-runtime`, `harness-claude-code-bridge` and `harness-protocol` contain
+code derived from [vercel/ai](https://github.com/vercel/ai) (`@ai-sdk/harness`,
+`@ai-sdk/harness-claude-code`, `@ai-sdk/harness-codex`), Apache-2.0; the exact upstream commit and
+the patches carried on top are listed in each package's `UPSTREAM.md`.
