@@ -1,0 +1,79 @@
+packages/harness-codex-bridge/vitest.config.ts
+  s_049073566b945b::t_380a4cc8247311 1-13
+package.json
+  s_049073566b945b::t_41d9acc65b3c6f 62
+packages/harness-codex-bridge/src/create-emit-stream-event.ts
+  s_049073566b945b::t_38903caa2be58e 1-336
+packages/harness-codex-bridge/test/harness.ts
+  s_049073566b945b::t_5fbd360fc2000c 56-58
+  s_049073566b945b::t_fe7e2211f50a23 1-55,59-63,66-72,79-80,82-83,88-89,91-96,141,143-367
+  s_049073566b945b::t_b63008926af796 64-65,73-78,81,90,104-138,142
+  s_049073566b945b::t_86ce6d994dfa32 84-87,97-103,139-140
+packages/harness-claude-code/src/closure.test.ts
+  s_049073566b945b::t_baf11f172144c9 15,17-19,54-55,61
+packages/harness-bridge-runtime/test/bridge-runtime.test.ts
+  s_049073566b945b::t_b337a8335bca27 253-290
+  s_049073566b945b::t_5b59ed9aef90b6 252
+packages/harness-codex-bridge/src/turn-driver.ts
+  s_049073566b945b::t_8bd0f6a1790a5f 284-291
+  s_049073566b945b::t_e7800c329ac8e5 252-256,452-453
+  s_049073566b945b::t_bbaea305a70b93 1-251,257-283,292-451,454-461
+README.md
+  s_049073566b945b::t_249a588428720e 27
+  s_049073566b945b::t_8aafcef7316f3e 229-232
+packages/harness-bridge-runtime/UPSTREAM.md
+  s_049073566b945b::t_78c5b76c50d353 31-32,35-37
+  s_049073566b945b::t_3cc7a62baf8e23 54-63
+packages/harness-codex-bridge/test/wire-compat.test.ts
+  s_049073566b945b::t_f41c683201a0d9 1-108
+packages/harness-codex-bridge/UPSTREAM.md
+  s_049073566b945b::t_e7800c329ac8e5 91-98
+  s_049073566b945b::t_aed04a79343ec3 1-66,73-81,83-90,99-121
+  s_049073566b945b::t_3cc7a62baf8e23 67-72,82
+release-please-config.json
+  s_049073566b945b::t_249a588428720e 14-18
+packages/harness-codex-bridge/tsconfig.json
+  s_049073566b945b::t_380a4cc8247311 1-8
+packages/harness-codex-bridge/LICENSE
+  s_049073566b945b::t_380a4cc8247311 1-201
+packages/harness-codex-bridge/package.json
+  s_049073566b945b::t_cee46432cc3e5c 1-61
+packages/harness-codex-bridge/src/main.ts
+  s_049073566b945b::t_1dc312f91dec1b 1-121
+packages/harness-codex-bridge/test/frames.test.ts
+  s_049073566b945b::t_6774f540823ef6 1-161
+packages/harness-claude-code-bridge/UPSTREAM.md
+  s_049073566b945b::t_78c5b76c50d353 35-39
+packages/harness-codex-bridge/README.md
+  s_049073566b945b::t_c820ec015e8770 1-102
+packages/harness-codex-bridge/NOTICE
+  s_049073566b945b::t_380a4cc8247311 1-10
+packages/harness-bridge-runtime/src/bridge-runtime.ts
+  s_049073566b945b::t_b18b0632aa956f 375-384,766,784-786
+packages/harness-codex-bridge/src/codex-step-tracker.ts
+  s_049073566b945b::t_b45308c637904e 1-100
+packages/harness-codex-bridge/test/turn-control.test.ts
+  s_049073566b945b::t_2c37f33a48d17a 120-135,152
+  s_049073566b945b::t_e4f89e71685b63 1-119,136-151,153-256,260,262-278
+  s_049073566b945b::t_e7800c329ac8e5 257-259,261
+.release-please-manifest.json
+  s_049073566b945b::t_249a588428720e 4
+bun.lock
+  s_049073566b945b::t_eb3c31a48f02b4 76-94,266,290-291,546-561
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "53f29203e1666ddec5511d9c24f2f4b1e6a929f9",
+  "prompts": {},
+  "sessions": {
+    "s_049073566b945b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d4c73c29-59a2-4407-b650-1460302d84dc",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
