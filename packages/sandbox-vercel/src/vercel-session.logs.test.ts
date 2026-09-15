@@ -182,8 +182,11 @@ describe('the following read', () => {
     // The probe's length field is the gate: a poll that finds neither file past the cursor
     // reads no bytes at all, which is what makes polling a quiet bridge affordable.
     expect(fake.calls.read).toBe(0)
-    // It did keep polling, though — the zero above is a gate, not a stalled loop.
-    expect(fake.calls.runCommand - before).toBeGreaterThan(3)
+    // It did keep polling, though — the zero above is a gate, not a stalled loop. How many
+    // polls fit in those 25ms is the runner's to decide, so the bound is the claim itself
+    // (it polled more than once) rather than a count: `toBeGreaterThan(3)` failed in CI at
+    // exactly 3, which says nothing about the gate this test is actually about.
+    expect(fake.calls.runCommand - before).toBeGreaterThan(1)
     await reader.cancel()
     await reading
   })
