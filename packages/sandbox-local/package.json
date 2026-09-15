@@ -1,7 +1,7 @@
 {
   "name": "@amond-ai/sandbox-local",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A local-process backend for @amond-ai/sandbox — runs the command on this machine and journals it to disk, so a desktop app that was killed and relaunched can still find the turn it started",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
