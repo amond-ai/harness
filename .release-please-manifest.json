@@ -1,15 +1,15 @@
 {
-  "packages/harness-bridge-runtime": "0.1.0",
-  "packages/harness-claude-code-bridge": "0.1.0",
-  "packages/harness-claude-code": "0.1.0",
-  "packages/harness-protocol": "0.1.0",
-  "packages/harness-sandbox": "0.1.0",
-  "packages/harness-transport-cloudflare": "0.1.0",
+  "packages/harness-bridge-runtime": "0.1.1",
+  "packages/harness-claude-code-bridge": "0.2.0",
+  "packages/harness-claude-code": "0.2.0",
+  "packages/harness-protocol": "0.2.0",
+  "packages/harness-sandbox": "0.2.0",
+  "packages/harness-transport-cloudflare": "0.2.0",
   "packages/harness-transport": "0.1.0",
   "packages/redact": "0.1.0",
-  "packages/sandbox-daytona": "0.1.0",
-  "packages/sandbox-e2b": "0.1.0",
-  "packages/sandbox-local": "0.1.0",
-  "packages/sandbox-vercel": "0.1.0",
-  "packages/sandbox": "0.1.0"
+  "packages/sandbox-daytona": "0.2.0",
+  "packages/sandbox-e2b": "0.2.0",
+  "packages/sandbox-local": "0.2.0",
+  "packages/sandbox-vercel": "0.2.0",
+  "packages/sandbox": "0.2.0"
 }
