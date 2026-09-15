@@ -12,10 +12,11 @@
  * of these manifests is by construction a reach back into the repository being left behind. The
  * one exception is `@pleaseai/eslint-config`, which is published rather than a sibling tree.
  *
- * The third assertion is the one the transport split exists to keep true. Only three members are
+ * The third assertion is the one the transport split exists to keep true. Only four members are
  * allowed to know what they run on: `harness-transport-cloudflare`, whose whole subject is
- * workerd, and `harness-bridge-runtime` and `harness-claude-code-bridge`, which are the shared
- * transport and the Claude adapter of one Node process inside the sandbox image.
+ * workerd, and `harness-bridge-runtime`, `harness-claude-code-bridge` and `harness-codex-bridge`,
+ * which are the shared transport and the two adapters of the Node process inside the sandbox
+ * image.
  * Every other member has to run wherever a `WebSocket` and a `fetch` do — that is what makes the
  * driver usable off Cloudflare — so a `@cloudflare/*` dependency or a `cloudflare:`/`node:`/`bun:`
  * import in one of them is the regression, and it is the kind that typechecks perfectly until
@@ -50,13 +51,14 @@ const CLOSED_SET = readdirSync(SET_ROOT)
   .sort()
 
 /**
- * The three members whose subject *is* a runtime: workerd, and the two halves of the Node process
- * in the image — the transport every bridge shares, and the Claude adapter built on it.
+ * The four members whose subject *is* a runtime: workerd, and the Node process in the image — the
+ * transport every bridge shares, and the two adapters built on it.
  */
 const RUNTIME_SPECIFIC = new Set<string>([
   'harness-transport-cloudflare',
   'harness-bridge-runtime',
   'harness-claude-code-bridge',
+  'harness-codex-bridge',
 ])
 
 /**

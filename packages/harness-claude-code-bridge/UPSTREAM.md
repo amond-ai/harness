@@ -32,6 +32,11 @@ what was vendored there and carries the patches that went with it — **numbered
 they are here**, so a citation by number still resolves. The gaps in the list
 below are those patches.
 
+That second harness is [`@amond-ai/harness-codex-bridge`](../harness-codex-bridge),
+which shares the numbering too: it reuses a number where its patch is the Codex
+side of the same change (3, 7, 8, 22) and takes fresh ones above 22 for what only
+Codex needed.
+
 The wire protocol upstream keeps in `@ai-sdk/harness` and
 `claude-code-bridge-protocol.ts` lives in
 [`@amond-ai/harness-protocol`](../harness-protocol) instead, because phase 2's
