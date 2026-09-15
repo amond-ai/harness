@@ -20,7 +20,7 @@
  */
 import type { JournalMeta } from './journal'
 import type { JournalIo } from './journal-io'
-import type { JournalProbe } from './vercel-probe'
+import type { GroupState, JournalProbe } from './vercel-probe'
 import type { VercelCommandLike, VercelSandboxLike } from './vercel-surface'
 import { journalPaths, WRAPPER_SHELL } from './journal'
 
@@ -172,6 +172,36 @@ export function createVercelKill(
   return async (meta, signal) => {
     const paths = journalPaths(root, meta.id)
 
+    /**
+     * Whether a journalled number is safe to signal, or now names somebody else.
+     *
+     * `<id>.pid` and `<id>.pgid` are the wrapper's record of a process table that can have moved
+     * on since: a persistent sandbox that stopped and resumed restarts its pids from the bottom,
+     * and `listProcesses` still returns the metas written before it did, so a low recorded number
+     * can name a stranger. `vercel-probe.ts` names this file as the reason it checks the cmdline
+     * marker at all — "a mismatch here is not a wrong label but a killed bystander".
+     *
+     * Only `'stranger'` refuses, and the narrowness is the point. `'none'` is a group that is
+     * merely empty, where the kill is a harmless no-op that falls through to the command's own
+     * pid — the reparented-child case this whole module exists for — and refusing there would
+     * strand exactly the turns it is meant to reach. An unreadable probe measured nothing and
+     * refuses nothing, for the same reason `confirmReaped` does not fail on one.
+     *
+     * Memoized: both branches below can reach it, and it is a sandbox round trip.
+     */
+    let targetState: GroupState | undefined
+    async function namesAStranger(): Promise<boolean> {
+      targetState ??= (await probe.read(meta)).group
+      return targetState === 'stranger'
+    }
+
+    function warnStale(target: string): void {
+      console.warn(
+        `sandbox-vercel: the ${target} recorded for '${meta.id}' now names another process;`
+        + ' the kill was not delivered',
+      )
+    }
+
     if (signal !== undefined) {
       // The process, never the group. SIGINT is how `claude` is asked to end the turn and still
       // print its `result`, and broadcasting it to the group would reach the wrapper shell,
@@ -187,6 +217,10 @@ export function createVercelKill(
         )
         return
       }
+      if (await namesAStranger()) {
+        warnStale(`pid ${String(pid)}`)
+        return
+      }
       if (!await shellKill(`-${SIGNAL_NAMES[signal] ?? String(signal)} ${String(pid)}`)) {
         console.warn(`sandbox-vercel: signal ${String(signal)} to '${meta.id}' (pid ${String(pid)}) was refused`)
       }
@@ -196,9 +230,15 @@ export function createVercelKill(
     // The default kill reaps the group, which under `setsid` is the turn and everything it
     // started — the `git`, `bun` and language servers a pid kill would leave behind.
     const group = await io.readPid(paths.pgid)
-    if (group !== undefined && await shellKill(`-KILL -- -${String(group)}`)) {
-      await confirmReaped(meta, `group -${String(group)}`)
-      return
+    if (group !== undefined) {
+      if (await namesAStranger()) {
+        warnStale(`group -${String(group)}`)
+        return
+      }
+      if (await shellKill(`-KILL -- -${String(group)}`)) {
+        await confirmReaped(meta, `group -${String(group)}`)
+        return
+      }
     }
 
     // Strictly narrower than what was asked for, so it can never exceed the request: a group

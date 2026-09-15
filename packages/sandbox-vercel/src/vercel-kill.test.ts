@@ -88,6 +88,27 @@ describe('the default kill', () => {
     await expect(killPath(fake)(META)).resolves.toBeUndefined()
     warn.mockRestore()
   })
+
+  it('signals nothing when the recorded group now leads a stranger', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = fakeSandbox()
+    // A persistent sandbox that stopped and resumed restarts its pids from the bottom, and
+    // `listProcesses` still returns the metas written before it did — so 501 is journalled for
+    // this turn and owned by somebody else. The empty-group case one test above is what keeps
+    // this from being spelled as 'not live': there the kill is a harmless no-op that falls
+    // through to the command's own pid, here it reaps a bystander's whole tree.
+    fake.files.set(PATHS.pgid, encode('501'))
+    fake.files.set(PATHS.pid, encode('502'))
+    fake.procs.set(501, { cmdline: 'postgres -D /var/lib/postgresql', pgid: 501 })
+    fake.procs.set(502, { cmdline: 'postgres: writer', pgid: 501 })
+
+    await killPath(fake)(META)
+
+    expect(fake.ran.some(ran => ran.args.some(arg => arg.startsWith('kill ')))).toBe(false)
+    expect(fake.procs.size).toBe(2)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('now names another process'))
+    warn.mockRestore()
+  })
 })
 
 describe('a named signal', () => {

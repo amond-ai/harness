@@ -27,7 +27,7 @@ describe('probeScript', () => {
       + ` ; c=$(tr 2> /dev/null '\\0' ' ' < /proc/"$g"/cmdline)`
       + ` ; if [ -z "$g" ] ; then printf '%s\\n' nopid`
       + ` ; elif [ -n "$c" ] ; then case $c in "$m"*) printf '%s\\n' live ;;`
-      + ` *) printf '%s\\n' none ;; esac`
+      + ` *) printf '%s\\n' stranger ;; esac`
       + ` ; else if kill -0 -- -"$g" 2> /dev/null ; then printf '%s\\n' survivors`
       + ` ; else printf '%s\\n' none ; fi ; fi`
       + ` ; if [ -f '/journal/p1.out' ] ; then printf '%s\\n' "$(wc -c < '/journal/p1.out')" ; else printf '%s\\n' -1 ; fi`

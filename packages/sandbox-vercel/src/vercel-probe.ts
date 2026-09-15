@@ -32,8 +32,17 @@ import { isNotFound } from './vercel-surface'
  */
 const EXIT_RECORD_LIMIT = 32
 
-/** What the wrapper's process group is doing, as the probe observed it. */
-export type GroupState = 'live' | 'survivors' | 'none' | 'unknown'
+/**
+ * What the wrapper's process group is doing, as the probe observed it.
+ *
+ * `'stranger'` and `'none'` are both "not this turn" and answer {@link Liveness} identically —
+ * the distinction exists for the kill path alone. `'none'` is a group that is simply empty, and
+ * a kill aimed at it is a harmless no-op that falls through to the command's own pid;
+ * `'stranger'` is a pgid some *other* process now leads, where that same kill would reach a
+ * bystander. Collapsing the two would make the kill path choose between killing strangers and
+ * refusing to kill a turn whose wrapper has merely exited.
+ */
+export type GroupState = 'live' | 'survivors' | 'none' | 'stranger' | 'unknown'
 
 /**
  * Whether the turn is still running — and, separately, whether we know.
@@ -145,11 +154,13 @@ export function probeScript(processId: string, root: string): string {
     `c=$(tr 2> /dev/null '\\0' ' ' < /proc/"$g"/cmdline)`,
     `if [ -z "$g" ] ; then printf '%s\\n' nopid`,
     // The pid is in use, so it settles the question on its own: ours, or a stranger that
-    // inherited the number. A stranger is `none` even though `kill -0 -- -$g` would have
-    // succeeded on the group it leads — see {@link probeScript} on why the empty-cmdline branch
-    // is the only one allowed to ask about the group at all.
+    // inherited the number. A stranger reads as `stranger` rather than `none` even though
+    // `kill -0 -- -$g` would have succeeded on the group it leads — the two are the same
+    // liveness answer and a different kill target; see {@link GroupState}. See
+    // {@link probeScript} on why the empty-cmdline branch is the only one allowed to ask about
+    // the group at all.
     `elif [ -n "$c" ] ; then case $c in "$m"*) printf '%s\\n' live ;;`
-    + ` *) printf '%s\\n' none ;; esac`,
+    + ` *) printf '%s\\n' stranger ;; esac`,
     `else if kill -0 -- -"$g" 2> /dev/null ; then printf '%s\\n' survivors`
     + ` ; else printf '%s\\n' none ; fi ; fi`,
     length(paths.out),
@@ -197,7 +208,7 @@ export function parseProbeOutput(text: string): ProbeReading {
 
 function groupStateOf(field: string): GroupState {
   const word = field.trim()
-  if (word === 'live' || word === 'survivors' || word === 'none') {
+  if (word === 'live' || word === 'survivors' || word === 'none' || word === 'stranger') {
     return word
   }
   // `nopid` — the wrapper never recorded its group, which is a real state for a command whose
@@ -212,6 +223,10 @@ function groupStateOf(field: string): GroupState {
  * exited but something it started has not, and a turn whose `git` or language server
  * demonstrably has not stopped has not stopped. Reporting it as finished is what lets a retry
  * clone over a tree another process is still writing to.
+ *
+ * `'stranger'` is `'gone'`, exactly as `'none'` is: a pgid another process now leads says
+ * nothing about our turn except that it is not there. The two part company only in
+ * {@link GroupState}, which the kill path reads to tell a harmless kill from a bystander.
  */
 function livenessOf(group: GroupState): Liveness {
   switch (group) {
@@ -219,6 +234,7 @@ function livenessOf(group: GroupState): Liveness {
     case 'survivors':
       return 'live'
     case 'none':
+    case 'stranger':
       return 'gone'
     default:
       return 'unknown'

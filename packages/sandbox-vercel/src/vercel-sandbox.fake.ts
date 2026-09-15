@@ -122,8 +122,9 @@ function probeOutput(state: FakeState, base: string, marker: string): string {
     const leader = state.procs.get(group)
     if (leader !== undefined) {
       // The pid is in use, so its command line settles the question — a stranger that recycled
-      // it is `none` however many processes its own group holds.
-      liveness = leader.cmdline.startsWith(marker) ? 'live' : 'none'
+      // it is `stranger` however many processes its own group holds, which is a different kill
+      // target from the `none` below even though both read as gone.
+      liveness = leader.cmdline.startsWith(marker) ? 'live' : 'stranger'
     }
     else {
       liveness = [...state.procs.values()].some(proc => proc.pgid === group) ? 'survivors' : 'none'
