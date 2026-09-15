@@ -107,10 +107,10 @@ every run. External dependencies are unconstrained — `harness-transport-cloudf
 Runtime coupling is constrained, though: only `harness-transport-cloudflare`,
 `harness-bridge-runtime` and `harness-claude-code-bridge` may name a runtime, and the same test
 holds every other member to no `@cloudflare/*` dependency and no `cloudflare:`/`node:`/`bun:`
-import. One module is exempt inside an otherwise portable member —
-`sandbox-local/src/node-host.ts`, whose host binding (spawning a process, signalling a process
-group, reading a process table) has no `WebSocket`-and-`fetch` equivalent; every other file in
-that package is written against the structural `LocalHost` surface it exports.
+import — with one module-level exception, `sandbox-local/src/node-host.ts`. That exception makes
+`sandbox-local` host-process-only rather than portable: its package entry re-exports
+`nodeLocalHost`, so importing it loads the `node:` builtins even though every other file in the
+package is written against the structural `LocalHost` surface.
 
 Everything Pleaseworks-specific stays in `apps/cf-orchestrator` and arrives through the
 injection points above: the `software-factory` plugin id and the rest of the `claude` flags
