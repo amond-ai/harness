@@ -216,17 +216,25 @@ export async function connect(
           resolve(existing)
           return
         }
-        const timer = setTimeout(
-          () => reject(new Error('timed out waiting for a frame')),
-          5000,
-        )
-        watchers.push({
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const watcher = {
           predicate,
-          resolve: (frame) => {
+          resolve: (frame: Frame) => {
             clearTimeout(timer)
             resolve(frame)
           },
-        })
+        }
+        timer = setTimeout(() => {
+          // Drop the watcher with the rejection. Left in place it keeps its
+          // predicate closure alive until some unrelated frame happens to match
+          // and calls its already-settled `resolve`.
+          const index = watchers.indexOf(watcher)
+          if (index !== -1) {
+            watchers.splice(index, 1)
+          }
+          reject(new Error('timed out waiting for a frame'))
+        }, 5000)
+        watchers.push(watcher)
       }),
     close: () => socket.close(),
   }

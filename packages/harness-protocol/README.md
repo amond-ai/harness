@@ -19,7 +19,7 @@ construction rather than by hoping a tree-shaker cooperates.
 
 Most of it is [vendored verbatim](./UPSTREAM.md) from Vercel's `@ai-sdk/harness`,
 `@ai-sdk/harness-claude-code` and `@ai-sdk/harness-codex`: the outbound stream parts, the
-transport frames, the shared inbound commands, and each adapter's `start` payload. Four files
+transport frames, the shared inbound commands, and each adapter's `start` payload. Five files
 are this repository's own:
 
 - `src/bridge-extensions.ts` — the half that does not know which agent runs inside the sandbox:
@@ -29,11 +29,12 @@ are this repository's own:
 - `src/protocol.ts` — Claude's: the SDK options the client owns, the run's permission posture,
   and the session artifacts a later attempt resumes by. Re-exports `bridge-extensions.ts`, so
   every existing import from the package root still resolves.
-- `src/codex-protocol.ts` — Codex's: `finish` and `error` carrying `stopped`, `phase`,
-  `interruptedBy` and a flat optional `journalPath`. No `deferredToolUse` (Codex runs under a
-  never-ask approval policy, so a turn never parks on a decision) and no `sessionArtifacts`
-  envelope (its resume coordinate is a thread id, and that already rides the vendored
-  `bridge-thread` frame).
+- `src/codex-protocol.ts` — Codex's: `finish` carrying `stopped`, `error` carrying `phase`, and
+  both carrying `interruptedBy` and a flat optional `journalPath`. No `deferredToolUse` (Codex
+  runs under a never-ask approval policy, so a turn never parks on a decision) and no
+  `sessionArtifacts` envelope (its resume coordinate is a thread id, and that already rides the
+  vendored `bridge-thread` frame).
+- `src/index.ts` — the package root entry point.
 - `src/codex.ts` — the `./codex` entry point.
 
 Each adapter extension exists for one measured reason: the vendored stream-part schemas are

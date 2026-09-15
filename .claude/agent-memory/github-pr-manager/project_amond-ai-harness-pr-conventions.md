@@ -23,12 +23,12 @@ Two further facts worth not re-deriving:
 - No merge queue on `main` (`repository.mergeQueue` is `null`), and no
   stacked-PR tool tracks the worktrees — `detect-stack-tool.sh` is silent. Plain
   `gh`/`gh please` merge semantics apply.
-- `.github/PULL_REQUEST_TEMPLATE.md` is a single template with exactly four
-  sections: `## Summary`, `## Related issue`, `## Checklist` (6 boxes keyed to
-  `bun run test` / `bun run lint` / `bun run check`), plus a leading
-  Conventional-Commits title comment. Extra sections (design notes,
-  verification, rebase warnings) slot in cleanly between Summary and Related
-  issue; the checklist must stay last.
+- `.github/PULL_REQUEST_TEMPLATE.md` is a single template with exactly three
+  `##` sections: `## Summary`, `## Related issue`, `## Checklist` (6 boxes keyed
+  to `bun run test` / `bun run lint` / `bun run check`), above them a leading
+  Conventional-Commits title comment — a comment, not a section. Extra sections
+  (design notes, verification, rebase warnings) slot in cleanly between Summary
+  and Related issue; the checklist must stay last.
 - The repo ships no AI-reviewer config (`.github` has only `dependabot.yml`,
   `ISSUE_TEMPLATE`, `DISCUSSION_TEMPLATE`, and `ci.yml`/`release-please.yml`/
   `zizmor.yml`), so the ready flip does not itself trigger a bot review.

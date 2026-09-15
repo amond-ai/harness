@@ -104,9 +104,10 @@ Nothing in the set may depend on `apps/*`, `@pleaseai/agent-core`, `@pleaseai/sa
 `@pleaseai/dashboard-schema` or `@pleaseai/session-store`. `src/closure.test.ts` asserts it on
 every run. External dependencies are unconstrained — `harness-transport-cloudflare` keeps
 `@cloudflare/sandbox` and `sandbox-e2b` keeps `e2b`, both of which travel with their manifests.
-Runtime coupling is constrained, though: only `harness-transport-cloudflare` and
-`harness-claude-code-bridge` may name a runtime, and the same test holds every other member to no
-`@cloudflare/*` dependency and no `cloudflare:`/`node:`/`bun:` import.
+Runtime coupling is constrained, though: only `harness-transport-cloudflare`,
+`harness-bridge-runtime` and `harness-claude-code-bridge` may name a runtime, and the same test
+holds every other member to no `@cloudflare/*` dependency and no `cloudflare:`/`node:`/`bun:`
+import.
 
 Everything Pleaseworks-specific stays in `apps/cf-orchestrator` and arrives through the
 injection points above: the `software-factory` plugin id and the rest of the `claude` flags

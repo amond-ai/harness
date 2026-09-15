@@ -2,10 +2,20 @@
 
 The transport every per-turn bridge process shares. It binds the WebSocket
 server, gates it on a per-turn token, stamps every frame with a monotonic `seq`,
-appends each to a journal on disk *before* it reaches the socket, replays the
-tail a reconnecting client has not seen, and services `abort`, `interrupt`,
-`stop` and `destroy`. What it does not know is which agent runs inside the
-sandbox — that is the adapter's, and it arrives as one callback.
+appends each journaled turn event to a journal on disk *before* it reaches the
+socket, replays the tail a reconnecting client has not seen, and services
+`abort`, `interrupt`, `stop` and `destroy`. What it does not know is which agent
+runs inside the sandbox — that is the adapter's, and it arrives as one callback.
+
+Disk-first is a guarantee about journaled turn events, and only those. Control
+frames — `bridge-hello`, `bridge-stop`, a command's error answer — answer the
+socket that sent what they reply to and are never journaled or replayed, and
+neither are live-only events: `emit(event, { journal: false })`, the token
+deltas, which take a `seq` and keep their place in the order but skip the append.
+An append the filesystem refuses is swallowed rather than allowed to fail the
+turn: the frame still goes out, and the in-memory log still serves `resume`. So a
+reconnecting client gets back the journaled tail, not everything the socket ever
+carried.
 
 ```ts
 import { runBridge } from '@amond-ai/harness-bridge-runtime'
@@ -26,8 +36,14 @@ await runBridge<StartMessage>({
 
 `runBridge` resolves once the server is listening and has printed
 `{"type":"bridge-ready","port":…}` on stdout, which is the line the orchestrator
-waits for before it dials. The process then stays alive on the server until a
-`stop` or `destroy` exits it.
+waits for before it dials. The process then normally stays alive on the server
+until a `stop` or `destroy` exits it. Those are the clean exits, not the only
+ones: an uncaught exception or an unhandled rejection anywhere in the process is
+reported as an `error` frame and flushed to the journal, and the runtime then
+exits with status 1 — unless an `onExit` is injected, which replaces that exit
+the same way it replaces the clean one. Waiting on `stop` or `destroy` does not
+recover a process that took the crash path; on the default exit its status is
+what tells the two apart.
 
 ## What the adapter provides, and what it gets
 
