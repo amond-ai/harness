@@ -372,6 +372,16 @@ export interface BridgeTurn {
      * error that no stop preceded says nothing about one.
      */
     interruptedBy?: InterruptReason
+    /**
+     * This turn's journal, named flat on the frame rather than inside an envelope.
+     *
+     * Forwarded verbatim, like the two above, and for the same reason the runtime does not
+     * build it: an adapter whose ending carries no envelope still has a journal to report, and
+     * `sessionArtifacts` is the wrong shape to report it in — two of that envelope's three
+     * fields name a session file an adapter without one has nothing to put there. The value is
+     * always {@link journalPath}; it is the caller that decides whether its schema carries it.
+     */
+    journalPath?: string
   }) => void
 
   /** Absolute path of this turn's journal, reported in `finish`. */
@@ -753,6 +763,7 @@ export async function runBridge<TStart extends { type: 'start' }>(
     phase?: BridgeErrorPhase
     sessionArtifacts?: Record<string, unknown>
     interruptedBy?: InterruptReason
+    journalPath?: string
   }): void => {
     writeErrorToStderr({
       message: input.message ?? 'bridge error',
@@ -770,6 +781,9 @@ export async function runBridge<TStart extends { type: 'start' }>(
       ...(input.interruptedBy === undefined
         ? {}
         : { interruptedBy: input.interruptedBy }),
+      ...(input.journalPath === undefined
+        ? {}
+        : { journalPath: input.journalPath }),
     })
   }
 
