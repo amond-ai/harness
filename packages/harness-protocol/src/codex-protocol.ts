@@ -119,7 +119,21 @@ export type CodexTurnHostError = z.infer<typeof codexTurnHostErrorSchema>
  * back. A member added upstream therefore arrives here automatically, which is how `bridge-thread`
  * (the frame carrying Codex's resume coordinate) and `file-change` reach this union without being
  * named.
+ *
+ * The member type is written out instead of inferred, and that is load-bearing rather than
+ * stylistic. The cast the substitution needs widens every member to a `z.ZodObject` with a loose
+ * shape, and `z.infer` over the result resolves to `Record<string, unknown>`: `frame.type` types as
+ * `unknown` and `if (frame.type === 'finish')` narrows nothing, so a consumer of what the comment
+ * above calls a discriminated union gets none of the discrimination. Declaring the union and
+ * asserting the schema against it restores narrowing — collapsing this back to
+ * `z.infer<typeof codexTurnHostOutboundMessageSchema>` would take it away again with no error.
  */
+export type CodexTurnHostOutboundMessage
+  = | Exclude<z.infer<typeof harnessV1BridgeOutboundMessageSchema>, { type: 'error' | 'finish' }>
+    | CodexTurnHostError
+    | CodexTurnHostFinish
+    | z.infer<typeof turnHostStartedSchema>
+
 export const codexTurnHostOutboundMessageSchema = z.discriminatedUnion('type', [
   ...harnessV1BridgeOutboundMessageSchema.options.filter(
     option => !['finish', 'error'].includes(option.shape.type.value as string),
@@ -127,6 +141,4 @@ export const codexTurnHostOutboundMessageSchema = z.discriminatedUnion('type', [
   codexTurnHostFinishSchema,
   codexTurnHostErrorSchema,
   turnHostStartedSchema,
-] as unknown as [z.ZodObject, ...z.ZodObject[]])
-
-export type CodexTurnHostOutboundMessage = z.infer<typeof codexTurnHostOutboundMessageSchema>
+] as unknown as [z.ZodObject, ...z.ZodObject[]]) as unknown as z.ZodType<CodexTurnHostOutboundMessage>
