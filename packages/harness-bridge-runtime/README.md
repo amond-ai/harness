@@ -37,13 +37,18 @@ await runBridge<StartMessage>({
 `runBridge` resolves once the server is listening and has printed
 `{"type":"bridge-ready","port":…}` on stdout, which is the line the orchestrator
 waits for before it dials. The process then normally stays alive on the server
-until a `stop` or `destroy` exits it. Those are the clean exits, not the only
-ones: an uncaught exception or an unhandled rejection anywhere in the process is
-reported as an `error` frame and flushed to the journal, and the runtime then
-exits with status 1 — unless an `onExit` is injected, which replaces that exit
-the same way it replaces the clean one. Waiting on `stop` or `destroy` does not
-recover a process that took the crash path; on the default exit its status is
-what tells the two apart.
+until a `stop` or `destroy` exits it.
+
+Those are the clean exits, not the only ones. Once `runBridge` has installed its
+`uncaughtException` and `unhandledRejection` handlers, either one reports an
+`error` frame, flushes the journal, and exits with status 1 — or hands to an
+injected `onExit`, which replaces that exit the same way it replaces the clean
+one. Both qualifiers carry weight: a failure before those handlers are
+registered, a module-load error say, is a bare process crash with no frame at
+all, and the flush is best-effort like every other append, so a crash can still
+take its own `error` frame with it. Waiting on `stop` or `destroy` recovers
+neither case; on the default exit the status is what tells a crash from a clean
+stop.
 
 ## What the adapter provides, and what it gets
 
