@@ -10,5 +10,6 @@
   "packages/sandbox-daytona": "0.1.0",
   "packages/sandbox-e2b": "0.1.0",
   "packages/sandbox-local": "0.1.0",
+  "packages/sandbox-vercel": "0.1.0",
   "packages/sandbox": "0.1.0"
 }

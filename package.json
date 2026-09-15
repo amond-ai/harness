@@ -46,6 +46,7 @@
     "@daytona/sdk": "^0.211.2",
     "@pleaseai/eslint-config": "^0.0.4",
     "@types/ws": "^8.18.1",
+    "@vercel/sandbox": "^3.3.0",
     "@vitest/coverage-istanbul": "^4.1.10",
     "bun-types": "^1.4.2",
     "e2b": "^2.45.0",
