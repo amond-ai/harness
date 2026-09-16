@@ -188,64 +188,83 @@ async function runTurn(
 
   const codexConfig = buildCodexConfig(start)
   const apiBaseUrl = resolveApiBaseUrl(start)
-  const codex = createCodex({
-    ...(procEnv.CODEX_API_KEY ? { apiKey: procEnv.CODEX_API_KEY } : {}),
-    /*
-     * Only when no `model_providers` entry was configured above: the CLI reads
-     * the provider's `base_url` in that case, and passing both leaves two
-     * sources for one setting.
-     */
-    ...(typeof codexConfig.model_provider === 'string' || apiBaseUrl === undefined
-      ? {}
-      : { baseUrl: apiBaseUrl }),
-    /*
-     * The credentials the turn runs on arrive here and nowhere else.
-     *
-     * `env` REPLACES the CLI child's environment rather than merging into it,
-     * so the whole of this process's environment is forwarded — which is what
-     * the consumer's `env: () => Record<string, string>` thunk populated when
-     * the sandbox exec'd this bridge. Upstream's `codex-subscription.ts`, which
-     * reads `~/.codex/auth.json` or the OS keyring and refreshes the OAuth
-     * token itself, is deliberately not ported: this repository has no
-     * credential-brokering primitive to build it on, and a host that reached
-     * into a keyring would be a host the sandbox contract cannot describe.
-     */
-    env: Object.fromEntries(
-      Object.entries(procEnv).filter(
-        (entry): entry is [string, string] => typeof entry[1] === 'string',
+  /*
+   * Constructing the client and opening the thread are the last steps that can
+   * throw before there is a stream to report on. Left to the runtime's own
+   * catch they reach the client as a run error with no `journalPath` — the one
+   * field that says where the turn's transcript is — so the ending is emitted
+   * here, where the journal is in scope.
+   */
+  let thread: CodexThreadLike
+  try {
+    const codex = createCodex({
+      ...(procEnv.CODEX_API_KEY ? { apiKey: procEnv.CODEX_API_KEY } : {}),
+      /*
+       * Only when no `model_providers` entry was configured above: the CLI reads
+       * the provider's `base_url` in that case, and passing both leaves two
+       * sources for one setting.
+       */
+      ...(typeof codexConfig.model_provider === 'string' || apiBaseUrl === undefined
+        ? {}
+        : { baseUrl: apiBaseUrl }),
+      /*
+       * The credentials the turn runs on arrive here and nowhere else.
+       *
+       * `env` REPLACES the CLI child's environment rather than merging into it,
+       * so the whole of this process's environment is forwarded — which is what
+       * the consumer's `env: () => Record<string, string>` thunk populated when
+       * the sandbox exec'd this bridge. Upstream's `codex-subscription.ts`, which
+       * reads `~/.codex/auth.json` or the OS keyring and refreshes the OAuth
+       * token itself, is deliberately not ported: this repository has no
+       * credential-brokering primitive to build it on, and a host that reached
+       * into a keyring would be a host the sandbox contract cannot describe.
+       */
+      env: Object.fromEntries(
+        Object.entries(procEnv).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string',
+        ),
       ),
-    ),
-    ...(Object.keys(codexConfig).length > 0 ? { config: codexConfig } : {}),
-  })
+      ...(Object.keys(codexConfig).length > 0 ? { config: codexConfig } : {}),
+    })
 
-  const threadOptions: Record<string, unknown> = {
-    ...(start.model ? { model: start.model } : {}),
-    /*
-     * The sandbox is the isolation boundary, not the CLI: everything this
-     * process can reach, the turn is already allowed to reach. A second
-     * sandbox inside the first would only make the agent fail at things the
-     * deployment means to permit.
-     */
-    sandboxMode: 'danger-full-access',
-    /*
-     * Load-bearing, not a default. `codexTurnHostFinishSchema` has no
-     * `deferredToolUse` *because* of this line: under `never` a turn cannot
-     * park on a decision, so there is no deferral for an ending to name. A
-     * bridge that wants approvals needs the schema changed first, rather than
-     * a field that is already waiting.
-     */
-    approvalPolicy: 'never',
-    workingDirectory: workdir,
-    skipGitRepoCheck: true,
-    ...(start.reasoningEffort
-      ? { modelReasoningEffort: start.reasoningEffort }
-      : {}),
-    webSearchMode: start.webSearch ? 'live' : 'disabled',
+    const threadOptions: Record<string, unknown> = {
+      ...(start.model ? { model: start.model } : {}),
+      /*
+       * The sandbox is the isolation boundary, not the CLI: everything this
+       * process can reach, the turn is already allowed to reach. A second
+       * sandbox inside the first would only make the agent fail at things the
+       * deployment means to permit.
+       */
+      sandboxMode: 'danger-full-access',
+      /*
+       * Load-bearing, not a default. `codexTurnHostFinishSchema` has no
+       * `deferredToolUse` *because* of this line: under `never` a turn cannot
+       * park on a decision, so there is no deferral for an ending to name. A
+       * bridge that wants approvals needs the schema changed first, rather than
+       * a field that is already waiting.
+       */
+      approvalPolicy: 'never',
+      workingDirectory: workdir,
+      skipGitRepoCheck: true,
+      ...(start.reasoningEffort
+        ? { modelReasoningEffort: start.reasoningEffort }
+        : {}),
+      webSearchMode: start.webSearch ? 'live' : 'disabled',
+    }
+
+    thread = threadState.id === undefined
+      ? codex.startThread(threadOptions)
+      : codex.resumeThread(threadState.id, threadOptions)
   }
-
-  const thread = threadState.id === undefined
-    ? codex.startThread(threadOptions)
-    : codex.resumeThread(threadState.id, threadOptions)
+  catch (err) {
+    turn.emitError({
+      error: err,
+      message: 'codex turn setup failed',
+      phase: 'run',
+      journalPath: turn.journalPath,
+    })
+    return
+  }
 
   /*
    * The controller the SDK turn actually runs on, aborted by either of the two

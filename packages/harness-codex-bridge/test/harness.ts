@@ -353,18 +353,51 @@ export async function connect(host: Host): Promise<Client> {
           resolve(existing)
           return
         }
-        const timer = setTimeout(
-          () => reject(new Error('timed out waiting for a frame')),
-          5000,
-        )
-        watchers.push({
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const watcher = {
           predicate,
-          resolve: (frame) => {
+          resolve: (frame: Frame) => {
             clearTimeout(timer)
             resolve(frame)
           },
-        })
+        }
+        timer = setTimeout(() => {
+          // Dropped before the rejection, not left behind: a watcher nobody is
+          // waiting on any more would go on evaluating its predicate against
+          // every frame the rest of the test receives.
+          const at = watchers.indexOf(watcher)
+          if (at >= 0) {
+            watchers.splice(at, 1)
+          }
+          reject(new Error('timed out waiting for a frame'))
+        }, 5000)
+        watchers.push(watcher)
       }),
     close: () => socket.close(),
   }
+}
+
+/**
+ * Block until the host is between turns.
+ *
+ * A `start` that arrives while the previous turn is still settling is refused
+ * outright — `a bridge turn is already running` — and the runtime only reaches
+ * `waiting` in the `finally` after the turn's driver returns, which is strictly
+ * after the `finish` or `error` frame a test awaited. So a test that sends two
+ * turns back to back has to observe the settle rather than assume it won the
+ * race. `bridge-hello` carries the state on every fresh connection, and that is
+ * the only place the wire exposes it.
+ */
+export async function waitForWaiting(host: Host): Promise<void> {
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline) {
+    const probe = await connect(host)
+    const hello = await probe.waitFor(frame => frame.type === 'bridge-hello')
+    probe.close()
+    if (hello.state === 'waiting') {
+      return
+    }
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  throw new Error('timed out waiting for the bridge to settle between turns')
 }

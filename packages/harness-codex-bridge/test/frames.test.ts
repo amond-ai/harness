@@ -1,5 +1,5 @@
 import type { Host } from './harness'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import {
   agentMessageEvents,
   commandExecutionEvents,
@@ -16,6 +16,7 @@ let host: Host | undefined
 afterEach(async () => {
   await host?.close()
   host = undefined
+  vi.restoreAllMocks()
 })
 
 it('translates an agent message into a text part and journals every delta', async () => {
@@ -254,16 +255,64 @@ it('reports an error item as a warning rather than an ending', async () => {
     ...agentMessageEvents('recovered'),
     turnCompleted(),
   ])
+  /*
+   * Spied before the host starts, because the runtime binds `process.stderr.
+   * write` as it comes up — and stderr is where a warning goes, so asserting
+   * only that no `error` frame arrived would pass just as well on a host that
+   * dropped the report entirely.
+   */
+  const stderr = vi.spyOn(process.stderr, 'write')
   host = await startHost({ codex: codex.factory })
   const client = await connect(host)
 
   client.send({ type: 'start', prompt: 'do the thing' })
   const finish = await client.waitFor(frame => frame.type === 'finish')
 
+  expect(stderr.mock.calls.map(call => String(call[0]))).toContain(
+    '[harness:codex:warn] retrying the shell call\n',
+  )
   // A step Codex recovered from is not the turn's outcome: an `error` frame
   // here would be read as one.
   expect(client.frames.some(frame => frame.type === 'error')).toBe(false)
   expect(finish.stopped).toBe('completed')
+  client.close()
+})
+
+it('closes an inferred step around a tool item codex sent without an id', async () => {
+  const codex = createFakeCodex([
+    threadStarted(),
+    {
+      type: 'item.started',
+      item: { type: 'command_execution', command: 'ls', status: 'in_progress' },
+    },
+    {
+      type: 'item.completed',
+      item: {
+        type: 'command_execution',
+        command: 'ls',
+        aggregated_output: 'README.md\n',
+        exit_code: 0,
+        status: 'completed',
+      },
+    },
+    ...agentMessageEvents('done'),
+    turnCompleted(),
+  ])
+  host = await startHost({ codex: codex.factory })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'list the files' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  /*
+   * Two steps, not one: the tool's own, closed by its completion, and the
+   * model's afterwards. An anonymous item gets a fresh fallback id per event,
+   * so a tracker keyed on that id never sees the start it opened get closed —
+   * and the first step would stay open until the turn ended.
+   */
+  const types = client.frames.map(frame => frame.type)
+  expect(types.filter(type => type === 'finish-step')).toHaveLength(2)
+  expect(types.indexOf('finish-step')).toBeLessThan(types.indexOf('text-start'))
   client.close()
 })
 

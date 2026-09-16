@@ -32,9 +32,17 @@ export function createCodexStepTracker(input: {
 }): CodexStepTracker {
   let stepOpen = false
   const pendingToolItemIds = new Set<string>()
+  /*
+   * Tool items Codex sent with no id of their own. There is nothing to match a
+   * start to its completion by, so they are paired by count instead — one
+   * completion closes one of them. Identity is what the set above needs and
+   * what these do not have; leaving them out of it entirely would close the
+   * step while such a tool was still running.
+   */
+  let pendingAnonymousTools = 0
 
   const finishStep = (): void => {
-    if (!stepOpen || pendingToolItemIds.size > 0) {
+    if (!stepOpen || pendingToolItemIds.size > 0 || pendingAnonymousTools > 0) {
       return
     }
     input.send({
@@ -56,12 +64,20 @@ export function createCodexStepTracker(input: {
       stepOpen = true
 
       if (isToolStepItem(item)) {
-        if (event.type === 'item.started' && itemId) {
-          pendingToolItemIds.add(itemId)
+        if (event.type === 'item.started') {
+          if (itemId) {
+            pendingToolItemIds.add(itemId)
+          }
+          else {
+            pendingAnonymousTools += 1
+          }
         }
         else if (event.type === 'item.completed') {
           if (itemId) {
             pendingToolItemIds.delete(itemId)
+          }
+          else if (pendingAnonymousTools > 0) {
+            pendingAnonymousTools -= 1
           }
           finishStep()
         }
@@ -69,6 +85,7 @@ export function createCodexStepTracker(input: {
     },
     finishTurn() {
       pendingToolItemIds.clear()
+      pendingAnonymousTools = 0
       finishStep()
     },
   }

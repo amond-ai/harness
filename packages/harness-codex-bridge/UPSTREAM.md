@@ -30,8 +30,10 @@ The bridge runtime upstream keeps in `@ai-sdk/harness/src/bridge/` lives in
 [`@amond-ai/harness-bridge-runtime`](../harness-bridge-runtime) instead. The wire
 protocol it speaks lives in [`@amond-ai/harness-protocol`](../harness-protocol),
 behind its `./codex` entry point. Each records its own vendoring; the patch
-numbers below are **the numbering those two files share**, so a citation by
-number resolves across all three.
+numbers below are the numbering this file shares with `harness-bridge-runtime`
+and `harness-claude-code-bridge`, so a citation by number resolves across those
+three. `harness-protocol` numbers its own patches separately — its list is
+five entries long and unrelated to this one.
 
 ## Patches carried on top of upstream
 

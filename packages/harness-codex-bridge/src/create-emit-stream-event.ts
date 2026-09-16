@@ -138,7 +138,13 @@ export function createEmitStreamEvent({
     const item = event.item
     const id = item.id ?? randomUUID()
     const observeStep = (): void => {
-      stepTracker.observeEvent({ event, itemId: id })
+      /*
+       * `item.id`, not the `id` above: for an item Codex sent without one that
+       * fallback is a fresh UUID per event, so the tracker would never match a
+       * start to its completion and the step would stay open for the rest of
+       * the turn. It pairs anonymous items by count instead.
+       */
+      stepTracker.observeEvent({ event, itemId: item.id })
     }
 
     if (item.type === 'agent_message' && typeof item.text === 'string') {

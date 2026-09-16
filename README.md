@@ -229,4 +229,5 @@ privately through [SECURITY.md](./SECURITY.md), not a public issue.
 Apache-2.0. `harness-bridge-runtime`, `harness-claude-code-bridge`, `harness-codex-bridge` and
 `harness-protocol` contain code derived from [vercel/ai](https://github.com/vercel/ai)
 (`@ai-sdk/harness`, `@ai-sdk/harness-claude-code`, `@ai-sdk/harness-codex`), Apache-2.0; the
-exact upstream commit and the patches carried on top are listed in each package's `UPSTREAM.md`.
+exact upstream source version and the patches carried on top are listed in each package's
+`UPSTREAM.md`.

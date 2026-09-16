@@ -5,12 +5,19 @@ The per-turn host that runs **inside the sandbox image**: it hosts
 orchestrator over a WebSocket, appending each transcript frame to a sequence-numbered journal on
 disk before it sends it.
 
-Every frame is journaled, the text and reasoning deltas included. That is the one place this
+Every turn event is journaled, the text and reasoning deltas included. That is the one place this
 bridge differs from
 [`@amond-ai/harness-claude-code-bridge`](../harness-claude-code-bridge), which sends its deltas
 live-only: there the same text arrives again on a `raw` frame carrying the whole SDK message, so
 a delta is a duplicate. Codex emits no `raw` frames, so here the deltas *are* the transcript and
 a reconnect has to get them back.
+
+Two things fall outside that, and both are the runtime's rather than this host's. An append the
+filesystem refuses costs that one entry on disk rather than the turn: the frame is in the
+in-memory log before the append is queued, so a `resume` against this process still replays it and
+only a reader that arrives after a restart misses it. And a control frame the runtime answers a
+socket with directly, such as a `start` refused because a turn is already running, never goes
+through the journal at all.
 
 This package ships one artifact — `dist/bridge.mjs`, a Node bundle. It is not a library: the
 orchestrator never imports it, it *execs* it. The transport underneath is
@@ -79,10 +86,15 @@ one that did not run.
 
 Whatever the process's environment holds is forwarded to the CLI child, and that is the only
 route in — it is what the consumer's `env: () => Record<string, string>` thunk populated when the
-sandbox exec'd this bridge. `CODEX_API_KEY`, `OPENAI_BASE_URL` and `start.headers` configure a
-named model provider when they are present; with none of them the CLI falls back to its own
-configuration. Upstream's keyring-and-`auth.json` subscription path is deliberately not ported —
-see [UPSTREAM.md](./UPSTREAM.md).
+sandbox exec'd this bridge. `CODEX_API_KEY` is passed straight to the SDK as its `apiKey`, the
+credential the CLI's own configuration authenticates with; it selects no provider by itself.
+`OPENAI_BASE_URL` or `start.headers` are the separate provider-selection path: either one stands
+up a named `agent_bridge_openai` model provider pointed at that base URL (default
+`https://api.openai.com/v1` when only `start.headers` is given, since headers can only attach to
+a configured provider), reading its credential from the same `CODEX_API_KEY` variable and, when
+`start.headers` is present, carrying it as that provider's per-request headers. With none of the
+three set, the CLI falls back to its own configuration. Upstream's keyring-and-`auth.json`
+subscription path is deliberately not ported — see [UPSTREAM.md](./UPSTREAM.md).
 
 ## Stopping a turn
 
@@ -92,6 +104,12 @@ asked for and gets no `finish`; an `interrupt` is remembered, and the turn is re
 `finish { stopped: 'interrupted', interruptedBy: … }` carrying what it produced before the stop.
 There is no grace period and no escalation — unlike the Claude bridge, whose `query.interrupt()`
 winds the CLI down and yields a typed result, here the abort *is* the escalation.
+
+A turn that fails mid-run reports it the same way: `error { phase, interruptedBy? }`, with
+`phase` naming which part of the turn was running and `interruptedBy` set only when the failure
+landed during the wind-down of an interrupt. `journalPath` rides both `finish` and `error` flat,
+per `codexTurnHostFinishSchema` / `codexTurnHostErrorSchema` in `@amond-ai/harness-protocol`'s
+`./codex` entry point.
 
 ## Upstream
 

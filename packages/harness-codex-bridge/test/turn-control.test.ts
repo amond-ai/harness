@@ -8,6 +8,7 @@ import {
   successfulTurn,
   threadStarted,
   turnCompleted,
+  waitForWaiting,
 } from './harness'
 
 let host: Host | undefined
@@ -91,9 +92,14 @@ it('leaves an abort without a finish, because it is a teardown and not a turn', 
   await client.waitFor(frame => frame.type === 'text-end')
 
   client.send({ type: 'abort' })
-  // The turn settles back to `waiting`, which is what a second `start` proves —
-  // and it proves it without asserting on the absence of a frame that has not
-  // had time to arrive.
+  /*
+   * A second turn is what proves the first one ended without asserting on the
+   * absence of a frame that has not had time to arrive. It has to wait for the
+   * settle first: the runtime reaches `waiting` only after the aborted turn's
+   * driver returns, and a `start` that arrives before then is refused outright
+   * rather than run.
+   */
+  await waitForWaiting(host)
   codex.push(turnCompleted())
   client.send({ type: 'start', prompt: 'and again' })
   await client.waitFor(frame => frame.type === 'bridge-started' && (frame.seq as number) > 1)
@@ -127,6 +133,7 @@ it('ends a failed turn on an error frame and not also on a finish', async () => 
    * `bridge-started` once the first turn has settled back to `waiting`, so a
    * `finish` the first turn was about to send has already had its chance.
    */
+  await waitForWaiting(host)
   codex.push(threadStarted('thr-2'))
   codex.push(turnCompleted())
   client.send({ type: 'start', prompt: 'and again' })
@@ -184,6 +191,7 @@ it('resumes the thread the start named, and restarts when told to', async () => 
   expect(codex.startThreadCount).toBe(0)
 
   // The thread this process is now on is resumed implicitly on the next turn…
+  await waitForWaiting(host)
   codex.push(turnCompleted())
   client.send({ type: 'start', prompt: 'second' })
   await client.waitFor(
@@ -192,6 +200,7 @@ it('resumes the thread the start named, and restarts when told to', async () => 
   expect(codex.resumedId).toBe('thr-1')
 
   // …unless the client asks for a fresh one.
+  await waitForWaiting(host)
   codex.push(threadStarted('thr-2'))
   codex.push(turnCompleted())
   client.send({ type: 'start', prompt: 'third', restartThread: true })
@@ -199,6 +208,28 @@ it('resumes the thread the start named, and restarts when told to', async () => 
     () => client.frames.filter(frame => frame.type === 'finish').length === 3,
   )
   expect(codex.startThreadCount).toBe(1)
+  client.close()
+})
+
+it('keeps the turn journal on a failure to open the thread', async () => {
+  // Constructing the client and opening the thread happen before there is a
+  // stream to fail on. Left to the runtime's own catch the ending reaches the
+  // client with no `journalPath`, and the transcript it names is where the
+  // client looks for what the turn managed to do.
+  host = await startHost({
+    codex: () => {
+      throw new Error('no codex on this image')
+    },
+  })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  const error = await client.waitFor(frame => frame.type === 'error')
+
+  expect(error.phase).toBe('run')
+  expect(error.error).toMatchObject({ message: 'no codex on this image' })
+  expect(error.journalPath).toBe(host.journalPath)
+  expect(client.frames.some(frame => frame.type === 'finish')).toBe(false)
   client.close()
 })
 
