@@ -1,7 +1,7 @@
 {
   "name": "@amond-ai/sandbox-daytona",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A Daytona backend for @amond-ai/sandbox — one session per process, with the exit code and the transcript read back from Daytona's own toolbox daemon",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
