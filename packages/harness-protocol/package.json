@@ -1,8 +1,8 @@
 {
   "name": "@amond-ai/harness-protocol",
   "type": "module",
-  "version": "0.1.0",
-  "description": "The bridge wire protocol the turn host and its Worker client both speak \u2014 vendored from @ai-sdk/harness, extended with the fields this deployment adds",
+  "version": "0.2.0",
+  "description": "The bridge wire protocol the turn host and its Worker client both speak — vendored from @ai-sdk/harness, extended with the fields this deployment adds",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/amond-ai/harness/tree/main/packages/harness-protocol#readme",

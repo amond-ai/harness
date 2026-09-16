@@ -1,7 +1,7 @@
 {
   "name": "@amond-ai/sandbox",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The sandbox surface the orchestrator runs against — owned here, not borrowed, so a backend other than Cloudflare can satisfy it",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
