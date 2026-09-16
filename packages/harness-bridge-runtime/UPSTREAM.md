@@ -28,11 +28,13 @@ every adapter's bridge imports, and the Claude package is
 ## Patches carried on top of upstream
 
 **The numbers are the ones these patches carry in
-[`harness-claude-code-bridge/UPSTREAM.md`](../harness-claude-code-bridge/UPSTREAM.md),
+[`harness-claude-code-bridge/UPSTREAM.md`](../harness-claude-code-bridge/UPSTREAM.md)
+and [`harness-codex-bridge/UPSTREAM.md`](../harness-codex-bridge/UPSTREAM.md),
 kept rather than renumbered.** They are cited by number in commit messages and in
 a test comment, and a renumbering would silently repoint every one of those
-citations at a different patch. The gaps are the patches that stayed with the
-Claude adapter.
+citations at a different patch. The gaps are the patches that stayed with an
+adapter; a number above 22 belongs to the Codex adapter, which arrived after the
+Claude list stopped growing.
 
 5. `feat(turn-host): journal frames to disk before sending them` — the disk
    append is awaited before the frame reaches the socket, unconditionally;
@@ -48,6 +50,16 @@ Claude adapter.
    the adapter then *does* with it — `query.interrupt()` instead of aborting, so
    the turn ends with a typed `result` — stayed with the Claude bridge under the
    same number.
+
+8. `feat(turn-host): report stop reason and session artifacts on finish`
+   (**the runtime's half**) — `emitError` forwards an optional `journalPath`
+   verbatim, omitting the key when the caller names none, the way it forwards
+   `sessionArtifacts` under patch 20. It exists for the second adapter:
+   `harness-codex-bridge` reports the journal flat on `finish` and `error`
+   rather than inside an envelope, because two of `sessionArtifacts`'s three
+   fields name a session *file* and Codex's session is a thread id that rides
+   `bridge-thread`. The value is always `turn.journalPath`; the runtime neither
+   inspects it nor decides whether an adapter's schema carries it.
 
 11. `fix(turn-host): deliver a frame to a socket at most once across resume` — a
     `resume` arriving while frames sit on the journal chain made `replay` and the

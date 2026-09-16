@@ -24,6 +24,7 @@ out.
 | `@amond-ai/harness-claude-code` | the orchestrator | The `TurnDriver` seam and both Claude Code drivers: `sdk` (drives the turn host over the bridge socket, one bounded attach round at a time) and `cli` (execs `claude -p` in the sandbox and watches its log cursor). Runtime-neutral. |
 | `@amond-ai/harness-bridge-runtime` | inside the sandbox image | The transport every bridge shares: a token-gated WebSocket server, the monotonic `seq`, the disk-first journal and the resume replay over it, and the `abort`/`interrupt`/`stop`/`destroy` commands. Knows no agent — that arrives as `onStart`. A fork of Vercel's `@ai-sdk/harness` bridge (Apache-2.0). |
 | `@amond-ai/harness-claude-code-bridge` | inside the sandbox image | The Claude adapter on that runtime: the per-turn Node process that hosts the Agent SDK `query()`. A fork of Vercel's `@ai-sdk/harness-claude-code` bridge (Apache-2.0). |
+| `@amond-ai/harness-codex-bridge` | inside the sandbox image | The Codex adapter on that runtime: the per-turn Node process that hosts `@openai/codex-sdk`, running its thread under `approvalPolicy: 'never'`. A fork of Vercel's `@ai-sdk/harness-codex` bridge (Apache-2.0). |
 | `@amond-ai/harness-protocol` | both | The bridge wire schema: every frame a host emits and the orchestrator sends, as zod schemas. One entry point per harness — the root is Claude's, `./codex` is Codex's — so each sandbox bundle carries only its own adapter's schemas. |
 | `@amond-ai/harness-transport` | the orchestrator | The `WsLike` socket shape, the upgrade headers, and a socket opener built on the standard `WebSocket` constructor. Deno, Node 22+, Bun, and browsers dial with this. |
 | `@amond-ai/harness-transport-cloudflare` | Cloudflare Workers | The opener for a Cloudflare Sandbox, whose ports are private and reached through `Sandbox.wsConnect`, plus the workerd `fetch` upgrade path. |
@@ -225,7 +226,8 @@ privately through [SECURITY.md](./SECURITY.md), not a public issue.
 
 ## License
 
-Apache-2.0. `harness-bridge-runtime`, `harness-claude-code-bridge` and `harness-protocol` contain
-code derived from [vercel/ai](https://github.com/vercel/ai) (`@ai-sdk/harness`,
-`@ai-sdk/harness-claude-code`, `@ai-sdk/harness-codex`), Apache-2.0; the exact upstream commit and
-the patches carried on top are listed in each package's `UPSTREAM.md`.
+Apache-2.0. `harness-bridge-runtime`, `harness-claude-code-bridge`, `harness-codex-bridge` and
+`harness-protocol` contain code derived from [vercel/ai](https://github.com/vercel/ai)
+(`@ai-sdk/harness`, `@ai-sdk/harness-claude-code`, `@ai-sdk/harness-codex`), Apache-2.0; the
+exact upstream source version and the patches carried on top are listed in each package's
+`UPSTREAM.md`.

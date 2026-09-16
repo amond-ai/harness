@@ -1,0 +1,61 @@
+{
+  "name": "@amond-ai/harness-codex-bridge",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "The per-turn host that runs inside the sandbox image — hosts @openai/codex-sdk and serves the Worker over a WebSocket",
+  "author": "Passion Factory Corp.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/amond-ai/harness/tree/main/packages/harness-codex-bridge#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amond-ai/harness.git",
+    "directory": "packages/harness-codex-bridge"
+  },
+  "bugs": {
+    "url": "https://github.com/amond-ai/harness/issues"
+  },
+  "keywords": [
+    "codex",
+    "agent",
+    "sandbox",
+    "codex-sdk",
+    "websocket",
+    "turn-host"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": "./dist/bridge.mjs"
+  },
+  "files": [
+    "NOTICE",
+    "UPSTREAM.md",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "bun build src/main.ts --target=node --outfile=dist/bridge.mjs --external @openai/codex-sdk --external ws --external zod",
+    "check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@amond-ai/harness-bridge-runtime": "workspace:*",
+    "@amond-ai/harness-protocol": "workspace:*",
+    "@openai/codex-sdk": "catalog:sandbox-image",
+    "ws": "catalog:sandbox-image",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@pleaseai/eslint-config": "catalog:",
+    "@types/ws": "catalog:",
+    "bun-types": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

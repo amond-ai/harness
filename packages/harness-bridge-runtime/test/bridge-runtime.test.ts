@@ -250,6 +250,45 @@ it('routes a known interrupt to the turn and refuses the rest on the sending soc
 })
 
 /*
+ * The three optional fields `emitError` forwards are the runtime's whole say in what an ending
+ * looks like: it copies them verbatim and omits every one the caller did not name. Asserted
+ * together because the omission is the half that matters — a key sent as `undefined` reads to a
+ * client as a field the adapter tried and failed to fill, and `journalPath` in particular is the
+ * one an adapter with no `sessionArtifacts` envelope reports its journal in.
+ */
+it('forwards the ending fields an adapter names and omits the ones it does not', async () => {
+  const turn = createFakeTurn()
+  const runtime = await runtimeWith(turn)
+  const client = await connect(runtime)
+  client.send({ type: 'start', prompt: 'go' })
+  const started = await turn.started
+
+  started.emitError({ error: 'no journal here', message: 'bare' })
+  const bare = await client.waitFor(frame => frame.type === 'error')
+  expect(bare).not.toHaveProperty('journalPath')
+  expect(bare).not.toHaveProperty('sessionArtifacts')
+  expect(bare).not.toHaveProperty('interruptedBy')
+
+  started.emitError({
+    error: 'with the lot',
+    message: 'full',
+    journalPath: runtime.journalPath,
+    sessionArtifacts: { sessionId: 'sess-1' },
+    interruptedBy: 'budget',
+  })
+  const full = await client.waitFor(
+    frame => frame.type === 'error' && frame.error === 'with the lot',
+  )
+  expect(full).toMatchObject({
+    phase: 'run',
+    journalPath: runtime.journalPath,
+    sessionArtifacts: { sessionId: 'sess-1' },
+    interruptedBy: 'budget',
+  })
+  turn.finish()
+})
+
+/*
  * The runtime validates an inbound reason against its own hardcoded list (the frame is a cast,
  * not a parse) while `@amond-ai/harness-protocol` publishes the schema a client sends by. They
  * were one file until this package was extracted; now they are two, in packages with no runtime

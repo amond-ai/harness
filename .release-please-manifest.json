@@ -1,6 +1,7 @@
 {
   "packages/harness-bridge-runtime": "0.1.0",
   "packages/harness-claude-code-bridge": "0.1.0",
+  "packages/harness-codex-bridge": "0.1.0",
   "packages/harness-claude-code": "0.1.0",
   "packages/harness-protocol": "0.1.0",
   "packages/harness-sandbox": "0.1.0",
