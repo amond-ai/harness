@@ -93,7 +93,7 @@ whole set depends only on itself plus external (catalog) dependencies:
 |---|---|
 | `@amond-ai/harness-claude-code` | This package: the seam and both drivers. |
 | `@amond-ai/sandbox` | The container surface a driver runs against — `exec`, `logs`, `kill`, `portEndpoint`. |
-| `@amond-ai/harness-protocol` | The turn host's wire schema, which the `sdk` driver's frames are parsed by. |
+| `@amond-ai/harness-protocol` | The turn host's wire schema, which the `sdk` driver's frames are parsed by — its `./claude-code` entry. |
 | `@amond-ai/harness-transport` | The `WsLike` socket shape, the upgrade handshake, and the standard-`WebSocket` opener. |
 | `@amond-ai/harness-transport-cloudflare` | The opener a Worker needs instead, because a Sandbox port is private. |
 | `@amond-ai/redact` | Credential masking, applied to every diagnostic any of this emits. |

@@ -21,7 +21,7 @@ import type {
   HarnessV1Session,
   HarnessV1StreamPart,
 } from '@ai-sdk/harness'
-import type { TurnHostOutboundMessage } from '@amond-ai/harness-protocol'
+import type { TurnHostOutboundMessage } from '@amond-ai/harness-protocol/claude-code'
 import type { SandboxProvider } from '@amond-ai/sandbox'
 import type { TurnDriverConfig } from '../config'
 import type { LiveMirror } from '../mirror'

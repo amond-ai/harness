@@ -24,7 +24,7 @@
  *   preparation, not the turn. Moving either behind this interface would drag the DO path
  *   through a seam that exists for the attempt loop.
  */
-import type { ApprovedRequest, DeferredToolUse, DeniedRequest, TurnHostOutboundMessage } from '@amond-ai/harness-protocol'
+import type { ApprovedRequest, DeferredToolUse, DeniedRequest, TurnHostOutboundMessage } from '@amond-ai/harness-protocol/claude-code'
 import type { WsLike } from '@amond-ai/harness-transport'
 import type { SandboxProvider } from '@amond-ai/sandbox'
 import type { TurnDriverConfig } from './config'

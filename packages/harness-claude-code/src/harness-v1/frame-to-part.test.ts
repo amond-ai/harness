@@ -5,7 +5,7 @@
  * fields this deployment hangs off `finish` — so the interesting assertions are the negative
  * ones: a connection frame is not an event, and the host's extensions are not part fields.
  */
-import type { TurnHostOutboundMessage } from '@amond-ai/harness-protocol'
+import type { TurnHostOutboundMessage } from '@amond-ai/harness-protocol/claude-code'
 import { describe, expect, it } from 'vitest'
 import { frameToPart } from './frame-to-part'
 

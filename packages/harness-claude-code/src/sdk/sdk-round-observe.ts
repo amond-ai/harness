@@ -6,10 +6,10 @@
  * the round has already classified, and the other only changes *when* a read gives up. Beside
  * the pump they would grow the module whose subject is the pump.
  */
-import type { TurnHostOutboundMessage } from '@amond-ai/harness-protocol'
+import type { TurnHostOutboundMessage } from '@amond-ai/harness-protocol/claude-code'
 import type { TurnRoundSpec } from '../turn-driver'
 import type { ChannelEnd, TurnChannel } from './sdk-channel'
-import { turnHostOutboundMessageSchema } from '@amond-ai/harness-protocol'
+import { turnHostOutboundMessageSchema } from '@amond-ai/harness-protocol/claude-code'
 
 /**
  * The next frame, or the abort that ends the round before the slice does.

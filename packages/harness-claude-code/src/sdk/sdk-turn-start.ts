@@ -9,7 +9,7 @@
  * as soon as `start` is acknowledged — the rounds each open their own, and a socket held across
  * a step boundary is a socket the Workflow cannot persist.
  */
-import type { ApprovedRequest, DeniedRequest } from '@amond-ai/harness-protocol'
+import type { ApprovedRequest, DeniedRequest } from '@amond-ai/harness-protocol/claude-code'
 import type { WsLike } from '@amond-ai/harness-transport'
 import type { SandboxProcessHandle } from '@amond-ai/sandbox'
 import type { PermissionMode } from '../permission-mode'

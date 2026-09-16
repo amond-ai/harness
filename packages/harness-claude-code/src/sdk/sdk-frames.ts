@@ -10,8 +10,8 @@
  * Nothing here judges the turn. It says what a frame *is*; `sdk-round-state.ts` says what a
  * sequence of them means.
  */
-import type { DeferredToolUse, InterruptReason, SessionArtifacts, StoppedReason } from '@amond-ai/harness-protocol'
-import { turnHostOutboundMessageSchema } from '@amond-ai/harness-protocol'
+import type { DeferredToolUse, InterruptReason, SessionArtifacts, StoppedReason } from '@amond-ai/harness-protocol/claude-code'
+import { turnHostOutboundMessageSchema } from '@amond-ai/harness-protocol/claude-code'
 
 /** How the turn ended, as one frame reported it. */
 export type TerminalObservation

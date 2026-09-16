@@ -14,8 +14,8 @@
  * keeps them as the session a later turn resumes by (ADR D8) — and everything else is dropped.
  */
 import type { HarnessV1StreamPart } from '@ai-sdk/harness'
-import type { DeferredToolUse, SessionArtifacts, TurnHostOutboundMessage } from '@amond-ai/harness-protocol'
-import { harnessV1StreamPartSchema } from '@amond-ai/harness-protocol'
+import type { DeferredToolUse, SessionArtifacts, TurnHostOutboundMessage } from '@amond-ai/harness-protocol/claude-code'
+import { harnessV1StreamPartSchema } from '@amond-ai/harness-protocol/claude-code'
 
 /**
  * How the host said the turn stopped, lifted off a `finish` before the strip removes it.
