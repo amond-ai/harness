@@ -33,7 +33,8 @@ adds a `start` extension, and every one of those four exists unchanged in the
 | `src/protocol.ts` | — (new; extends the vendored Claude `start` schema, see below) |
 | `src/bridge-extensions.ts` | — (new; the agent-agnostic half of `protocol.ts`, see below) |
 | `src/codex-protocol.ts` | — (new; extends the vendored Codex `start` schema, see below) |
-| `src/index.ts` | — (new; the package surface) |
+| `src/index.ts` | — (new; the package root — the shared halves) |
+| `src/claude-code.ts` | — (new; the `./claude-code` entry point) |
 | `src/codex.ts` | — (new; the `./codex` entry point) |
 
 The vendored files are byte-identical copies. That closure imports only
@@ -45,7 +46,8 @@ The vendored files are byte-identical copies. That closure imports only
 `codex-bridge-protocol.ts` is deliberately not re-exported either, for the same
 reason `claude-code-bridge-protocol.ts` is not: two `startMessageSchema`s under
 one namespace would leave a consumer picking by luck. Claude's extension is the
-package root and Codex's is the `./codex` entry.
+`./claude-code` entry and Codex's is the `./codex` entry; the root carries
+neither.
 
 `@ai-sdk/provider` is therefore a devDependency at the version
 `@ai-sdk/harness@1.0.87` pins: the imports are type-only, so it is erased at
@@ -95,6 +97,19 @@ compile time and reaches neither the turn host's bundle nor the sandbox image.
    rather than adding it to the root: the root is value-imported by a bridge that
    does not mark this package external, so one entry per adapter is what keeps
    each sandbox bundle carrying only its own schemas.
+
+6. `refactor(harness-protocol): give claude an entry and reduce the root to the
+   shared halves` — `src/claude-code.ts` publishes `protocol.ts` as
+   `./claude-code`, and `src/index.ts` drops it for `bridge-extensions.ts`. The
+   root had been carrying Claude's schemas because Claude's adapter was the only
+   one when it was written, and patch 5 left that in place rather than bury a
+   rename of 13 call sites inside the Codex change. Nothing leaked either way
+   even then — neither `dist/bridge.mjs` contains a schema of the other
+   adapter's, before or after — so what this buys is the shape: a third adapter
+   now gets the same deal the first two have, instead of finding a root that
+   means "the shared halves plus whichever adapter arrived first".
+   `claude-code.ts` duplicates the six `harness-v1/*` lines the way `codex.ts`
+   does, for the reason recorded there.
 
 One upstream field is deliberately not taken as-is: `claude-code-bridge-protocol.ts`
 declares `thinking` without `.optional()`, so its schema refuses every `start`

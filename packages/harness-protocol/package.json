@@ -31,6 +31,10 @@
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
     },
+    "./claude-code": {
+      "types": "./dist/claude-code.d.mts",
+      "default": "./dist/claude-code.mjs"
+    },
     "./codex": {
       "types": "./dist/codex.d.mts",
       "default": "./dist/codex.mjs"
@@ -47,7 +51,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsdown src/index.ts src/codex.ts --dts",
+    "build": "tsdown src/index.ts src/claude-code.ts src/codex.ts --dts",
     "check": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

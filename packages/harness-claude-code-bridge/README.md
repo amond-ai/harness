@@ -45,7 +45,7 @@ orchestrator sends `start`, consumes frames for one bounded round, and reconnect
 `resume { lastSeenEventId }` — the journal replays every journaled frame after that sequence,
 so a dropped socket loses no transcript. The live-only deltas above are the exception, and
 nothing should be reconstructed from them. The wire schema for all of it is
-[`@amond-ai/harness-protocol`](../harness-protocol).
+[`@amond-ai/harness-protocol`](../harness-protocol)'s `./claude-code` entry point.
 
 A turn ending **does not end the process**: `stop` and `destroy` are the ordinary way it
 exits, so the same host serves the next turn. Two paths end it anyway — an interrupt the turn
