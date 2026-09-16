@@ -1,0 +1,44 @@
+packages/harness-codex-bridge/UPSTREAM.md
+  s_0c1fbf00a2679b::t_1b2e320f2d0b76 33-36
+packages/harness-codex-bridge/test/harness.ts
+  s_0c1fbf00a2679b::t_4b0d16ca8e6b54 357,359,363,365-374,379-402
+  s_0c1fbf00a2679b::t_fae51e575f394e 356,364
+  s_0c1fbf00a2679b::t_fe703a3f279157 403
+packages/harness-codex-bridge/src/turn-driver.ts
+  s_0c1fbf00a2679b::t_71c6cf49dd9a96 191-225,227-228,230-253,255-267
+README.md
+  s_0c1fbf00a2679b::t_878f662d3c8d79 232-233
+packages/harness-codex-bridge/test/turn-control.test.ts
+  s_0c1fbf00a2679b::t_1613f1a97a825e 11,95-102,136,194,203,214-229,231-232
+  s_0c1fbf00a2679b::t_075fdedfd94689 230
+  s_0c1fbf00a2679b::t_e3f3d53da2fbe3 233-235
+packages/harness-codex-bridge/src/create-emit-stream-event.ts
+  s_0c1fbf00a2679b::t_4b0d16ca8e6b54 141-147
+packages/harness-codex-bridge/src/codex-step-tracker.ts
+  s_0c1fbf00a2679b::t_4b0d16ca8e6b54 35-42,45,67-73,79-81,88
+packages/harness-codex-bridge/test/frames.test.ts
+  s_0c1fbf00a2679b::t_c009a90ee6e2f9 2,19,258-264,271-273,281-315
+  s_0c1fbf00a2679b::t_fdf5ce928594b1 316-318
+packages/harness-codex-bridge/README.md
+  s_0c1fbf00a2679b::t_fb8536ee711ded 8,15,20
+  s_0c1fbf00a2679b::t_837bdbe8d28862 89-97
+  s_0c1fbf00a2679b::t_925294a4c3c929 16-19
+  s_0c1fbf00a2679b::t_ed62e56c81f58c 108-113
+  s_0c1fbf00a2679b::t_8e5324c33618aa 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "d344860496051248f0b8d178d6afa33ae387459c",
+  "prompts": {},
+  "sessions": {
+    "s_0c1fbf00a2679b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2232aeee-9c93-402e-ab17-2e3705719d3b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Minsu Lee <amond@amond.net>"
+    }
+  }
+}
