@@ -59,6 +59,9 @@ try {
     // Codex's session state lives in `~/.codex/sessions` on the sandbox
     // filesystem; the resume payload is the thread id that indexes it.
     onStop: driver.onStop,
+    // Both lifecycle commands exit the process; an in-flight turn's `codex
+    // exec` child only dies with the signal the driver aborts here.
+    onDestroy: driver.onDestroy,
   })
 }
 catch (err) {

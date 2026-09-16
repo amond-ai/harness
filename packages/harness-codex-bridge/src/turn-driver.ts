@@ -66,8 +66,14 @@ export interface CodexTurnDriver {
    * a later process can resume by, and `~/.codex/sessions` is where the thread
    * itself lives. Held in this closure rather than at module scope so a test
    * can stand up two independent drivers in one process.
+   *
+   * Aborts an in-flight turn on the way out: `stop` is dispatched without
+   * waiting for the turn, and the runtime hard-exits the process right after,
+   * so a `codex exec` child whose signal was never aborted is left orphaned.
    */
   onStop: () => { threadId?: string }
+  /** The same teardown for `destroy`, which sends no reply. */
+  onDestroy: () => void
 }
 
 type Emit = (msg: Record<string, unknown>) => void
@@ -81,11 +87,39 @@ export function createTurnDriver(
   driverOptions: TurnDriverOptions,
 ): CodexTurnDriver {
   const threadState: { id: string | undefined } = { id: undefined }
-  return {
-    onStart: (start, turn) => runTurn(start, turn, driverOptions, threadState),
-    onStop: () =>
-      threadState.id === undefined ? {} : { threadId: threadState.id },
+  /*
+   * The controller of the turn running right now, hoisted out of `runTurn` so
+   * the lifecycle commands can reach it. Without it `stop`/`destroy` exit the
+   * process with the SDK's signal never aborted, and the `codex exec` child —
+   * spawned without `detached`, torn down only through that signal — outlives
+   * the parent with `runStreamed`'s own cleanup never run.
+   */
+  const activeRun: ActiveRun = { ctl: undefined, lifecycleStopped: false }
+  const abortActiveRun = (): void => {
+    /*
+     * A lifecycle teardown, like a client `abort`: the turn it cut short gets
+     * no ending. The process is exiting on the next tick, so an `error` or a
+     * `finish` emitted on the way out would only describe the teardown as an
+     * outcome of the turn.
+     */
+    activeRun.lifecycleStopped = true
+    activeRun.ctl?.abort()
   }
+  return {
+    onStart: (start, turn) =>
+      runTurn(start, turn, driverOptions, threadState, activeRun),
+    onStop: () => {
+      abortActiveRun()
+      return threadState.id === undefined ? {} : { threadId: threadState.id }
+    },
+    onDestroy: abortActiveRun,
+  }
+}
+
+/** The in-flight turn's abort handle, and whether a lifecycle command used it. */
+interface ActiveRun {
+  ctl: AbortController | undefined
+  lifecycleStopped: boolean
 }
 
 async function runTurn(
@@ -93,6 +127,7 @@ async function runTurn(
   turn: BridgeTurn,
   driverOptions: TurnDriverOptions,
   threadState: { id: string | undefined },
+  activeRun: ActiveRun,
 ): Promise<void> {
   const { createCodex, workdir } = driverOptions
   const emit: Emit = msg => turn.emit(msg as BridgeEvent)
@@ -227,6 +262,9 @@ async function runTurn(
    * reason — the abort is the escalation.
    */
   const runCtl = new AbortController()
+  // Published for the whole of this turn, so `stop` and `destroy` can abort the
+  // SDK — and therefore the CLI child — before the process exits.
+  activeRun.ctl = runCtl
   // Remembered rather than only acted on: the ending this host reports echoes the reason back,
   // because the client's own memory of the stop it asked for does not survive a step that never
   // committed — and without the echo the ending reads as an unnamed timeout.
@@ -305,6 +343,13 @@ async function runTurn(
     emitTerminalError,
   })
 
+  /*
+   * `runStreamed`'s events are a bare `AsyncIterable` with no guarantee that a
+   * terminal event precedes its end, so an iterable that simply runs dry — the
+   * CLI child dying mid-turn — is a truncated turn rather than a completed one.
+   * Only a `turn.completed` this loop actually saw earns a completed `finish`.
+   */
+  let sawTurnCompleted = false
   try {
     const { events } = await thread.runStreamed(start.prompt, {
       signal: runCtl.signal,
@@ -316,6 +361,9 @@ async function runTurn(
     for await (const event of events) {
       if (runCtl.signal.aborted) {
         break
+      }
+      if (event.type === 'turn.completed') {
+        sawTurnCompleted = true
       }
       emitStreamEvent(event)
     }
@@ -331,6 +379,12 @@ async function runTurn(
       emitTerminalError({ error: err, message: 'codex turn failed' })
     }
   }
+  finally {
+    // The turn is over: a later `stop` has nothing of this turn's to abort.
+    if (activeRun.ctl === runCtl) {
+      activeRun.ctl = undefined
+    }
+  }
 
   if (emittedTerminalError) {
     return
@@ -341,7 +395,20 @@ async function runTurn(
    * `interrupt` aborted the same signal and does, which is the whole
    * difference between the two commands.
    */
-  if (turn.abortSignal.aborted) {
+  if (turn.abortSignal.aborted || activeRun.lifecycleStopped) {
+    return
+  }
+
+  /*
+   * No terminal event and no stop asked for: the stream ended on its own part
+   * way through. Reporting that as a completed turn would hand the client a
+   * truncated transcript under the one ending that says nothing went wrong.
+   */
+  if (!sawTurnCompleted && interruptReason === undefined) {
+    emitTerminalError({
+      error: 'codex stream ended without a terminal event',
+      message: 'codex stream ended before the turn completed',
+    })
     return
   }
 

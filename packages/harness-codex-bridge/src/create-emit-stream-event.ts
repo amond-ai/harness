@@ -207,6 +207,9 @@ export function createEmitStreamEvent({
             output: item.aggregated_output ?? '',
             status: item.status ?? 'completed',
           },
+          // The flag consumers check generically, rather than leaving a failed
+          // command indistinguishable from a successful one.
+          isError: item.status === 'failed' || (item.exit_code ?? 0) !== 0,
         })
       }
       observeStep()
@@ -231,6 +234,9 @@ export function createEmitStreamEvent({
           toolCallId: id,
           toolName: item.tool ?? 'unknown',
           result: extractMcpToolCallResult(item),
+          // `extractMcpToolCallResult` shapes the error payload but says
+          // nothing about the call having failed; this is what does.
+          isError: item.status === 'failed' || item.error != null,
           dynamic: true,
         })
       }
@@ -264,8 +270,17 @@ export function createEmitStreamEvent({
       return
     }
 
-    if (item.type === 'file_change' && event.type === 'item.completed') {
-      for (const change of item.changes ?? []) {
+    if (
+      item.type === 'file_change'
+      && event.type === 'item.completed'
+    ) {
+      /*
+       * Codex emits the completed item once the patch has succeeded *or*
+       * failed, so the status is what separates the two: without it a failed
+       * patch would have the client record changes that never landed.
+       */
+      const changes = item.status === 'failed' ? [] : (item.changes ?? [])
+      for (const change of changes) {
         send({
           type: 'file-change',
           event:
@@ -321,16 +336,19 @@ function extractMcpToolCallResult(item: CodexItem): unknown {
 export function mapUsage(usage: Record<string, number>): Record<string, unknown> {
   const input = usage.input_tokens ?? 0
   const cacheRead = usage.cached_input_tokens ?? 0
+  const output = usage.output_tokens ?? 0
+  const reasoning = usage.reasoning_output_tokens ?? 0
   return {
     inputTokens: {
       total: input,
       noCache: Math.max(0, input - cacheRead),
       cacheRead,
-      cacheWrite: 0,
+      cacheWrite: usage.cache_write_input_tokens ?? 0,
     },
     outputTokens: {
-      total: usage.output_tokens ?? 0,
-      text: usage.output_tokens ?? 0,
+      total: output,
+      text: Math.max(0, output - reasoning),
+      reasoning,
     },
   }
 }

@@ -236,7 +236,9 @@ export function turnCompleted(
   usage: Record<string, number> = {
     input_tokens: 10,
     cached_input_tokens: 4,
-    output_tokens: 2,
+    cache_write_input_tokens: 3,
+    output_tokens: 7,
+    reasoning_output_tokens: 5,
   },
 ): CodexEvent {
   return { type: 'turn.completed', usage }
@@ -279,6 +281,7 @@ export async function startHost(input: {
     token,
     onStart: driver.onStart,
     onStop: driver.onStop,
+    onDestroy: driver.onDestroy,
     onExit: () => {},
   })
   const journalPath = join(bridgeStateDir, 'event-log.ndjson')

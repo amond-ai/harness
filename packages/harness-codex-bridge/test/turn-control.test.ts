@@ -1,5 +1,5 @@
 import type { Host } from './harness'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import {
   agentMessageEvents,
   connect,
@@ -136,6 +136,26 @@ it('ends a failed turn on an error frame and not also on a finish', async () => 
   client.close()
 })
 
+it('reports a stream that ended without a terminal event as a run-phase error', async () => {
+  // The CLI child dying mid-turn: the iterable runs dry with no
+  // `turn.completed`, and a `finish` here would call a truncated turn a clean
+  // one.
+  const codex = createFakeCodex([threadStarted(), ...agentMessageEvents('working')])
+  host = await startHost({ codex: codex.factory })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'text-end')
+
+  codex.end()
+  const error = await client.waitFor(frame => frame.type === 'error')
+
+  expect(error.phase).toBe('run')
+  expect(String(error.error)).toContain('without a terminal event')
+  expect(client.frames.some(frame => frame.type === 'finish')).toBe(false)
+  client.close()
+})
+
 it('reports a stream that threw as a run-phase error', async () => {
   const codex = createFakeCodex([
     threadStarted(),
@@ -259,6 +279,24 @@ it('refuses a mid-turn user message rather than leaving it unanswered', async ()
   // the queue, but not until the turn ended.
   expect(response).toMatchObject({ messageId: 'm-1', accepted: false })
   expect(client.frames.some(frame => frame.type === 'finish')).toBe(false)
+  client.close()
+})
+
+it.each(['stop', 'destroy'])('aborts the running turn before %s exits the process', async (command) => {
+  // Both commands exit the process, and the SDK spawns `codex exec` without
+  // `detached`: a signal never aborted leaves the child orphaned and
+  // `runStreamed`'s own cleanup unrun.
+  const codex = createFakeCodex([threadStarted(), ...agentMessageEvents('working')])
+  host = await startHost({ codex: codex.factory })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'text-end')
+
+  client.send({ type: command })
+  await vi.waitFor(() => {
+    expect(codex.runs[0]?.turnOptions?.signal?.aborted).toBe(true)
+  })
   client.close()
 })
 
