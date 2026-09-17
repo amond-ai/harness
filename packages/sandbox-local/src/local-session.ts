@@ -76,6 +76,8 @@ export interface LocalSessionOptions {
    */
   env?: Record<string, string>
   newProcessId?: () => string
+  /** Mints the value this sandbox's wrappers are authenticated by. Defaults to a v4 UUID. */
+  newNonce?: () => string
   now?: () => string
   /** Monotonic milliseconds. Injected so a wait's deadline can be exercised without spending it. */
   monotonicNowMs?: () => number
@@ -101,6 +103,7 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
     now,
     elapsedMs,
     identityTtlMs: options.identityTtlMs,
+    newNonce: options.newNonce,
   })
 
   /** Is this process, and everything it left running, over? */
@@ -334,13 +337,16 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
       // Both created and then verified: a state directory that is missing or unwritable fails
       // *silently* otherwise — the wrapper's redirection dies, so the command never runs, and
       // the caller learns only much later that the transcript is empty.
-      await registry.ensure()
+      // The nonce comes back from the same call that makes the directory, because the two
+      // fail together and for one reason: a wrapper spawned without either is a command running
+      // in the checkout that no later orchestrator can find, name, or end.
+      const nonce = await registry.ensure()
       await host.mkdir(cwd)
       if (!await host.exists(cwd)) {
         throw new Error(`working directory '${cwd}' does not exist and could not be created`)
       }
       const spawned = await host.spawn({
-        script: journalledScript(command, paths, execOptions?.timeout),
+        script: journalledScript(command, paths, nonce, execOptions?.timeout),
         cwd,
         env: { ...baseEnv, ...execOptions?.env },
       })

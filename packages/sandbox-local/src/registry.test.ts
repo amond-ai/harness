@@ -1,9 +1,12 @@
 import type { ProcessRecord } from './journal'
 import type { FakeHost } from './local.fixtures'
 import { describe, expect, it } from 'vitest'
-import { journalledScript, journalPaths, serializeProcessRecord } from './journal'
-import { AT, fakeHost, STATE } from './local.fixtures'
+import { journalledScript, journalPaths, noncePath, serializeProcessRecord } from './journal'
+import { AT, decode, fakeHost, STATE } from './local.fixtures'
 import { createProcessRegistry } from './registry'
+
+/** This sandbox's wrapper nonce, fixed so a wrapper's command line can be written by hand. */
+const NONCE = 'sandbox-nonce'
 
 function registryOver(fake: FakeHost, elapsed: { ms: number } = { ms: 0 }) {
   return createProcessRegistry({
@@ -11,7 +14,13 @@ function registryOver(fake: FakeHost, elapsed: { ms: number } = { ms: 0 }) {
     stateDir: STATE,
     now: () => AT,
     elapsedMs: () => elapsed.ms,
+    newNonce: () => NONCE,
   })
+}
+
+/** The nonce file every sandbox that has ever spawned a wrapper has on disk. */
+function placeNonce(fake: FakeHost, value = NONCE): void {
+  fake.put(noncePath(STATE), value)
 }
 
 function recordFor(pid: number, overrides: Partial<ProcessRecord> = {}): ProcessRecord {
@@ -25,11 +34,18 @@ function recordFor(pid: number, overrides: Partial<ProcessRecord> = {}): Process
   }
 }
 
-/** A wrapper in the table, exactly as the host would render one it started. */
+/**
+ * A wrapper in the table, exactly as the host would render one it started.
+ *
+ * The nonce file comes with it, because on a real machine it always does: it is written by the
+ * `ensure()` that precedes the first spawn, and a wrapper in the table without one is a state
+ * directory somebody has taken a file out of.
+ */
 function placeWrapper(fake: FakeHost, pid: number, id: string, argv: string[] = ['claude', '-p']): void {
+  placeNonce(fake)
   fake.place({
     pid,
-    command: `/bin/sh -c ${journalledScript(argv, journalPaths(STATE, id))}`,
+    command: `/bin/sh -c ${journalledScript(argv, journalPaths(STATE, id), NONCE)}`,
   })
 }
 
@@ -260,5 +276,97 @@ describe('ensure', () => {
     const fake = fakeHost()
     fake.host.mkdir = async () => {}
     await expect(registryOver(fake).ensure()).rejects.toThrow(/could not be created/)
+  })
+
+  it('mints the sandbox nonce once and hands the same one back afterwards', async () => {
+    const fake = fakeHost()
+    const registry = registryOver(fake)
+    await expect(registry.ensure()).resolves.toBe(NONCE)
+    await expect(registry.ensure()).resolves.toBe(NONCE)
+    expect(decode(fake.files.get(noncePath(STATE))!)).toBe(NONCE)
+  })
+
+  it('adopts the nonce a second orchestrator already minted, rather than replacing it', async () => {
+    // Two orchestrators open the same sandbox and both reach this call. A read-then-write would
+    // let the second overwrite a value the first has already spawned wrappers carrying, and
+    // every one of those processes would become unrecoverable — silently, and only after a
+    // crash. The loser of the race takes the winner's value instead.
+    const fake = fakeHost()
+    placeNonce(fake, 'minted-first')
+    const second = createProcessRegistry({
+      host: fake.host,
+      stateDir: STATE,
+      now: () => AT,
+      newNonce: () => 'minted-second',
+    })
+    await expect(second.ensure()).resolves.toBe('minted-first')
+    expect(decode(fake.files.get(noncePath(STATE))!)).toBe('minted-first')
+  })
+
+  it('refuses to start a command it could never recover', async () => {
+    // Something is already at the nonce's path and it is not a nonce, so the exclusive create
+    // refuses and there is nothing to read. Proceeding would spawn a wrapper carrying a value
+    // no later orchestrator can check, which is exactly the orphan this file exists to prevent.
+    const fake = fakeHost()
+    placeNonce(fake, 'not a nonce')
+    await expect(registryOver(fake).ensure()).rejects.toThrow(/could not be read/)
+  })
+
+  it('refuses a minted nonce that would not survive the wrapper it goes into', async () => {
+    const fake = fakeHost()
+    const registry = createProcessRegistry({
+      host: fake.host,
+      stateDir: STATE,
+      now: () => AT,
+      newNonce: () => `x' ; rm -rf / ; : '`,
+    })
+    await expect(registry.ensure()).rejects.toThrow(/not usable/)
+  })
+})
+
+describe('the wrapper nonce', () => {
+  it('refuses a process-table row that reproduces the marker without it', async () => {
+    // The issue this defence is for (#4). Everything else in a wrapper's command line — the
+    // shell, the opener, the process id, the state directory — is public, so a row carrying all
+    // of them is something any process on the machine can be running. `destroy()` signals the
+    // group of whatever recovery returns, so a match here is a bystander killed.
+    const fake = fakeHost()
+    placeNonce(fake)
+    fake.place({
+      pid: 4711,
+      command: `/bin/sh -c ${journalledScript(['claude', '-p'], journalPaths(STATE, 'p1'), 'someone-elses-nonce')}`,
+    })
+    await expect(registryOver(fake).recovered()).resolves.toEqual(new Map())
+    await expect(registryOver(fake).list()).resolves.toEqual([])
+  })
+
+  it('recovers nothing at all once the nonce file is gone', async () => {
+    // Recovery is the path with no record to check a row against, so the sandbox's own nonce is
+    // the last thing separating a wrapper of ours from a command line shaped like one. Without
+    // it we lose an orphan we could once have ended — and do not kill whatever reproduced it.
+    const fake = fakeHost()
+    placeWrapper(fake, 4711, 'p1')
+    fake.files.delete(noncePath(STATE))
+    await expect(registryOver(fake).recovered()).resolves.toEqual(new Map())
+  })
+
+  it('leaves liveness on the start time when the nonce file is gone', async () => {
+    // A record still names the pid, so the weaker half of the identity check is still there.
+    // It is weaker — `ps -o lstart` resolves to one second — and it is not nothing.
+    const fake = fakeHost()
+    placeWrapper(fake, 4711, 'p1')
+    fake.files.delete(noncePath(STATE))
+    await expect(registryOver(fake).liveness(recordFor(4711))).resolves.toBe('live')
+    const moved = await registryOver(fake).liveness(recordFor(4711, { kernelStartedAt: 'another day' }))
+    expect(moved).toBe('gone')
+  })
+
+  it('reads a nonce file larger than any it minted as none', async () => {
+    // The file lives where the sandbox's own commands can write, and this read happens on every
+    // liveness probe — so the cap is what keeps a command from making it arbitrarily expensive.
+    const fake = fakeHost()
+    placeWrapper(fake, 4711, 'p1')
+    placeNonce(fake, 'n'.repeat(65))
+    await expect(registryOver(fake).recovered()).resolves.toEqual(new Map())
   })
 })
