@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { journalledScript, journalPaths, parseProcessRecord, serializeProcessRecord } from './journal'
-import { AT, decode, fakeHost, sessionOver, STATE, WORK } from './local.fixtures'
+import { journalledScript, journalPaths, noncePath, parseProcessRecord, serializeProcessRecord } from './journal'
+import { AT, decode, fakeHost, NONCE, sessionOver, STATE, WORK } from './local.fixtures'
 
 const PATHS = journalPaths(STATE, 'p1')
 
@@ -12,7 +12,7 @@ describe('exec', () => {
 
     expect(handle.id).toBe('p1')
     expect(fake.spawned).toEqual([{
-      script: journalledScript(['claude', '-p'], PATHS),
+      script: journalledScript(['claude', '-p'], PATHS, NONCE),
       cwd: WORK,
       // The base environment is layered under the caller's, not replaced by it: the `cli`
       // driver execs a `claude` the machine already has, and a spawn without PATH cannot.
@@ -75,9 +75,13 @@ describe('discovery', () => {
   it('answers about a process this session never started', async () => {
     // The case the whole backend is for: the app was quit mid-turn and relaunched.
     const fake = fakeHost()
+    // The nonce file comes with the wrapper, because on a real machine it always does: it is
+    // written by the `ensure()` that precedes the first spawn and removed only with the state
+    // directory, so a state directory holding a wrapper's journals holds this too.
+    fake.put(noncePath(STATE), NONCE)
     fake.place({
       pid: 4711,
-      command: `/bin/sh -c ${journalledScript(['claude', '-p'], PATHS)}`,
+      command: `/bin/sh -c ${journalledScript(['claude', '-p'], PATHS, NONCE)}`,
     })
     fake.put(PATHS.meta, serializeProcessRecord({
       id: 'p1',
@@ -93,7 +97,8 @@ describe('discovery', () => {
 
   it('finds a live process whose record is gone, rather than reporting a death', async () => {
     const fake = fakeHost()
-    fake.place({ pid: 4711, command: `/bin/sh -c ${journalledScript(['claude', '-p'], PATHS)}` })
+    fake.put(noncePath(STATE), NONCE)
+    fake.place({ pid: 4711, command: `/bin/sh -c ${journalledScript(['claude', '-p'], PATHS, NONCE)}` })
     const handle = await sessionOver(fake).getProcess('p1')
     await expect(handle?.status()).resolves.toMatchObject({ state: 'running', command: ['claude', '-p'] })
   })
@@ -136,7 +141,8 @@ describe('discovery', () => {
       kernelStartedAt: 'start-4000',
     }))
     fake.put(journalPaths(STATE, 'done').exit, '0')
-    fake.place({ pid: 4711, command: `/bin/sh -c ${journalledScript(['claude'], journalPaths(STATE, 'live'))}` })
+    fake.put(noncePath(STATE), NONCE)
+    fake.place({ pid: 4711, command: `/bin/sh -c ${journalledScript(['claude'], journalPaths(STATE, 'live'), NONCE)}` })
 
     const listed = await sessionOver(fake).listProcesses()
     expect(listed.map(status => [status.id, status.state]).sort()).toEqual([
@@ -199,6 +205,24 @@ describe('destroy', () => {
     expect(fake.table.has(4711)).toBe(true)
     expect(fake.files.has(journalPaths(STATE, 'p1').meta)).toBe(true)
     expect(fake.files.has(`${WORK}/repo/file.txt`)).toBe(true)
+  })
+
+  it('leaves a bystander that reproduces the wrapper marker alone', async () => {
+    // What #4 was about: every part of a wrapper's command line except the nonce is public, so
+    // a process carrying the shell, the opener, a process id and this state directory's paths
+    // is something any process on the machine can be running. `destroy()` signals the group of
+    // whatever the listing names, so claiming that row is not a mislabelling but a kill.
+    const fake = fakeHost({ nextPid: 4711 })
+    const session = sessionOver(fake)
+    await session.exec(['claude', '-p'])
+    fake.place({
+      pid: 5000,
+      command: `/bin/sh -c ${journalledScript(['claude', '-p'], journalPaths(STATE, 'p9'), 'someone-elses-nonce')}`,
+    })
+
+    await session.destroy()
+    expect(fake.table.has(4711)).toBe(false)
+    expect(fake.table.has(5000)).toBe(true)
   })
 
   it('leaves a working directory it was merely pointed at', async () => {

@@ -12,7 +12,7 @@
 // The name says sandbox and the backend is not one: no filesystem boundary, no network policy,
 // no resource limit. See the README before reaching for it as a security boundary.
 
-export { journalledScript, journalPaths, parseJournalScript, parseProcessRecord, serializeProcessRecord } from './journal'
+export { isWrapperNonce, journalledScript, journalPaths, noncePath, parseJournalScript, parseProcessRecord, serializeProcessRecord } from './journal'
 export type { JournalPaths, ProcessRecord, RecoveredScript } from './journal'
 
 export { createJournalIo } from './journal-io'

@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isWrapperNonce,
   journalledScript,
   journalPaths,
+  noncePath,
   parseJournalScript,
   parseProcessRecord,
   serializeProcessRecord,
 } from './journal'
 
 const PATHS = journalPaths('/state', 'p1')
+
+/** This sandbox's wrapper nonce, fixed so a command line can be written out by hand below. */
+const NONCE = 'sandbox-nonce'
 
 describe('journalPaths', () => {
   it('refuses an id that would resolve outside the state directory', () => {
@@ -23,13 +28,35 @@ describe('journalPaths', () => {
   })
 })
 
+describe('noncePath', () => {
+  it('is a name no process id could take, beside the journals it authenticates', () => {
+    // The leading dot is the whole of it: `journalPaths` names every journal after an id, and
+    // an id may not contain one — so nothing this package writes can collide with the nonce,
+    // and nothing that scans the state directory for journals can mistake it for one.
+    expect(noncePath('/state')).toBe('/state/.nonce')
+    expect(noncePath('/state///')).toBe('/state/.nonce')
+    expect(Object.values(journalPaths('/state', 'p1'))).not.toContain(noncePath('/state'))
+  })
+})
+
+describe('isWrapperNonce', () => {
+  it('refuses anything that would not survive the opener it is quoted into', () => {
+    // A quote closes the single-quoted word and hands what follows to `/bin/sh -c` as code; a
+    // space moves the boundary the parser splits the id from the nonce at.
+    expect(isWrapperNonce('9f2c-4a10_b')).toBe(true)
+    for (const value of ['', `it's`, 'two words', 'semi;colon', 'p1 nonce']) {
+      expect(isWrapperNonce(value)).toBe(false)
+    }
+  })
+})
+
 describe('journalledScript', () => {
   it('backgrounds the command so the pid it records is the command\'s own', () => {
     // A simple command backgrounded by `&` is forked and exec'd directly, so `$!` is the
     // command rather than a subshell standing in front of it — which is what makes a SIGINT
     // reach `claude` instead of the wrapper.
-    expect(journalledScript(['echo', 'hi'], PATHS)).toBe(
-      `: 'p1' ; 'echo' 'hi' > '/state/p1.out' 2> '/state/p1.err' & __c=$!`
+    expect(journalledScript(['echo', 'hi'], PATHS, NONCE)).toBe(
+      `: 'p1 sandbox-nonce' ; 'echo' 'hi' > '/state/p1.out' 2> '/state/p1.err' & __c=$!`
       + ` ; printf '%s' "$__c" > '/state/p1.pid'`
       + ` ; wait $__c ; __e=$?`
       + ` ; printf '%s' "$__e" > '/state/p1.exit.pending'`
@@ -38,7 +65,7 @@ describe('journalledScript', () => {
   })
 
   it('publishes the exit by a rename from a sibling, so no reader sees a prefix', () => {
-    const script = journalledScript(['echo', 'hi'], PATHS)
+    const script = journalledScript(['echo', 'hi'], PATHS, NONCE)
     // Same directory, or `mv` is a copy across filesystems and the atomicity POSIX gives
     // `rename(2)` is gone — reintroducing the torn read the two-step write is here to remove.
     expect(script).toContain(`> '/state/p1.exit.pending' ; command -p mv -- '/state/p1.exit.pending' '/state/p1.exit'`)
@@ -57,8 +84,15 @@ describe('journalledScript', () => {
     expect(script).toContain(`printf '%s' "$__c" > '/state/p1.pid' ;`)
   })
 
+  it('refuses a nonce that would break out of the opener it is quoted into', () => {
+    // Composed into a script this package hands to `/bin/sh -c` with the orchestrator's whole
+    // environment, so a quote in the nonce is not a malformed marker but an injected command.
+    expect(() => journalledScript(['echo', 'hi'], PATHS, `x' ; rm -rf / ; : '`)).toThrow(/invalid wrapper nonce/)
+    expect(() => journalledScript(['echo', 'hi'], PATHS, 'two words')).toThrow(/invalid wrapper nonce/)
+  })
+
   it('records the exit from inside the tree, after the command has been waited on', () => {
-    const script = journalledScript(['false'], PATHS)
+    const script = journalledScript(['false'], PATHS, NONCE)
     // The order is the durability guarantee: whoever spawned this may be gone by now.
     expect(script.indexOf('wait $__c')).toBeLessThan(script.indexOf(`mv -- '/state/p1.exit.pending'`))
   })
@@ -66,12 +100,12 @@ describe('journalledScript', () => {
   it('keeps a state root that begins with a dash out of mv\'s option list', () => {
     // Without the operand separator the pending path is read as flags — `mv: illegal option
     // -- w` — so every command under such a root would finish without ever publishing an exit.
-    const script = journalledScript(['echo', 'hi'], journalPaths('-state', 'p1'))
+    const script = journalledScript(['echo', 'hi'], journalPaths('-state', 'p1'), NONCE)
     expect(script).toContain(`command -p mv -- '-state/p1.exit.pending' '-state/p1.exit'`)
   })
 
   it('carries its own deadline, so a timeout outlives the orchestrator too', () => {
-    const script = journalledScript(['sleep', '99'], PATHS, 1_500)
+    const script = journalledScript(['sleep', '99'], PATHS, NONCE, 1_500)
     expect(script).toContain(`{ sleep 1.5 ; kill -0 $__c 2> /dev/null`)
     // Marked before it is killed: the reader can only see the file afterwards, and the other
     // order leaves a window where a killed command reads as one that failed on its own.
@@ -80,7 +114,7 @@ describe('journalledScript', () => {
   })
 
   it('escalates a deadline the command ignores, and ends what it left running', () => {
-    const script = journalledScript(['sh', '-c', 'sleep 300 & wait'], PATHS, 1_000)
+    const script = journalledScript(['sh', '-c', 'sleep 300 & wait'], PATHS, NONCE, 1_000)
     // A command that handles SIGTERM exits cleanly; one that ignores it would otherwise run
     // forever with the wrapper still waiting on it, the timeout enforcing nothing.
     expect(script).toContain('kill -TERM $__c 2> /dev/null ; sleep 5 ; kill -KILL $__c')
@@ -98,11 +132,11 @@ describe('journalledScript', () => {
 
   it('reaps nothing when the command ended on its own', () => {
     // A turn may deliberately leave a server running — the bridge does exactly that.
-    expect(journalledScript(['claude', '-p'], PATHS)).not.toContain('kill -KILL')
+    expect(journalledScript(['claude', '-p'], PATHS, NONCE)).not.toContain('kill -KILL')
   })
 
   it('leaves no watchdog behind when no timeout was asked for', () => {
-    const script = journalledScript(['sleep', '99'], PATHS)
+    const script = journalledScript(['sleep', '99'], PATHS, NONCE)
     expect(script).not.toContain('__w')
     expect(script).not.toContain('/state/p1.timeout')
   })
@@ -110,10 +144,10 @@ describe('journalledScript', () => {
 
 describe('parseJournalScript', () => {
   const lineFor = (argv: string[], id = 'p1'): string =>
-    `/bin/sh -c ${journalledScript(argv, journalPaths('/state', id))}`
+    `/bin/sh -c ${journalledScript(argv, journalPaths('/state', id), NONCE)}`
 
   it('reads a live wrapper back into the process it is running', () => {
-    expect(parseJournalScript(lineFor(['claude', '-p', 'fix the bug']), '/state')).toEqual({
+    expect(parseJournalScript(lineFor(['claude', '-p', 'fix the bug']), '/state', NONCE)).toEqual({
       id: 'p1',
       command: ['claude', '-p', 'fix the bug'],
     })
@@ -124,16 +158,16 @@ describe('parseJournalScript', () => {
     // the script. The id is read from the opener and every other anchor is *derived* from it,
     // so the only string that can be mistaken for the real redirection is the real one.
     const prompt = `see: 'evil' ; rm -rf / > '/state/p9.out' 2> '/state/p9.err' & __c=$!`
-    expect(parseJournalScript(lineFor(['claude', '-p', prompt]), '/state')).toEqual({
+    expect(parseJournalScript(lineFor(['claude', '-p', prompt]), '/state', NONCE)).toEqual({
       id: 'p1',
       command: ['claude', '-p', prompt],
     })
   })
 
   it('claims nothing that belongs to another state directory, or to no one', () => {
-    expect(parseJournalScript(lineFor(['echo', 'hi']), '/elsewhere')).toBeUndefined()
-    expect(parseJournalScript('/usr/libexec/secretd -x', '/state')).toBeUndefined()
-    expect(parseJournalScript(`/bin/sh -c : 'p1' ; not-quoted-argv`, '/state')).toBeUndefined()
+    expect(parseJournalScript(lineFor(['echo', 'hi']), '/elsewhere', NONCE)).toBeUndefined()
+    expect(parseJournalScript('/usr/libexec/secretd -x', '/state', NONCE)).toBeUndefined()
+    expect(parseJournalScript(`/bin/sh -c : 'p1 sandbox-nonce' ; not-quoted-argv`, '/state', NONCE)).toBeUndefined()
   })
 
   it('claims nothing that merely mentions a wrapper', () => {
@@ -141,19 +175,42 @@ describe('parseJournalScript', () => {
     // its arguments — an editor holding the file open, a grep for it, the turn's own claude
     // carrying it inside a prompt. Recovery hands what it finds to destroy(), which signals the
     // process group, so matching a stranger is not a wrong label but a killed bystander.
-    const wrapper = journalledScript(['claude', '-p'], journalPaths('/state', 'p1'))
+    const wrapper = journalledScript(['claude', '-p'], journalPaths('/state', 'p1'), NONCE)
     for (const line of [
       `grep -R ${wrapper} /var/log`,
       `/usr/bin/vim ${wrapper}`,
       `/bin/zsh -c ${wrapper}`,
     ]) {
-      expect(parseJournalScript(line, '/state')).toBeUndefined()
+      expect(parseJournalScript(line, '/state', NONCE)).toBeUndefined()
     }
     // And still claims its own.
-    expect(parseJournalScript(`/bin/sh -c ${wrapper}`, '/state')).toEqual({
+    expect(parseJournalScript(`/bin/sh -c ${wrapper}`, '/state', NONCE)).toEqual({
       id: 'p1',
       command: ['claude', '-p'],
     })
+  })
+
+  it('claims nothing that reproduces the marker without this sandbox\'s nonce', () => {
+    // The issue this is here for (#4). Every other part of a wrapper's command line is public
+    // — the shell, the opener, the id, the state directory — so a command line that reproduces
+    // all of them exactly is something any process on the machine can be running, deliberately
+    // or by coincidence. Recovery hands what it matches to `destroy()`, which signals the
+    // process group, so a match on the public part alone is a bystander killed.
+    const reproduction = `/bin/sh -c ${journalledScript(['claude', '-p'], PATHS, 'someone-elses-nonce')}`
+    expect(parseJournalScript(reproduction, '/state', NONCE)).toBeUndefined()
+    // Nor one that merely begins with ours: the nonce has to be the whole of what follows the
+    // separator, or a longer value sharing our prefix would pass.
+    const extended = `/bin/sh -c ${journalledScript(['claude', '-p'], PATHS, `${NONCE}-and-more`)}`
+    expect(parseJournalScript(extended, '/state', NONCE)).toBeUndefined()
+  })
+
+  it('claims nothing at all when the sandbox has no nonce to check against', () => {
+    // The nonce file is written before the sandbox's first wrapper and removed only with the
+    // state directory, so its absence means nothing was started here or the bookkeeping has
+    // been interfered with. In the second case there is no longer anything separating one of
+    // our wrappers from a reproduction of one, and the safe answer is to claim neither.
+    expect(parseJournalScript(`/bin/sh -c ${journalledScript(['claude', '-p'], PATHS, NONCE)}`, '/state', undefined))
+      .toBeUndefined()
   })
 })
 
