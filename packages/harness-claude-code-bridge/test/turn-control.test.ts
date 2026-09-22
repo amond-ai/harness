@@ -100,6 +100,28 @@ it('leaves an SDK-side abort no one asked for without a reason to name', async (
   expect(finish).not.toHaveProperty('interruptedBy')
 })
 
+it('reports a host abort as a run-phase error, never as a completed finish', async () => {
+  // `abort` tears the query down and leaves no `result`: there is no `terminal_reason` for the
+  // ending to map, and mapping its absence would call the turn `completed` — which the caller
+  // counts as success.
+  const query = createFakeQuery([initMessage()])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(
+    frame => frame.type === 'raw'
+      && (frame.rawValue as { type: string }).type === 'system',
+  )
+
+  client.send({ type: 'abort' })
+  const error = await client.waitFor(frame => frame.type === 'error')
+
+  expect(error.phase).toBe('run')
+  expect(error).not.toHaveProperty('interruptedBy')
+  expect(client.frames.some(frame => frame.type === 'finish')).toBe(false)
+})
+
 it('answers an interrupt with no running turn on that socket alone', async () => {
   const query = createFakeQuery([initMessage(), resultMessage()])
   host = await startHost({ query: query.fn })

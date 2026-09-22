@@ -644,6 +644,8 @@ async function runTurn(
   // committed — and without the echo the ending reads as an unnamed timeout (#388).
   let interruptReason: InterruptReason | undefined
   let escalation: ReturnType<typeof setTimeout> | undefined
+  // Declared ahead of the escalation that sets it, which is the first of its writers.
+  let emittedTerminalError = false
   turn.onInterrupt((reason) => {
     if (interruptRequested) {
       return
@@ -661,6 +663,9 @@ async function runTurn(
         sessionArtifacts: sessionArtifacts(),
         interruptedBy: reason,
       })
+      // This *is* the turn's terminal frame: the loop below unwinds on the abort, and without
+      // the flag it would report a second ending — a `finish` — after this `error`.
+      emittedTerminalError = true
       abortCtl.abort()
       void turn.flush().finally(() => exitProcess(1))
     }, graceMs)
@@ -670,7 +675,6 @@ async function runTurn(
   let turnUsage: Record<string, unknown> | undefined
   let totalCostUsd: number | undefined
   let initCheckFailed = false
-  let emittedTerminalError = false
   let emittedTerminalFinish = false
 
   const emitTerminalError = (message: string | undefined): void => {
@@ -841,12 +845,13 @@ async function runTurn(
   catch (err) {
     /*
      * An abort is never the SDK's own failure: every `abortCtl.abort()` in this
-     * file is one this host asked for, and each has already said what happened
+     * file is one this host asked for, and most have already said what happened
      * — the interrupt escalation emits its `no result within …` error, a
      * terminal error emits its own, the routed-command check emits an `init`
-     * error, and a host `abort` frame is a deliberate teardown the Worker
-     * asked for. The rejection that follows is the abort landing, so reporting
+     * error. The rejection that follows is the abort landing, so reporting
      * it again as `claude-code turn failed` is a second, wrong explanation.
+     * The one abort that has said nothing yet — a host `abort` frame — falls
+     * through to the ending below, which is where the `break` path lands too.
      */
     if (!abortCtl.signal.aborted) {
       turn.emitError({
@@ -858,8 +863,8 @@ async function runTurn(
         // interrupt's ending too, and the key is omitted on every other failure.
         ...(interruptReason === undefined ? {} : { interruptedBy: interruptReason }),
       })
+      return
     }
-    return
   }
   finally {
     // The turn produced its result (or died trying): the escalation has
@@ -871,6 +876,21 @@ async function runTurn(
   }
 
   if (initCheckFailed || emittedTerminalError) {
+    return
+  }
+  /*
+   * A host `abort` tears the query down and leaves no `result`, so
+   * there is no ending to describe: a `finish` here would read `terminalReason`
+   * as absent and call the turn `completed`, which the caller counts as success.
+   * Reached on both unwinds — the `break` above and a rejected iteration.
+   */
+  if (abortCtl.signal.aborted) {
+    turn.emitError({
+      error: new Error('turn aborted before the SDK produced a result'),
+      message: 'claude-code turn aborted',
+      phase: 'run',
+      sessionArtifacts: sessionArtifacts(),
+    })
     return
   }
   emittedTerminalFinish = true

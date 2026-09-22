@@ -74,8 +74,28 @@ export function createFakeQuery(
   const fn: QueryFn = (params) => {
     callCount++
     options = params.options
+    // The real SDK ends its iteration when the controller it was handed aborts; a host `abort`
+    // frame reaches the query through that controller and nothing else. `next()` below reads the
+    // signal itself, which covers a controller the driver had already aborted before it called
+    // us, so this listener exists only to wake a `next()` that is already waiting. It must not
+    // call `end()`: `ended` belongs to the whole fake, and a later turn on the same one would
+    // then read this turn's abort as its own end of stream.
+    const signal = params.options?.abortController?.signal
+    signal?.addEventListener('abort', () => {
+      if (waiter) {
+        const resolve = waiter
+        waiter = undefined
+        resolve({ value: undefined, done: true })
+      }
+    }, { once: true })
     const iterator: AsyncIterator<SDKMessage> = {
       next: () => {
+        // An abort tears the real SDK's child down, so anything still queued when it lands is
+        // never delivered. Draining the script past that point would let a test observe messages
+        // no aborted turn can produce.
+        if (signal?.aborted) {
+          return Promise.resolve({ value: undefined, done: true })
+        }
         const next = queued.shift()
         if (next !== undefined) {
           return Promise.resolve({
