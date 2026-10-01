@@ -197,6 +197,13 @@ describe('journal meta', () => {
       .toBeUndefined()
   })
 
+  it('rejects a cwd that is present but not a string', () => {
+    expect(parseJournalMeta('{"id":"a","pid":1,"command":["claude"],"cwd":5,"startedAt":"t"}'))
+      .toBeUndefined()
+    expect(parseJournalMeta('{"id":"a","pid":1,"command":["claude"],"startedAt":"t"}'))
+      .toEqual({ id: 'a', pid: 1, command: ['claude'], startedAt: 't' })
+  })
+
   it('returns undefined for content that is not a journal meta', () => {
     expect(parseJournalMeta('not json')).toBeUndefined()
     expect(parseJournalMeta('{"id":"abc"}')).toBeUndefined()

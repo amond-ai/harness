@@ -1,3 +1,4 @@
+import type { JournalSlice, PartialRead } from '@amond-ai/sandbox/journal'
 /**
  * Reading the journal back out of the sandbox filesystem.
  *
@@ -11,7 +12,6 @@
  */
 import type { E2bSandboxLike } from './e2b-surface'
 import type { JournalMeta, JournalPaths } from './journal'
-import type { JournalSlice } from './log-replay'
 import { journalPaths, parseJournalMeta } from './journal'
 
 const META_SUFFIX = '.meta.json'
@@ -24,16 +24,6 @@ const META_SUFFIX = '.meta.json'
  * a turn inflated on purpose is dropped rather than buffered.
  */
 const EXIT_RECORD_LIMIT = 32
-
-/**
- * What a failed or partial journal read means to the caller asking for it.
- *
- * `'silence'` is the watchdog's reading — a sample that ends early simply reports less.
- * `'fail'` is `replayTurn`'s: it judges the turn from the transcript, so one truncated
- * without saying so is a verdict reached on evidence that was never all there. Only a read
- * that dies *after* the file opened is affected; see {@link createJournalIo}'s `streamFile`.
- */
-export type PartialRead = 'silence' | 'fail'
 
 export interface JournalIo {
   entries: () => Promise<{ name: string }[]>
