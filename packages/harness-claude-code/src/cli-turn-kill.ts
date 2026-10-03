@@ -42,6 +42,8 @@ export function isLive(status: ProcessStatus): boolean {
  * `result` line, so the transcript ends in the agent's own last word and the replay can read
  * the outcome (ADR phase 0). Unless that wait proves the turn already gone, {@link terminateTurn}
  * escalates to the backend's default kill — today's SIGTERM, which cuts the turn with no `result`.
+ * Even a proven-gone turn gets that default kill once, unwaited, for the session members the
+ * interrupt never reached ({@link sweepSurvivors}).
  *
  * Each stage races the turn's own exit. After signalling, a bounded network wait observes
  * settlement; if it times out, the process status is re-checked. A failed kill must not
@@ -71,9 +73,11 @@ export async function killTurn(sandbox: SandboxSession, processId: string): Prom
       return true
     }
     catch (cause) {
-      // Only a proven death skips the escalation. `SandboxNoExitRecordError` is that proof —
-      // the turn is gone, it just never recorded `$?` — and a second signal at a dead process
-      // confirms nothing. Everything else leaves liveness unknown and must escalate, as the
+      // Only a proven death skips the settle wait. `SandboxNoExitRecordError` is that proof for
+      // the wrapper — it is gone, it just never recorded `$?` — but not for its session:
+      // background members ignore SIGINT (POSIX, for asynchronous lists) and outlive it, so one
+      // default kill still sweeps them before the re-check. Everything else leaves
+      // liveness unknown and must escalate, as the
       // pre-phase-0 code did unconditionally: the contract's two error classes are explicitly
       // not an exhaustive union (`packages/sandbox/src/types.ts`), and the default
       // Cloudflare backend rejects with `@cloudflare/sandbox`'s own `ProcessWaitTimeoutError`,
@@ -81,6 +85,7 @@ export async function killTurn(sandbox: SandboxSession, processId: string): Prom
       // interrupt at SIGINT, never terminating a wedged turn.
       if (cause instanceof SandboxNoExitRecordError) {
         logKillSettle(processId, cause)
+        await sweepSurvivors(process, processId)
         return await confirmDead(sandbox, processId)
       }
       const settle = cause instanceof SandboxWaitTimeoutError
@@ -110,6 +115,24 @@ async function terminateTurn(
   catch (cause) {
     logKillSettle(processId, cause)
     return await confirmDead(sandbox, processId)
+  }
+}
+
+/**
+ * One default kill after an interrupt that settled without an exit record.
+ *
+ * Not {@link terminateTurn}: the wrapper is already gone, so a second wait would reject the
+ * same way and prove nothing. The kill is for the session's members that ignored SIGINT — on
+ * a backend that records the session id it reaches them through it; on a backend
+ * whose process is simply gone it signals nothing. Its failure is logged and dropped, because
+ * the verdict belongs to {@link confirmDead} exactly as before.
+ */
+async function sweepSurvivors(process: SandboxProcessHandle, processId: string): Promise<void> {
+  try {
+    await process.kill()
+  }
+  catch (cause) {
+    console.warn(`watchdog survivor sweep failed process_id=${processId} error="${describe(cause)}"`)
   }
 }
 
