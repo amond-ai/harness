@@ -25,6 +25,16 @@ describe('one host frame as a stream part', () => {
     expect(part).toEqual({ type: 'text-delta', id: 't1', delta: 'hello' })
   })
 
+  it('passes the streamed tool input through as the harness tool-input parts', () => {
+    const parts = [
+      { type: 'tool-input-start', id: 'toolu_1', toolName: 'bash', providerExecuted: true },
+      { type: 'tool-input-delta', id: 'toolu_1', delta: '{"command":"ls"}' },
+      { type: 'tool-input-end', id: 'toolu_1' },
+    ]
+
+    expect(parts.map(value => frameToPart(frame({ ...value, seq: 4 })).part)).toEqual(parts)
+  })
+
   it('emits the host\'s finish with only the harness fields, and keeps the artifacts', () => {
     const translated = frameToPart(frame({
       type: 'finish',

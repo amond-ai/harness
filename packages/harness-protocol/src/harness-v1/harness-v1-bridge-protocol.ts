@@ -22,6 +22,9 @@ import {
   harnessV1TextStartPartSchema,
   harnessV1ToolApprovalRequestPartSchema,
   harnessV1ToolCallPartSchema,
+  harnessV1ToolInputDeltaPartSchema,
+  harnessV1ToolInputEndPartSchema,
+  harnessV1ToolInputStartPartSchema,
   harnessV1ToolResultPartSchema,
 } from './harness-v1-stream-part'
 
@@ -214,6 +217,9 @@ export const harnessV1BridgeOutboundMessageSchema = z.discriminatedUnion(
     harnessV1ReasoningStartPartSchema,
     harnessV1ReasoningDeltaPartSchema,
     harnessV1ReasoningEndPartSchema,
+    harnessV1ToolInputStartPartSchema,
+    harnessV1ToolInputDeltaPartSchema,
+    harnessV1ToolInputEndPartSchema,
     harnessV1ToolCallPartSchema,
     harnessV1ToolApprovalRequestPartSchema,
     harnessV1ToolResultPartSchema,
@@ -290,6 +296,7 @@ export const harnessV1BridgeToolResultInboundSchema = z.object({
   toolCallId: z.string(),
   output: z.unknown(),
   isError: z.boolean().optional(),
+  toolResult: z.unknown().optional(),
 })
 
 export const harnessV1BridgeToolApprovalResponseInboundSchema = z.object({

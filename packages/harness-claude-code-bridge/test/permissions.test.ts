@@ -1,55 +1,13 @@
-import type { Options } from '@anthropic-ai/claude-agent-sdk'
-import type { Host } from './harness'
 import { sdkPermissionModeSchema } from '@amond-ai/harness-protocol/claude-code'
 import { afterEach, expect, it } from 'vitest'
 import { DENIED_BY_REVIEWER_MESSAGE, DENY_BY_RUN_POLICY_MESSAGE } from '../src/permission-policy'
 import { connect, createFakeQuery, initMessage, startHost } from './harness'
-
-let host: Host | undefined
+import { callPreToolUse, hostRef, startAndCaptureOptions } from './pre-tool-use'
 
 afterEach(async () => {
-  await host?.close()
-  host = undefined
+  await hostRef.current?.close()
+  hostRef.current = undefined
 })
-
-/** The `PreToolUse` hook the driver installed, called the way the SDK calls it. */
-async function callPreToolUse(
-  options: Options | undefined,
-  input: { tool_name: string, tool_input: unknown },
-): Promise<{
-  hookSpecificOutput?: {
-    permissionDecision?: string
-    permissionDecisionReason?: string
-  }
-}> {
-  const hook = options?.hooks?.PreToolUse?.[0]?.hooks?.[0]
-  if (hook === undefined) {
-    throw new Error('no PreToolUse hook installed')
-  }
-  return (await hook(
-    input as never,
-    undefined,
-    { signal: new AbortController().signal },
-  )) as never
-}
-
-/** Start a turn and hand back the `options` the driver called `query()` with. */
-async function startAndCaptureOptions(
-  start: Record<string, unknown>,
-): Promise<Options> {
-  const query = createFakeQuery([initMessage()])
-  host = await startHost({ query: query.fn })
-  const client = await connect(host)
-  client.send({ type: 'start', prompt: 'do the thing', ...start })
-  await client.waitFor(
-    frame => frame.type === 'raw'
-      && (frame.rawValue as { type: string }).type === 'system',
-  )
-  if (query.options === undefined) {
-    throw new Error('query() was not called')
-  }
-  return query.options
-}
 
 it('denies through canUseTool without forwarding under approvalPolicy deny', async () => {
   const options = await startAndCaptureOptions({
@@ -67,6 +25,33 @@ it('denies through canUseTool without forwarding under approvalPolicy deny', asy
     behavior: 'deny',
     message: DENY_BY_RUN_POLICY_MESSAGE,
   })
+})
+
+it('marks an approval-gated external MCP call dynamic, as the stream does', async () => {
+  const query = createFakeQuery([initMessage()])
+  hostRef.current = await startHost({ query: query.fn })
+  const client = await connect(hostRef.current)
+  client.send({ type: 'start', prompt: 'do the thing', permissionMode: 'default', approvalPolicy: 'forward' })
+  await client.waitFor(
+    frame => frame.type === 'raw'
+      && (frame.rawValue as { type: string }).type === 'system',
+  )
+
+  // Pends on the human's answer, which never comes: only the frames it emitted first matter.
+  void query.options?.canUseTool?.(
+    'mcp__github__create_issue',
+    { title: 'x' },
+    { signal: new AbortController().signal, toolUseID: 'call-7' } as never,
+  )
+  const call = await client.waitFor(frame => frame.type === 'tool-call')
+
+  expect(call).toMatchObject({
+    toolCallId: 'call-7',
+    toolName: 'mcp__github__create_issue',
+    providerExecuted: true,
+    dynamic: true,
+  })
+  await client.waitFor(frame => frame.type === 'tool-approval-request')
 })
 
 it('forwards every SDK permission mode unchanged, auto included', async () => {
@@ -174,4 +159,47 @@ it('resumes the session the start named, as the SDK option', async () => {
   const options = await startAndCaptureOptions({ sessionId: 'sess-worker-1' })
 
   expect(options.sessionId).toBe('sess-worker-1')
+})
+
+it('forwards the subagent stream options as the SDK options', async () => {
+  const options = await startAndCaptureOptions({ agentProgressSummaries: true, forwardSubagentText: false })
+
+  expect(options.agentProgressSummaries).toBe(true)
+  expect(options.forwardSubagentText).toBe(false)
+})
+
+it('filters AskUserQuestion under its harness name, askUserQuestions', async () => {
+  const allowed = await startAndCaptureOptions({
+    builtinToolFiltering: { mode: 'allow', toolNames: ['read', 'askUserQuestions'] },
+  })
+  expect(allowed.tools).toEqual(['Read', 'AskUserQuestion'])
+  expect(allowed.disallowedTools).not.toContain('AskUserQuestion')
+  await hostRef.current?.close()
+
+  const denied = await startAndCaptureOptions({
+    builtinToolFiltering: { mode: 'deny', toolNames: ['askUserQuestions'] },
+  })
+  expect(denied.disallowedTools).toEqual(['AskUserQuestion'])
+})
+
+it('bypasses without canUseTool, and the run policy still bites through the hook', async () => {
+  // The SDK mode, the harness mode that maps onto it, and no mode at all (`allow-all`).
+  for (const permissionMode of ['bypassPermissions', 'allow-all', undefined]) {
+    const options = await startAndCaptureOptions({
+      ...(permissionMode === undefined ? {} : { permissionMode }),
+      refuseTools: ['WebFetch'],
+      deferTools: ['Bash'],
+    })
+    expect(options.permissionMode).toBe('bypassPermissions')
+    expect(options.allowDangerouslySkipPermissions).toBe(true)
+    expect(options.canUseTool).toBeUndefined()
+    expect(options.permissionPromptToolName).toBe('stdio')
+
+    const refused = await callPreToolUse(options, { tool_name: 'WebFetch', tool_input: {} })
+    expect(refused.hookSpecificOutput?.permissionDecision).toBe('deny')
+    const deferred = await callPreToolUse(options, { tool_name: 'Bash', tool_input: { command: 'ls' } })
+    expect(deferred.hookSpecificOutput?.permissionDecision).toBe('defer')
+    await hostRef.current?.close()
+    hostRef.current = undefined
+  }
 })

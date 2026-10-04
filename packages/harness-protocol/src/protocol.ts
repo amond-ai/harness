@@ -150,6 +150,11 @@ export const startMessageSchema = claudeCodeStartMessageSchema.extend({
   pathToClaudeCodeExecutable: z.string().optional(),
   maxBudgetUsd: z.number().optional(),
   sessionId: z.string().optional(),
+  /*
+   * The session to resume. Upstream's vendored `resumeSessionId` names the
+   * same thing; the turn host reads either, and refuses a `start` whose two
+   * names disagree.
+   */
   resume: z.string().optional(),
 
   /*

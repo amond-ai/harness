@@ -32,6 +32,21 @@ describe('the turn host\'s start schema', () => {
       }).success).toBe(true)
     }
   })
+  it('accepts the start fields taken at harness-claude-code@1.0.142', () => {
+    const parsed = startMessageSchema.safeParse({
+      type: 'start',
+      prompt: 'do the thing',
+      agentProgressSummaries: true,
+      forwardSubagentText: false,
+      resumeSessionId: 'sess-1',
+    })
+    expect(parsed.success).toBe(true)
+    expect(parsed.data).toMatchObject({
+      agentProgressSummaries: true,
+      forwardSubagentText: false,
+      resumeSessionId: 'sess-1',
+    })
+  })
 })
 
 describe('the inbound union', () => {
@@ -46,6 +61,13 @@ describe('the inbound union', () => {
       type: 'interrupt',
       reason: 'whenever',
     }).success).toBe(false)
+  })
+
+  it('keeps the structured tool result on an inbound tool-result', () => {
+    const toolResult = { type: 'tool-result', toolCallId: 'call-1', toolName: 'askUserQuestions', output: { type: 'json', value: {} } }
+    const parsed = inboundMessageSchema.safeParse({ type: 'tool-result', toolCallId: 'call-1', output: {}, toolResult })
+    expect(parsed.success).toBe(true)
+    expect(parsed.data).toMatchObject({ toolResult })
   })
 })
 
@@ -185,6 +207,25 @@ describe('the turn host\'s outbound union', () => {
         { id: 'call-8', name: 'Bash', input: { command: 'rm -rf /' }, reason: 'no' },
       ],
     }).success).toBe(true)
+  })
+
+  it('accepts the tool-input parts and a counted tool call, in both unions', () => {
+    for (const frame of [
+      { type: 'tool-input-start', id: 'toolu_1', toolName: 'bash', providerExecuted: true },
+      { type: 'tool-input-delta', id: 'toolu_1', delta: '{"command":' },
+      { type: 'tool-input-end', id: 'toolu_1' },
+      { type: 'tool-call', toolCallId: 'toolu_1', toolName: 'bash', input: '{}', stepToolCallCount: 2 },
+    ]) {
+      expect(harnessV1BridgeOutboundMessageSchema.safeParse(frame).success).toBe(true)
+      expect(turnHostOutboundMessageSchema.safeParse(frame).success).toBe(true)
+    }
+    expect(turnHostOutboundMessageSchema.safeParse({
+      type: 'tool-call',
+      toolCallId: 'toolu_1',
+      toolName: 'bash',
+      input: '{}',
+      stepToolCallCount: 0,
+    }).success).toBe(false)
   })
 
   it('still accepts every frame the upstream union carries', () => {

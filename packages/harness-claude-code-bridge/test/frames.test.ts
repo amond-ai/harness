@@ -42,6 +42,65 @@ it('emits every non-stream_event SDK message as a journaled raw frame', async ()
   expect(journal.filter(frame => frame.type === 'raw')).toHaveLength(3)
 })
 
+it('forwards task, progress and subagent messages raw exactly once, and maps none of them', async () => {
+  const script = [
+    initMessage(),
+    { type: 'system', subtype: 'task_started', task_id: 'task-1' },
+    { type: 'tool_progress', tool_use_id: 'toolu_task_1', elapsed_time_seconds: 3 },
+    {
+      type: 'assistant',
+      parent_tool_use_id: 'toolu_task_1',
+      message: { content: [{ type: 'tool_use', id: 'toolu_sub_1', name: 'Bash', input: { command: 'ls' } }] },
+    },
+    // A subagent's token delta: raw, as upstream forwards it, but not a part.
+    {
+      type: 'stream_event',
+      parent_tool_use_id: 'toolu_task_1',
+      event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } },
+    },
+    { type: 'system', subtype: 'task_notification', task_id: 'task-1', status: 'completed' },
+    resultMessage(),
+  ]
+  const query = createFakeQuery(script)
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const raws = client.frames.filter(frame => frame.type === 'raw').map(frame => frame.rawValue)
+  expect(raws).toEqual(script)
+  expect(client.frames.some(frame => frame.type === 'tool-call' || frame.type === 'text-start')).toBe(false)
+  client.close()
+})
+
+it('journals a subagent stream_event as one raw, and keeps the parent\'s own stream_event out of raw', async () => {
+  const subagentDelta = {
+    type: 'stream_event',
+    parent_tool_use_id: 'toolu_task_1',
+    event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'sub' } },
+  }
+  const query = createFakeQuery([
+    initMessage(),
+    subagentDelta,
+    { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } },
+    resultMessage(),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const isStreamRaw = (frame: Record<string, unknown>): boolean =>
+    frame.type === 'raw' && (frame.rawValue as { type?: string }).type === 'stream_event'
+  const live = client.frames.filter(isStreamRaw)
+  expect(live.map(frame => frame.rawValue)).toEqual([subagentDelta])
+  // Not live-only: the journal holds the same line the live mirror appended.
+  expect((await host.readJournal()).filter(isStreamRaw)).toEqual(live)
+  client.close()
+})
+
 it('acknowledges a start before the query has said anything', async () => {
   const query = createFakeQuery([initMessage(), resultMessage()])
   host = await startHost({ query: query.fn })
@@ -81,6 +140,235 @@ it('keeps stream_event-derived frames out of the journal and out of a replay', a
   expect(replayed.frames.some(frame => frame.type === 'raw')).toBe(true)
   expect(replayed.frames.some(frame => frame.type === 'text-delta')).toBe(false)
   replayed.close()
+  client.close()
+})
+
+it('streams a tool call\'s input as live-only tool-input parts', async () => {
+  const toolUse = (index: number, id: string, name: string): Array<Record<string, unknown>> => [
+    { type: 'stream_event', event: { type: 'content_block_start', index, content_block: { type: 'tool_use', id, name } } },
+    { type: 'stream_event', event: { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: '{"a":1}' } } },
+    { type: 'stream_event', event: { type: 'content_block_stop', index } },
+  ]
+  const query = createFakeQuery([
+    initMessage(),
+    ...toolUse(0, 'toolu_1', 'Bash'),
+    ...toolUse(1, 'toolu_2', 'mcp__github__create_issue'),
+    // The structured answer is not a tool the agent called, so it streams nothing.
+    ...toolUse(2, 'toolu_3', 'StructuredOutput'),
+    resultMessage(),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const inputs = client.frames
+    .filter(frame => frame.type.startsWith('tool-input-'))
+    .map(({ seq: _seq, ...frame }) => frame)
+  expect(inputs).toEqual([
+    { type: 'tool-input-start', id: 'toolu_1', toolName: 'bash', providerExecuted: true },
+    { type: 'tool-input-delta', id: 'toolu_1', delta: '{"a":1}' },
+    { type: 'tool-input-end', id: 'toolu_1' },
+    { type: 'tool-input-start', id: 'toolu_2', toolName: 'mcp__github__create_issue', providerExecuted: true, dynamic: true },
+    { type: 'tool-input-delta', id: 'toolu_2', delta: '{"a":1}' },
+    { type: 'tool-input-end', id: 'toolu_2' },
+  ])
+  // Liveness, like the text deltas: the record of the call is its `assistant` message.
+  expect((await host.readJournal()).some(frame => frame.type.startsWith('tool-input-'))).toBe(false)
+  client.close()
+})
+
+it('journals a message_stop raw carrying the response\'s summed usage', async () => {
+  const query = createFakeQuery([
+    initMessage(),
+    { type: 'stream_event', event: { type: 'message_start', message: { usage: { input_tokens: 10, output_tokens: 1 } } } },
+    { type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 7 } } },
+    { type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 50, input_tokens: null } } },
+    { type: 'stream_event', event: { type: 'message_stop' } },
+    resultMessage(),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const isStop = (frame: Record<string, unknown>): boolean =>
+    frame.type === 'raw' && (frame.rawValue as { event?: { type?: string } }).event?.type === 'message_stop'
+  const live = client.frames.filter(isStop)
+  expect(live.map(frame => frame.rawValue)).toEqual([{
+    type: 'stream_event',
+    event: { type: 'message_stop' },
+    // A later delta wins, and a null one does not erase what `message_start` reported.
+    usage: { input_tokens: 10, output_tokens: 50 },
+  }])
+  // Not live-only: the journal, and so the transcript a settle rebuilds from it, holds the same
+  // line the live mirror appended — and only that one of the four `stream_event`s.
+  const journaled = (await host.readJournal()).filter(isStop)
+  expect(journaled).toEqual(live)
+  expect((await host.readJournal()).filter(frame => frame.type === 'raw')).toHaveLength(3)
+  client.close()
+})
+
+it('meters a step from the usage the response streamed after the assistant message', async () => {
+  const query = createFakeQuery([
+    initMessage(),
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 10, output_tokens: 1 } } },
+    { type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 50 } } },
+    resultMessage(),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  const step = await client.waitFor(frame => frame.type === 'finish-step')
+
+  // The assistant message reports the usage at its first token; the delta carries the rest.
+  expect(step.usage).toMatchObject({
+    inputTokens: { total: 10, noCache: 10 },
+    outputTokens: { total: 50 },
+  })
+  client.close()
+})
+
+it('does not let a streamed usage that reports 0 input tokens erase the complete count', async () => {
+  const query = createFakeQuery([
+    initMessage(),
+    { type: 'stream_event', event: { type: 'message_start', message: { usage: { input_tokens: 10, output_tokens: 1 } } } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 10, output_tokens: 1 } } },
+    { type: 'stream_event', event: { type: 'message_delta', usage: { input_tokens: 0, output_tokens: 50 } } },
+    { type: 'stream_event', event: { type: 'message_stop' } },
+    resultMessage(),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  const step = await client.waitFor(frame => frame.type === 'finish-step')
+
+  expect(step.usage).toMatchObject({
+    inputTokens: { total: 10, noCache: 10 },
+    outputTokens: { total: 50 },
+  })
+  const stop = client.frames.find(frame => frame.type === 'raw' && (frame.rawValue as { event?: { type?: string } }).event?.type === 'message_stop')
+  expect((stop?.rawValue as { usage: unknown }).usage).toEqual({ input_tokens: 10, output_tokens: 50 })
+  client.close()
+})
+
+it('keeps a tool result\'s non-text content and an MCP scalar as sent, and skips string content', async () => {
+  const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0K' } }
+  const query = createFakeQuery([
+    initMessage(),
+    // The first user turn can arrive as a bare string; it holds no blocks to map.
+    { type: 'user', message: { content: 'do the thing' } },
+    {
+      type: 'assistant',
+      message: { content: [
+        { type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: '/a.png' } },
+        { type: 'tool_use', id: 'toolu_2', name: 'mcp__calc__add', input: { a: 1, b: 2 } },
+      ] },
+    },
+    {
+      type: 'user',
+      message: { content: [
+        { type: 'tool_result', tool_use_id: 'toolu_1', content: [image] },
+        { type: 'tool_result', tool_use_id: 'toolu_2', content: '3' },
+      ] },
+    },
+    resultMessage(),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const results = client.frames.filter(frame => frame.type === 'tool-result')
+  expect(results.map(frame => [frame.toolCallId, frame.result])).toEqual([
+    ['toolu_1', [image]],
+    // `3` parses as JSON too, but a scalar is the text the server sent, not a structure.
+    ['toolu_2', '3'],
+  ])
+  expect(client.frames.some(frame => frame.type === 'error')).toBe(false)
+  client.close()
+})
+
+it('leaves a question\'s tool-call to the hook, and names its result askUserQuestions', async () => {
+  const query = createFakeQuery([
+    initMessage(),
+    { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_q', name: 'AskUserQuestion' } } },
+    { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } },
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_q', name: 'AskUserQuestion', input: { questions: [] } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_q', content: 'apple' }] } },
+    resultMessage(),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  // No hook ran in this fake, so nothing emitted the call: the stream mapper did not either.
+  expect(client.frames.some(frame => frame.type === 'tool-call' || frame.type === 'tool-input-start')).toBe(false)
+  expect(client.frames.find(frame => frame.type === 'tool-result')).toMatchObject({
+    toolCallId: 'toolu_q',
+    toolName: 'askUserQuestions',
+  })
+  client.close()
+})
+
+it('reports the CLI\'s structured tool result, without the pre-edit file', async () => {
+  const edit = {
+    filePath: '/workspace/repo/a.ts',
+    oldString: 'a',
+    newString: 'b',
+    originalFile: 'a\n'.repeat(1000),
+    structuredPatch: [{ oldStart: 1, lines: ['-a', '+b'] }],
+  }
+  const query = createFakeQuery([
+    initMessage(),
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Edit', input: {} }] } },
+    {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'edited' }] },
+      tool_use_result: edit,
+    },
+    {
+      type: 'assistant',
+      message: { content: [
+        { type: 'tool_use', id: 'toolu_2', name: 'Read', input: {} },
+        { type: 'tool_use', id: 'toolu_3', name: 'Read', input: {} },
+      ] },
+    },
+    // Two results and one structured value: whose it is cannot be told, so the text is used.
+    {
+      type: 'user',
+      message: { content: [
+        { type: 'tool_result', tool_use_id: 'toolu_2', content: 'one' },
+        { type: 'tool_result', tool_use_id: 'toolu_3', content: 'two' },
+      ] },
+      tool_use_result: { file: { content: 'one' } },
+    },
+    resultMessage(),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const { originalFile: _originalFile, ...reported } = edit
+  const results = client.frames.filter(frame => frame.type === 'tool-result')
+  expect(results.map(frame => [frame.toolCallId, frame.result])).toEqual([
+    ['toolu_1', reported],
+    ['toolu_2', 'one'],
+    ['toolu_3', 'two'],
+  ])
+  // The raw `user` frame still carries the whole value: the transcript keeps what the part drops.
+  const raw = client.frames.find(frame => frame.type === 'raw'
+    && (frame.rawValue as { tool_use_result?: unknown }).tool_use_result !== undefined)
+  expect((raw?.rawValue as { tool_use_result: unknown }).tool_use_result).toEqual(edit)
   client.close()
 })
 

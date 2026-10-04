@@ -9,10 +9,12 @@ below are not upstream yet.
 - **License**: Apache-2.0 (both packages)
 
 `@ai-sdk/harness-codex@1.0.113` is a later release than the `@ai-sdk/harness@1.0.87`
-the rest of this repository vendors, and it was taken from the published package
+this host was first composed on, and it was taken from the published package
 rather than from a commit. The sibling packages record the same split for the same
-reason: the Codex half of upstream moves on its own, and the `1.0.87` copy under
-`harness-protocol/src/harness-v1/` is what both adapters compose on.
+reason: the Codex half of upstream moves on its own. The shared halves both
+adapters compose on — the copy under `harness-protocol/src/harness-v1/` and
+`harness-bridge-runtime` — have since been re-vendored at `@ai-sdk/harness@1.0.138`
+(see their own `UPSTREAM.md`); the change reached this host only by addition.
 `harness-protocol` pins `codex-bridge-protocol.ts` at `1.0.111`; that file is
 byte-identical in `1.0.113`, so the `start` this host parses is the one it
 vendored.

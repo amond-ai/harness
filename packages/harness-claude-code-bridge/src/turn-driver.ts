@@ -10,11 +10,12 @@
 
 import type { BridgeEvent, BridgeTurn, Experimental_BridgeUserMessage, Experimental_BridgeUserMessageQueue, InterruptReason } from '@amond-ai/harness-bridge-runtime'
 import type { SdkPermissionMode, StartMessage } from '@amond-ai/harness-protocol/claude-code'
-import type { Options, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { HookCallback, HookJSONOutput, Options, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { ClaudeMessage } from './create-emit-stream-event'
 import { randomUUID } from 'node:crypto'
 import { exit, env as procEnv } from 'node:process'
-import { sdkPermissionModeSchema, startMessageSchema } from '@amond-ai/harness-protocol/claude-code'
+import { harnessV1QuestionsToolOutputSchema, sdkPermissionModeSchema, startMessageSchema } from '@amond-ai/harness-protocol/claude-code'
+import { z } from 'zod/v4'
 
 import { createClaudeCodeSystemPrompt } from './claude-code-system-prompt'
 import { toClaudeSkillsOption } from './claude-skills-option'
@@ -25,12 +26,18 @@ import {
   defaultUsage,
   emitFinishStep,
   finishApprovalStep,
+  isExternalMcpTool,
   mapUsage,
 } from './create-emit-stream-event'
 import {
   createPreToolUseEvaluator,
   DENY_BY_RUN_POLICY_MESSAGE,
 } from './permission-policy'
+import {
+  claudeCodeQuestionKey,
+  toClaudeCodeQuestionResult,
+  toHarnessQuestionsInput,
+} from './question-tool'
 import {
   sessionTranscriptPath,
   stoppedFromTerminalReason,
@@ -53,6 +60,7 @@ type CommonBuiltinToolName
     | 'glob'
     | 'grep'
     | 'webSearch'
+    | 'askUserQuestions'
 
 const NATIVE_TO_COMMON: Readonly<Record<string, CommonBuiltinToolName>> = {
   Read: 'read',
@@ -62,6 +70,7 @@ const NATIVE_TO_COMMON: Readonly<Record<string, CommonBuiltinToolName>> = {
   Glob: 'glob',
   Grep: 'grep',
   WebSearch: 'webSearch',
+  AskUserQuestion: 'askUserQuestions',
 }
 
 const NATIVE_TOOL_KINDS: Readonly<
@@ -131,10 +140,49 @@ export interface TurnDriverOptions {
    * without taking the test runner down with it.
    */
   exit?: (code: number) => void
+  /**
+   * How long a host `abort` waits on the graceful `interrupt()` before it
+   * aborts the query outright. Defaults to upstream's five seconds; a test
+   * passes a short one so the fallback is observable.
+   */
+  abortFallbackMs?: number
 }
 
 /** Grace the host gives `interrupt()` to produce a `result`. */
 const DEFAULT_INTERRUPT_GRACE_MS = 30_000
+
+/*
+ * Upstream's hard-abort fallback, not `interruptGraceMs`: the bridge runtime
+ * fences a replacement `start` on this turn's teardown for ten seconds
+ * (`turnTeardownGraceMs`), and the interrupt grace — 30 s by default — would
+ * outlast that fence, so a retry after an abort would be refused rather than
+ * run.
+ */
+const DEFAULT_ABORT_FALLBACK_MS = 5_000
+
+/** The `onStart` the bridge runtime drives a turn with, and the `onStop` it answers `stop` with. */
+export type TurnDriver = ((start: StartMessage, turn: BridgeTurn) => Promise<void>) & {
+  /**
+   * The resume payload for `bridge-stop`: the exact conversation the last
+   * turn belonged to, so a later resume does not have to fall back to "most
+   * recent in this workdir". Empty before any turn reported a session.
+   */
+  onStop: () => { claudeSessionId?: string }
+}
+
+/**
+ * What one bridge process remembers across its turns — upstream keeps it at
+ * module level; here it lives in the driver's closure (patch 2).
+ */
+interface DriverSession {
+  /**
+   * The Claude session id most recently reported by the SDK, captured from
+   * the message stream. Every turn may fork a new id (the SDK's `continue` and
+   * `resume` create a new session linked to the previous one), so the latest
+   * observation is the one a later resume must name.
+   */
+  lastClaudeSessionId?: string
+}
 
 /**
  * Build the `onStart` the bridge runtime drives one turn with. Everything the
@@ -143,8 +191,16 @@ const DEFAULT_INTERRUPT_GRACE_MS = 30_000
  */
 export function createTurnDriver(
   driverOptions: TurnDriverOptions,
-): (start: StartMessage, turn: BridgeTurn) => Promise<void> {
-  return (start, turn) => runTurn(start, turn, driverOptions)
+): TurnDriver {
+  const session: DriverSession = {}
+  const onStart = (start: StartMessage, turn: BridgeTurn): Promise<void> =>
+    runTurn({ startFrame: start, turn, driverOptions, session })
+  return Object.assign(onStart, {
+    onStop: () =>
+      session.lastClaudeSessionId === undefined
+        ? {}
+        : { claudeSessionId: session.lastClaudeSessionId },
+  })
 }
 
 type Emit = (msg: Record<string, unknown>) => void
@@ -198,6 +254,7 @@ function createApprovalResolver(input: {
       nativeName: toolName,
       input: JSON.stringify(toolInput ?? {}),
       providerExecuted: true,
+      ...(isExternalMcpTool(toolName) ? { dynamic: true } : {}),
     })
     input.emit({
       type: 'tool-approval-request',
@@ -216,6 +273,16 @@ function createApprovalResolver(input: {
         }
   }
 }
+
+/*
+ * What a bypassing turn adds, from upstream: no `canUseTool` — the bypass
+ * guarantees the SDK never invokes it — and the `stdio` prompt tool, because
+ * Claude Code exposes `AskUserQuestion` in a headless SDK session only when a
+ * permission prompt tool is configured. The run's own posture is unaffected:
+ * refuse, defer and the replayed answers live in the `PreToolUse` hook, which
+ * runs before the permission mode is consulted (`permission-policy.ts`).
+ */
+const BYPASS_PERMISSION_OPTIONS = { permissionPromptToolName: 'stdio' } as const
 
 function createPermissionOptions(input: {
   start: StartMessage
@@ -240,17 +307,23 @@ function createPermissionOptions(input: {
    * The Worker sends the SDK's own mode. Pass it straight through — the run's
    * posture is the Worker's call, and re-deriving it from the harness trio
    * would silently narrow `plan` or `dontAsk` to something else.
-   * `bypassPermissions` needs its companion flag or the CLI refuses it.
+   * `bypassPermissions` needs its companion flag or the CLI refuses it, and
+   * gets the bypass shape upstream gives `allow-all` below.
    */
   if (isSdkPermissionMode(requestedMode)) {
+    const bypassing = requestedMode === 'bypassPermissions'
     return {
       permissionMode: requestedMode,
-      allowDangerouslySkipPermissions: requestedMode === 'bypassPermissions',
-      canUseTool: (
-        toolName: string,
-        toolInput: Record<string, unknown>,
-        options: { toolUseID: string },
-      ) => resolveApproval(toolName, toolInput, options.toolUseID),
+      allowDangerouslySkipPermissions: bypassing,
+      ...(bypassing
+        ? BYPASS_PERMISSION_OPTIONS
+        : {
+            canUseTool: (
+              toolName: string,
+              toolInput: Record<string, unknown>,
+              options: { toolUseID: string },
+            ) => resolveApproval(toolName, toolInput, options.toolUseID),
+          }),
     }
   }
 
@@ -260,19 +333,24 @@ function createPermissionOptions(input: {
     permissionMode,
     inactiveNativeTools,
   })
-  const bypassing
-    = permissionMode === 'allow-all' && inactiveNativeTools.size === 0
+
+  const baseOptions = {
+    permissionMode:
+      permissionMode === 'allow-all'
+        ? 'bypassPermissions'
+        : permissionMode === 'allow-edits'
+          ? 'acceptEdits'
+          : 'default',
+    allowDangerouslySkipPermissions: permissionMode === 'allow-all',
+    ...(permissionSettings ? { settings: permissionSettings } : {}),
+  }
+
+  if (permissionMode === 'allow-all') {
+    return { ...baseOptions, ...BYPASS_PERMISSION_OPTIONS }
+  }
 
   return {
-    permissionMode: bypassing
-      ? 'bypassPermissions'
-      : permissionMode === 'allow-edits'
-        ? 'acceptEdits'
-        : 'default',
-    allowDangerouslySkipPermissions: bypassing,
-    ...(!bypassing && permissionSettings
-      ? { settings: permissionSettings }
-      : {}),
+    ...baseOptions,
     canUseTool: async (
       toolName: string,
       toolInput: Record<string, unknown>,
@@ -289,6 +367,153 @@ function createPermissionOptions(input: {
       }
       return resolveApproval(toolName, toolInput, options.toolUseID)
     },
+  }
+}
+
+/**
+ * Whether a question call is one the host can be asked to answer. The tool
+ * input is the model's JSON, so this checks the shape `toHarnessQuestionsInput`
+ * reads — a non-empty list of objects with a string `question` and, when
+ * present, `options` that are objects with a string `label`. Anything else is
+ * left to the CLI's own input validation.
+ */
+function isForwardableQuestionInput(
+  nativeInput: unknown,
+): nativeInput is Parameters<typeof toHarnessQuestionsInput>[0] {
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null
+  const questions = isObject(nativeInput) ? nativeInput.questions : undefined
+  return (
+    Array.isArray(questions)
+    && questions.length > 0
+    && questions.every(
+      question => isObject(question)
+        && typeof question.question === 'string'
+        && question.question !== ''
+        && (question.options === undefined
+          || (Array.isArray(question.options)
+            && question.options.every(
+              option => isObject(option)
+                && typeof option.label === 'string'
+                && option.label !== '',
+            ))),
+    )
+  )
+}
+
+/**
+ * The native result of a question the host answered. An error result is no
+ * answer: the bridge settles a request the turn ended under that way, and a
+ * host's own error carries no `answers`. A result is untrusted JSON off the
+ * socket, so one the questions-tool schema refuses is no answer either.
+ */
+function toNativeQuestionResult(input: {
+  result: { output: unknown, isError?: boolean }
+  nativeInput: Parameters<typeof toHarnessQuestionsInput>[0]
+  toolCallId: string
+}): ReturnType<typeof toClaudeCodeQuestionResult> {
+  const { result } = input
+  const output = result.isError === true
+    ? undefined
+    : harnessV1QuestionsToolOutputSchema.safeParse(result.output)
+  if (output?.success === true) {
+    return toClaudeCodeQuestionResult({
+      nativeInput: input.nativeInput,
+      output: output.data,
+    })
+  }
+  if (output?.success === false) {
+    // The model only sees the generic deny reason; the bridge forwards console output as `sandbox-log` frames.
+    console.warn(
+      `AskUserQuestion result refused (${input.toolCallId}): ${z.prettifyError(output.error)}`,
+    )
+  }
+  return {
+    behavior: 'deny',
+    message: result.isError === true && typeof result.output === 'string'
+      ? result.output
+      : 'The questions were not answered.',
+  }
+}
+
+/**
+ * Upstream's question flow: ask the host to answer an `AskUserQuestion` call
+ * as a host-executed tool, and run the call with the answers it sent back.
+ * Parks the CLI on `requestToolResult` until the host answers, so the driver
+ * only runs it where nothing else has decided the call (see the `PreToolUse`
+ * hook in `runTurn`).
+ */
+function createQuestionPreToolUseHook(input: {
+  turn: BridgeTurn
+  emit: Emit
+  nativeToolCallNames: Map<string, string>
+}): HookCallback {
+  return async (hookInput, toolUseID): Promise<HookJSONOutput> => {
+    if (
+      hookInput.hook_event_name !== 'PreToolUse'
+      || hookInput.tool_name !== 'AskUserQuestion'
+    ) {
+      return {}
+    }
+
+    const nativeInput: unknown = hookInput.tool_input
+    if (!isForwardableQuestionInput(nativeInput)) {
+      return {}
+    }
+    const canonicalInput = toHarnessQuestionsInput(nativeInput)
+    const toolCallId = toolUseID ?? hookInput.tool_use_id
+    input.nativeToolCallNames.set(toolCallId, hookInput.tool_name)
+    input.emit({
+      type: 'tool-call',
+      toolCallId,
+      toolName: 'askUserQuestions',
+      nativeName: hookInput.tool_name,
+      input: JSON.stringify(canonicalInput),
+      providerExecuted: false,
+      providerMetadata: {
+        'claude-code': {
+          nativeRequest: nativeInput,
+        },
+      },
+    })
+
+    const questionKey = claudeCodeQuestionKey(nativeInput)
+    const result = await input.turn.requestToolResult({
+      toolCallId,
+      matches: (candidate) => {
+        const nativeRequest = candidate.toolResult?.providerOptions?.[
+          'claude-code'
+        ]?.nativeRequest as
+        | Parameters<typeof claudeCodeQuestionKey>[0]
+        | undefined
+        return (
+          nativeRequest != null
+          && claudeCodeQuestionKey(nativeRequest) === questionKey
+        )
+      },
+    })
+    const nativeResult = toNativeQuestionResult({
+      result,
+      nativeInput,
+      toolCallId,
+    })
+
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        ...(nativeResult.behavior === 'allow'
+          ? {
+              permissionDecision: 'allow',
+              updatedInput: {
+                ...nativeResult.updatedInput,
+              } as Record<string, unknown>,
+            }
+          : {
+              permissionDecision: 'deny',
+              permissionDecisionReason: nativeResult.message,
+            }),
+      },
+    }
   }
 }
 
@@ -334,26 +559,38 @@ function nativeToolRequiresApproval(input: {
   return kind === 'edit' || kind === 'bash'
 }
 
-async function runTurn(
-  startFrame: StartMessage,
-  turn: BridgeTurn,
-  driverOptions: TurnDriverOptions,
-): Promise<void> {
+async function runTurn({
+  startFrame,
+  turn,
+  driverOptions,
+  session,
+}: {
+  startFrame: StartMessage
+  turn: BridgeTurn
+  driverOptions: TurnDriverOptions
+  session: DriverSession
+}): Promise<void> {
   const { query, workdir } = driverOptions
   const exitProcess = driverOptions.exit ?? exit
   const graceMs = startFrame.interruptGraceMs ?? DEFAULT_INTERRUPT_GRACE_MS
   /*
    * Frames derived from a `stream_event` SDK message — the text/reasoning
-   * deltas and their start/end — are liveness, not transcript: they are sent
-   * if a socket is attached and take a `seq`, but they are not journaled and
-   * not replayed. `emitStreamEvent` has no way to say so itself, so the loop
-   * raises this flag around the one call that can produce them.
+   * deltas, the tool input, and their start/end — are liveness, not
+   * transcript: they are sent if a socket is attached and take a `seq`, but
+   * they are not journaled and not replayed. `emitStreamEvent` has no way to
+   * say so itself, so the loop raises this flag around the one call that can
+   * produce them.
+   *
+   * A `raw` frame is never live-only, even one built from a `stream_event`
+   * (the `message_stop` that carries a response's usage): a client's live
+   * mirror appends every `raw` it receives, and the transcript it rebuilds
+   * from the journal must hold the same lines.
    */
   let derivedFromStreamEvent = false
   const emit: Emit = msg =>
     turn.emit(
       msg as BridgeEvent,
-      derivedFromStreamEvent ? { journal: false } : undefined,
+      derivedFromStreamEvent && msg.type !== 'raw' ? { journal: false } : undefined,
     )
 
   /*
@@ -379,6 +616,53 @@ async function runTurn(
    * silently ran without the tools it asked for would be worse than one that
    * did not run. Refuse before `query()`.
    */
+  /*
+   * `resume` is this host's name for the exact session to resume and
+   * `resumeSessionId` upstream's; either one names it. Two different names
+   * are a client fault, not a choice to make on its behalf.
+   */
+  if (
+    start.resume !== undefined
+    && start.resumeSessionId !== undefined
+    && start.resume !== start.resumeSessionId
+  ) {
+    emit({
+      type: 'error',
+      phase: 'start',
+      error: `start.resume (${start.resume}) and start.resumeSessionId (${start.resumeSessionId}) name different sessions`,
+    })
+    return
+  }
+  const resumeSessionId = start.resumeSessionId ?? start.resume
+  /*
+   * The SDK documents `sessionId` as exclusive of `resume` (and `continue`):
+   * `sessionId` opens a fresh session under that id, a resume name picks an
+   * existing one. Refuse the combination rather than hand it to `query()`.
+   */
+  if (start.sessionId !== undefined && resumeSessionId !== undefined) {
+    emit({
+      type: 'error',
+      phase: 'start',
+      error: 'start.sessionId cannot be combined with start.resume or start.resumeSessionId',
+    })
+    return
+  }
+  /*
+   * Without a named session a turn after the first stays pinned to the one
+   * this bridge last observed, rather than whatever `continue` would resolve
+   * to — upstream's rule. Read before the query starts: its own messages move
+   * the observation on.
+   *
+   * A `start.sessionId` with no resume name opens a fresh session under that
+   * id, so it takes neither the pin nor `continue`: the SDK documents
+   * `sessionId` as exclusive of both, and the host must not build that
+   * combination itself. Upstream has no `sessionId` option.
+   */
+  const freshNamedSession = start.sessionId !== undefined && resumeSessionId === undefined
+  const resumeTarget = freshNamedSession
+    ? undefined
+    : resumeSessionId ?? session.lastClaudeSessionId
+
   if (start.tools && start.tools.length > 0) {
     emit({
       type: 'error',
@@ -391,13 +675,28 @@ async function runTurn(
   // Local controller for the Claude query. Aborted either by the host (via the
   // shared runtime's `turn.abortSignal`) or by us on a terminal error.
   const abortCtl = new AbortController()
+  // A host abort prefers the SDK's graceful `interrupt()` — Esc semantics: the
+  // in-flight turn is persisted to the session transcript and settles with an
+  // interrupted result, so a later resume still sees the work done before the
+  // abort. The hard abort kills the CLI process and loses that turn's records,
+  // so it is only the fallback — armed unconditionally, because aborting an
+  // already-settled query is a no-op — and the immediate path when the abort
+  // arrives before the query exists.
+  let gracefulAbort: (() => void) | undefined
+  let hardAbortTimer: ReturnType<typeof setTimeout> | undefined
+  const onHostAbort = (): void => {
+    if (gracefulAbort) {
+      gracefulAbort()
+    }
+    else {
+      abortCtl.abort()
+    }
+  }
   if (turn.abortSignal.aborted) {
     abortCtl.abort()
   }
   else {
-    turn.abortSignal.addEventListener('abort', () => abortCtl.abort(), {
-      once: true,
-    })
+    turn.abortSignal.addEventListener('abort', onHostAbort, { once: true })
   }
 
   const streamEventState = createClaudeStreamEventState()
@@ -428,6 +727,41 @@ async function runTurn(
     approvedRequests: start.approvedRequests,
     deniedRequests: start.deniedRequests,
   })
+  const questionPreToolUseHook = createQuestionPreToolUseHook({
+    turn,
+    emit,
+    nativeToolCallNames: streamEventState.nativeToolCallNames,
+  })
+  /*
+   * The host answers a question itself only when the run forwards decisions
+   * to it. Under `approvalPolicy: 'deny'` nobody is there to answer, and a
+   * parked CLI is a turn that never ends.
+   */
+  const hostAnswersQuestions = (start.approvalPolicy ?? 'deny') === 'forward'
+  /*
+   * The tool-call of a question the host is not asked to answer. The stream
+   * mapper leaves every `AskUserQuestion` call to this hook (upstream emits it
+   * only from the question flow), so a question the run policy decided —
+   * deferred, answered by a replayed approval, refused — would otherwise
+   * reach the client as a result with no call.
+   */
+  const emitRuntimeQuestionCall = (call: {
+    toolName: string
+    toolInput: unknown
+    toolCallId: string | undefined
+  }): void => {
+    if (call.toolName !== 'AskUserQuestion' || call.toolCallId === undefined) {
+      return
+    }
+    emit({
+      type: 'tool-call',
+      toolCallId: call.toolCallId,
+      toolName: toCommonName(call.toolName),
+      nativeName: call.toolName,
+      input: JSON.stringify(call.toolInput ?? {}),
+      providerExecuted: true,
+    })
+  }
   const permissionOptions = createPermissionOptions({
     start,
     inactiveNativeTools,
@@ -512,6 +846,12 @@ async function runTurn(
     options: {
       ...(start.model ? { model: start.model } : {}),
       ...(start.maxTurns !== undefined ? { maxTurns: start.maxTurns } : {}),
+      ...(start.agentProgressSummaries !== undefined
+        ? { agentProgressSummaries: start.agentProgressSummaries }
+        : {}),
+      ...(start.forwardSubagentText !== undefined
+        ? { forwardSubagentText: start.forwardSubagentText }
+        : {}),
       // See `childEnv` above: only set when the Worker asked, already merged.
       ...(start.env !== undefined ? { env: childEnv } : {}),
       // SDK options the Worker owns; each is forwarded verbatim.
@@ -528,7 +868,6 @@ async function runTurn(
         ? { maxBudgetUsd: start.maxBudgetUsd }
         : {}),
       ...(start.sessionId !== undefined ? { sessionId: start.sessionId } : {}),
-      ...(start.resume !== undefined ? { resume: start.resume } : {}),
       ...(skillsOption ? { skills: skillsOption } : {}),
       ...(nativeTools !== undefined ? { tools: nativeTools } : {}),
       ...(inactiveNativeTools.length > 0
@@ -554,14 +893,23 @@ async function runTurn(
          * runs with the mode stage allowing everything, so a refuse list on
          * `canUseTool` alone would never be reached. Returning `undefined`
          * here — no decision — leaves the call to the normal pipeline.
+         *
+         * One hook, not upstream's separate `AskUserQuestion` matcher: the SDK
+         * runs the hooks of every matching entry in parallel, so two entries
+         * would let the question flow park the CLI on a host answer for a
+         * call the run policy had already deferred. Here the order is the
+         * code's: the policy decides first — a replayed denial or approval,
+         * `refuseTools`, `deferTools` — and only a question none of that
+         * decided, under `approvalPolicy: 'forward'`, goes to the host.
          */
         PreToolUse: [
           {
             hooks: [
-              async (input) => {
+              async (input, toolUseID, hookOptions) => {
                 const call = input as {
                   tool_name?: string
                   tool_input?: unknown
+                  tool_use_id?: string
                 }
                 if (typeof call.tool_name !== 'string') {
                   return {}
@@ -571,8 +919,29 @@ async function runTurn(
                   toolInput: call.tool_input,
                 })
                 if (outcome === undefined) {
+                  /*
+                   * A question the host cannot be asked (malformed input) takes the
+                   * runtime-call path below, so its result never lacks a call.
+                   */
+                  if (
+                    call.tool_name === 'AskUserQuestion'
+                    && hostAnswersQuestions
+                    && isForwardableQuestionInput(call.tool_input)
+                  ) {
+                    return questionPreToolUseHook(input, toolUseID, hookOptions)
+                  }
+                  emitRuntimeQuestionCall({
+                    toolName: call.tool_name,
+                    toolInput: call.tool_input,
+                    toolCallId: toolUseID ?? call.tool_use_id,
+                  })
                   return {}
                 }
+                emitRuntimeQuestionCall({
+                  toolName: call.tool_name,
+                  toolInput: call.tool_input,
+                  toolCallId: toolUseID ?? call.tool_use_id,
+                })
                 return {
                   hookSpecificOutput: {
                     hookEventName: 'PreToolUse' as const,
@@ -603,18 +972,25 @@ async function runTurn(
         ],
       },
       /*
-       * Continuation rule: the host can force-continue (resume after a
-       * cross-process detach) by setting `start.continue: true`; otherwise we
-       * continue every subsequent turn after the first one in this bridge
-       * process. An explicit `start.resume` suppresses all of that — the SDK
-       * documents `continue` and `resume` as mutually exclusive, so sending
-       * both fails the query at startup, and a reused bridge would break every
-       * resume it was asked for.
+       * Continuation rule, most specific first.
+       *
+       * A named session (`start.resumeSessionId`, or its alias `start.resume`)
+       * is what a cross-process resume should use: `continue` means "most
+       * recent thread in this workdir", which silently picks the wrong one
+       * once anything else has run there. The bridge also retains the id it
+       * observed during its previous query, so every later query stays pinned
+       * to that conversation. The SDK documents `continue` and `resume` as
+       * mutually exclusive, so either one suppresses `continue`.
+       *
+       * Otherwise the host can force-continue by setting `start.continue`, and
+       * turns after the first fall back to the cwd-based behaviour when no
+       * exact id was observed.
        */
-      ...(start.resume === undefined
-        && (start.continue === true || !turn.firstTurn)
-        ? { continue: true }
-        : {}),
+      ...(resumeTarget !== undefined
+        ? { resume: resumeTarget }
+        : !freshNamedSession && (start.continue === true || !turn.firstTurn)
+            ? { continue: true }
+            : {}),
       ...permissionOptions,
       // The Worker forwards MCP server configs verbatim; the host does not
       // model the SDK's config union, it only carries it across the wire.
@@ -626,6 +1002,21 @@ async function runTurn(
       abortController: abortCtl,
     },
   })
+
+  gracefulAbort = () => {
+    // Backstop for the whole teardown, not just the interrupt call: if the
+    // stream has not settled within the fallback of a graceful interrupt
+    // being requested, abort outright. `unref` keeps the timer from pinning
+    // the process open on its own.
+    hardAbortTimer = setTimeout(
+      () => abortCtl.abort(),
+      driverOptions.abortFallbackMs ?? DEFAULT_ABORT_FALLBACK_MS,
+    )
+    hardAbortTimer.unref?.()
+    void Promise.resolve()
+      .then(() => q.interrupt())
+      .catch(() => abortCtl.abort())
+  }
   /*
    * A stop is an interrupt, not a kill: `query.interrupt()` asks the CLI to
    * wind the turn down, and the SDK then yields a normal `result` with
@@ -719,15 +1110,17 @@ async function runTurn(
         queryInput.handleLifecycle(msg)
       }
 
-      /*
-       * The SDK's messages ARE the CLI's `--output-format stream-json` lines,
-       * so forwarding each one verbatim re-emits the same NDJSON the Worker
-       * decodes today — the least-churn wire the ADR asked for. It goes out
-       * ahead of the harness parts derived from the same message, so a
-       * consumer reading only `raw` sees the transcript in the CLI's own
-       * order. `stream_event` is excluded: those are token deltas, and the
-       * harness already renders them as text/reasoning parts.
-       */
+      // Every SDK message carries the session id of the conversation it
+      // belongs to. Track the latest so the stop payload, the finish
+      // metadata and the session artifacts all name the exact conversation:
+      // a resume can fork after `init`, and resuming the init id would lose
+      // the fork's turns.
+      const messageSessionId = (msg as { session_id?: unknown }).session_id
+      if (typeof messageSessionId === 'string' && messageSessionId.length > 0) {
+        session.lastClaudeSessionId = messageSessionId
+        sessionId = messageSessionId
+      }
+
       if (type === 'system' && msg.subtype === 'init') {
         const init = msg as ClaudeMessage & { session_id?: string, cwd?: string }
         if (typeof init.session_id === 'string') {
@@ -747,10 +1140,8 @@ async function runTurn(
         deferredToolUse = result.deferred_tool_use
       }
 
-      if (type !== 'stream_event') {
-        emit({ type: 'raw', rawValue: msg })
-      }
-
+      // `emitStreamEvent` forwards the message itself as a `raw` frame, ahead
+      // of the parts it derives from it.
       derivedFromStreamEvent = type === 'stream_event'
       emitStreamEvent(msg)
       derivedFromStreamEvent = false
@@ -785,6 +1176,32 @@ async function runTurn(
 
       if (type === 'result') {
         if (msg.subtype === 'success') {
+          /*
+           * `success` does not mean the turn succeeded: the CLI flags a
+           * rejected request with `is_error` and puts the message in
+           * `result`, which the empty-result rescue below cannot catch.
+           *
+           * Only on an ending that would otherwise read `completed`. An
+           * interrupted or deferred turn ends on an error-shaped `result` by
+           * construction, and those endings keep their `finish` — the
+           * `stopped`, `interruptedBy` and `deferredToolUse` the caller acts
+           * on — and a host `abort` already ends as a run-phase error below.
+           */
+          if (
+            msg.is_error
+            && stoppedFromTerminalReason(terminalReason) === 'completed'
+            && !interruptRequested
+            && !turn.abortSignal.aborted
+          ) {
+            emitTerminalError(
+              msg.result?.trim()
+              || streamEventState.observedTerminalError
+              || (typeof msg.api_error_status === 'number'
+                ? `Claude Code reported an API error (HTTP ${msg.api_error_status})`
+                : 'Claude Code reported a failed result'),
+            )
+            continue
+          }
           const emptyResult = !msg.result?.trim?.()
           if (emptyResult && streamEventState.observedTerminalError) {
             emitTerminalError(streamEventState.observedTerminalError)
@@ -851,9 +1268,11 @@ async function runTurn(
      * error. The rejection that follows is the abort landing, so reporting
      * it again as `claude-code turn failed` is a second, wrong explanation.
      * The one abort that has said nothing yet — a host `abort` frame — falls
-     * through to the ending below, which is where the `break` path lands too.
+     * through to the ending below, which is where the `break` path lands too;
+     * so does a throw after one, which is the stop the host asked for (the
+     * hard-abort fallback killing the CLI, a rejected `interrupt()`).
      */
-    if (!abortCtl.signal.aborted) {
+    if (!abortCtl.signal.aborted && !turn.abortSignal.aborted) {
       turn.emitError({
         error: err,
         message: 'claude-code turn failed',
@@ -867,26 +1286,51 @@ async function runTurn(
     }
   }
   finally {
+    // The turn is over; disarm the host-abort path first. An abort of this
+    // turn's signal arriving after this point must not interrupt the disposed
+    // query or arm the hard-abort fallback for it.
+    gracefulAbort = undefined
+    if (hardAbortTimer !== undefined) {
+      clearTimeout(hardAbortTimer)
+    }
+    turn.abortSignal.removeEventListener('abort', onHostAbort)
     // The turn produced its result (or died trying): the escalation has
     // nothing left to escalate.
     if (escalation !== undefined) {
       clearTimeout(escalation)
     }
     queryInput.close()
+    // Dispose the query explicitly: with streaming input the SDK keeps its
+    // CLI subprocess alive for more user messages, and a turn that ended
+    // through an interrupt or error path can otherwise leak that process —
+    // observed upstream as orphaned `claude` processes holding the very
+    // conversation the next turn continues.
+    try {
+      await (q as { return?: (value?: unknown) => Promise<unknown> }).return?.(
+        undefined,
+      )
+    }
+    catch {
+      // Best effort; the abort controller tears the process down otherwise.
+    }
   }
 
   if (initCheckFailed || emittedTerminalError) {
     return
   }
   /*
-   * A host `abort` tears the query down and leaves no `result`, so
-   * there is no ending to describe: a `finish` here would read `terminalReason`
-   * as absent and call the turn `completed`, which the caller counts as success.
-   * Reached on both unwinds — the `break` above and a rejected iteration.
+   * A host `abort` is a teardown the client asked for, not an ending to
+   * describe as one: the graceful `interrupt()` above may well have produced
+   * a `result`, but a `finish` would then read as `interrupted` at best — and
+   * after the hard fallback, with no `result`, as `completed`, which the
+   * caller counts as success. Upstream reports nothing at all here; this host
+   * reports a run-phase `error` carrying the session, so the attempt a client
+   * retries can resume it. Reached on both unwinds — the `break` above
+   * and a rejected iteration.
    */
-  if (abortCtl.signal.aborted) {
+  if (abortCtl.signal.aborted || turn.abortSignal.aborted) {
     turn.emitError({
-      error: new Error('turn aborted before the SDK produced a result'),
+      error: new Error('turn aborted by the host'),
       message: 'claude-code turn aborted',
       phase: 'run',
       sessionArtifacts: sessionArtifacts(),
@@ -920,8 +1364,20 @@ async function runTurn(
     ...(stopped === 'interrupted' && interruptReason !== undefined
       ? { interruptedBy: interruptReason }
       : {}),
-    ...(totalCostUsd !== undefined
-      ? { harnessMetadata: { 'claude-code': { costUsd: totalCostUsd } } }
+    ...(totalCostUsd !== undefined || session.lastClaudeSessionId !== undefined
+      ? {
+          harnessMetadata: {
+            'claude-code': {
+              ...(totalCostUsd !== undefined ? { costUsd: totalCostUsd } : {}),
+              // The conversation this turn belongs to, resumable outside the
+              // SDK with `claude --resume <sessionId>`. Upstream's field;
+              // `sessionArtifacts.sessionId` above is this host's.
+              ...(session.lastClaudeSessionId !== undefined
+                ? { sessionId: session.lastClaudeSessionId }
+                : {}),
+            },
+          },
+        }
       : {}),
   })
 }

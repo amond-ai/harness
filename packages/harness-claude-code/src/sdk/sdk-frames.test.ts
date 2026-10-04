@@ -59,6 +59,24 @@ describe('classifyFrame', () => {
       .toEqual({ kind: 'liveness', seq: 9 })
   })
 
+  it('reads the streamed tool input as liveness, not as an unreadable frame', () => {
+    // The host streams a tool call's arguments as they are generated (harness@1.0.138). They are
+    // evidence the turn is alive and nothing more: the record of the call is its `raw` message.
+    for (const [seq, part] of [
+      [21, { type: 'tool-input-start', id: 'toolu_1', toolName: 'bash', providerExecuted: true }],
+      [22, { type: 'tool-input-delta', id: 'toolu_1', delta: '{"command":"ls"}' }],
+      [23, { type: 'tool-input-end', id: 'toolu_1' }],
+    ] as const) {
+      expect(classifyFrame(JSON.stringify({ ...part, seq }))).toEqual({ kind: 'liveness', seq })
+    }
+  })
+
+  it('carries the summed response usage on a message_stop raw as one more transcript line', () => {
+    const rawValue = { type: 'stream_event', event: { type: 'message_stop' }, usage: { output_tokens: 5 } }
+    expect(classifyFrame(JSON.stringify({ type: 'raw', seq: 30, rawValue })))
+      .toEqual({ kind: 'transcript', seq: 30, line: `${JSON.stringify(rawValue)}\n` })
+  })
+
   it('reports a frame it cannot read rather than ending the turn on it', () => {
     expect(classifyFrame('{not json')).toMatchObject({ kind: 'unreadable' })
     expect(classifyFrame(JSON.stringify({ type: 'raw' }))).toMatchObject({ kind: 'unreadable' })

@@ -5,10 +5,12 @@ depended on: it must run inside the sandbox image against a pinned CLI, and the
 patches below are not upstream yet.
 
 - **Repository**: [vercel/ai](https://github.com/vercel/ai)
-- **Commit**: `3d3afacf9b587f5df1edd6cfdb91b3771d1c7e4e`
-- **Tag**: `@ai-sdk/harness-claude-code@1.0.90`
-- **Packages taken from**: `@ai-sdk/harness-claude-code@1.0.90`,
-  `@ai-sdk/harness@1.0.87`
+- **Commit**: `eb77f09e3c06c28e860d92e0de941b143c2eecec`
+- **Tag**: `@ai-sdk/harness-claude-code@1.0.142` (the same commit carries
+  `@ai-sdk/harness@1.0.138`)
+- **Packages taken from**: `@ai-sdk/harness-claude-code@1.0.142`,
+  `@ai-sdk/harness@1.0.138` (re-vendored from `1.0.90` / `1.0.87`; patches
+  26–34 below are the adaptations that re-vendor made)
 - **License**: Apache-2.0 (both packages)
 
 ## File-by-file mapping
@@ -21,6 +23,7 @@ patches below are not upstream yet.
 | `src/tool-filtering.ts` | `@ai-sdk/harness-claude-code/src/bridge/tool-filtering.ts` |
 | `src/claude-skills-option.ts` | `@ai-sdk/harness-claude-code/src/bridge/claude-skills-option.ts` |
 | `src/claude-code-system-prompt.ts` | `@ai-sdk/harness-claude-code/src/bridge/claude-code-system-prompt.ts` |
+| `src/question-tool.ts` | `@ai-sdk/harness-claude-code/src/bridge/question-tool.ts` (its `@ai-sdk/harness` type import repointed at `@amond-ai/harness-protocol`) |
 | `src/main.ts` | — (new; upstream's entry is `bridge/index.ts` itself) |
 | `src/permission-policy.ts` | — (new; the run's permission posture as a `PreToolUse` hook plus a `canUseTool` fallback, and the matcher that replays a human's approval) |
 | `src/session-artifacts.ts` | — (new; the paths of a turn's two durable artifacts — the CLI's session jsonl and the journal — including the CLI's project-directory encoding) |
@@ -34,8 +37,8 @@ below are those patches.
 
 That second harness is [`@amond-ai/harness-codex-bridge`](../harness-codex-bridge),
 which shares the numbering too: it reuses a number where its patch is the Codex
-side of the same change (3, 7, 8, 22) and takes fresh ones above 22 for what only
-Codex needed.
+side of the same change (3, 7, 8, 22) and took 23–25 for what only Codex needed.
+The 1.0.142 re-vendor's patches therefore start at 26 rather than 23.
 
 The wire protocol upstream keeps in `@ai-sdk/harness` and
 `claude-code-bridge-protocol.ts` lives in
@@ -59,7 +62,9 @@ Each is a separate commit in this repository and is intended to go upstream.
    `mcpToolUseIds` set it fed were unreachable.
 4. `feat(turn-host): emit every SDK message as a raw frame` — every SDK message
    except `stream_event` rides the wire verbatim as `{ type: 'raw', rawValue }`
-   ahead of the harness parts derived from it.
+   ahead of the harness parts derived from it. Since the 1.0.142 re-vendor the
+   frame is emitted at the top of `createEmitStreamEvent`, where upstream emits
+   its own raw frames (patch 26).
 6. `feat(turn-host): accept the SDK options on start` — `settingSources`, the
    SDK `permissionMode` enum, `persistSession`, `pathToClaudeCodeExecutable`,
    `maxBudgetUsd`, `sessionId`, `resume`, `emitDeltas`, `refuseTools`,
@@ -131,9 +136,6 @@ Each is a separate commit in this repository and is intended to go upstream.
     request it is owed about, and an answer authorizes one request rather than
     the tool.
 
-Upstream behaviour deliberately dropped: the `pnpm install` bootstrap inside the
-sandbox (the image ships the dependencies).
-
 22. `feat(turn-host): echo the interrupt reason on the ending it caused` — the
     host answered an `interrupt` with a `finish { stopped: 'interrupted' }`, or
     with a run-phase `error` when it escalated, and neither said *which* stop it
@@ -147,3 +149,138 @@ sandbox (the image ships the dependencies).
     `@amond-ai/harness-protocol`): on `finish` only beside
     `stopped: 'interrupted'`, so an SDK abort nobody asked for still names none;
     on the escalation `error` and on a query failure during the wind-down.
+
+26. `refactor(turn-host): forward raw frames from the stream-event mapper in
+    upstream's shape` and `feat(turn-host): pass task and tool-progress
+    messages through as raw only` — upstream forwards `task_*`,
+    `background_tasks_changed`, `tool_progress` and subagent messages raw from
+    `create-emit-stream-event.ts` and returns. Patch 4's generic raw frame moved
+    there, to the top of the mapper ahead of `stream-start`, and upstream's
+    branches only return: each SDK message still rides the wire raw exactly
+    once, ahead of every part derived from it. A subagent's `stream_event`s
+    are forwarded raw as upstream does, from inside the `parent_tool_use_id`
+    guard (the top-of-mapper raw skips every `stream_event`, so each still
+    yields one raw), and are journaled like every other raw frame (patch 27):
+    a live-only raw would put lines in the live mirror that the
+    journal-rebuilt transcript lacks. The cost is journal size — every
+    subagent token delta is a journal line, so for a client that reads the
+    journal through a bounded tail a long subagent stream pushes older lines
+    out of that window sooner.
+
+27. `feat(turn-host): meter steps from streamed usage and journal a
+    message_stop raw` — upstream's per-step metering and its `message_stop`
+    raw frame carrying the response's summed usage. Upstream sends it like any
+    frame; here it is the one stream_event-derived frame that is **not**
+    live-only (patch 5): a client's live mirror appends every `raw` it
+    receives, so the transcript rebuilt from the journal must carry the same
+    lines. The driver's live-only flag skips every `raw`.
+
+28. `fix(turn-host): fail a turn whose success result the CLI flagged as an
+    error` — upstream's `is_error` check, applied only when the ending would
+    otherwise read `completed`: an interrupted or deferred turn ends on an
+    error-shaped `result` by construction and keeps its `finish` with
+    `stopped`, `interruptedBy` and `deferredToolUse` (patches 8, 21, 22).
+
+29. `feat(turn-host): abort a turn through the graceful interrupt first` —
+    upstream's host-abort path (`interrupt()`, hard abort as the fallback after
+    five seconds or when `interrupt()` rejects). The fallback is upstream's
+    constant, not `interruptGraceMs`: its 30 s default would outlast the
+    bridge's ten-second teardown fence (patch 30).
+    Upstream reports nothing for an aborted turn and suppresses errors after
+    one; this host keeps the ending `fix(harness-claude-code-bridge): report a
+    host abort as an error, not a completed finish` introduced — a host `abort`
+    ends on a run-phase `error` carrying `sessionArtifacts`, never on a
+    `finish`, because a `finish` without a `terminal_reason` reads as
+    `completed`, which a client counts as success. The separate `interrupt`
+    command (patch 7) is unchanged.
+
+30. `feat(turn-host): fence a start on the aborted turn's teardown` —
+    upstream's `activeTurn` fence and `turnTeardownGraceMs` (ten seconds). A
+    start during a turn nobody aborted is still refused at once (patch 12); a
+    start during an aborted turn's teardown waits up to the grace, and where
+    upstream then lets the new turn overlap the old one, this bridge refuses it
+    with the same `start`-phase error. The fence itself is the runtime's half,
+    in `harness-bridge-runtime` under the same number; the five-second
+    hard-abort fallback it outlasts is patch 29.
+
+31. `feat(turn-host): answer AskUserQuestion through the host behind the run
+    policy` — upstream's question tool, `requestToolResult({ matches })`
+    buffering and the `askUserQuestions` names (also in `tool-filtering.ts`).
+    Upstream registers the question hook as its own `AskUserQuestion` matcher;
+    the SDK runs matching hooks in parallel, so here it runs inside the one
+    `PreToolUse` hook, **after** the run policy (patch 9, 21): a question the
+    policy decides — replayed denial or approval, `refuseTools`, `deferTools`
+    — never parks
+    the CLI on a host answer, and an undecided one goes to the host only under
+    `approvalPolicy: 'forward'`. Because the stream mapper leaves every
+    `AskUserQuestion` call to the hook, a question the host is not asked to
+    answer is reported as the runtime's own `tool-call` there.
+    Beyond upstream, whose buffer and pending requests live for the whole
+    bridge process: the bridge remembers every `toolCallId` a request took a
+    result under or was settled for, and drops a `tool-result` for one rather
+    than buffering it, and buffers one result per `toolCallId` (first wins, and
+    consuming one drops its duplicates), so a retransmitted answer cannot answer
+    a later, identical question through `matches`. Buffered results and pending
+    requests are scoped to the turn: on turn teardown (finish, error, abort,
+    interrupt) and on a new `start` the buffer is cleared and every pending
+    request is settled as an `isError` result, which the question hook turns
+    into a deny — never an answer — so a parked hook unblocks. Cross-id
+    `matches` replay therefore works only within one turn, which is its
+    purpose: an answer that arrives before the hook asked. Where upstream casts
+    the host's answer, the hook parses it with
+    `harnessV1QuestionsToolOutputSchema` and denies one the schema refuses, and
+    it leaves a call without a usable `questions` list (non-empty objects with
+    a string `question`, `options` objects with a string `label`) to the CLI's
+    own validation, still emitting the runtime's tool-call so the result has a
+    call. An answer is the selected labels then the trimmed free text, joined
+    by `, `; one with neither is left out of `answers`. Late or retransmitted
+    answers are dropped by tool call id, kept for the turn after the one that
+    consumed the id. The buffer, its turn scoping and the consumed-id memory
+    are the runtime's half, in `harness-bridge-runtime` under the same number;
+    the hook, the question translation and the answer parsing are this
+    package's.
+
+32. `feat(turn-host): bypass without canUseTool and with the stdio prompt
+    tool` — upstream's bypass shape (no `canUseTool`, `permissionPromptToolName:
+    'stdio'`), applied to the SDK's `bypassPermissions` as well as the
+    harness's `allow-all`. The run posture still binds there through the
+    `PreToolUse` hook, which runs ahead of the mode stage.
+
+33. `feat(turn-host): resume the exact session a start names or the bridge last
+    saw` — upstream's `resumeSessionId`, its last-observed session id and the
+    `bridge-stop` payload / `finish` `harnessMetadata['claude-code'].sessionId`
+    built from it. The id is held in the `createTurnDriver` closure, not at
+    module level (patch 2), and `createTurnDriver` returns the `onStop` that
+    reads it. `start.resume` (patch 6) is an alias: either name suppresses
+    `continue`, and two different names are a `start`-phase error.
+    `sessionArtifacts.sessionId` (patch 19) stays. Beyond upstream, which has
+    no `sessionId` option: the implicit pin applies only when a `start` names
+    none of `resume`, `resumeSessionId` and `sessionId`. A `start.sessionId`
+    with no resume name opens a fresh session under that id, with neither
+    `resume` nor `continue`, since the SDK documents `sessionId` as exclusive
+    of both. A `start.sessionId` together with `resume` or `resumeSessionId` is
+    a `start`-phase error, for the same reason.
+
+34. `feat(turn-host): report the CLI's structured tool result, without
+    originalFile` — upstream's `tool_use_result` for a message with exactly one
+    `tool_result` block, minus `originalFile`: `Edit`/`Write` put the whole
+    pre-edit file there, the raw `user` frame already journals it, and a
+    client may read that journal only through a bounded tail.
+
+Taken from upstream as-is in the same re-vendor: tool-input streaming (no
+host-tool branch, patch 3), non-array message content, non-text tool-result
+content and MCP scalars, `dynamic` on approval-gated external MCP calls,
+disposing the query with `return()` on every ending, and forwarding
+`agentProgressSummaries` / `forwardSubagentText`.
+
+## Upstream behaviour deliberately dropped
+
+- The `pnpm install` bootstrap inside the sandbox — the image ships the
+  dependencies.
+- Host-defined tools: the `@modelcontextprotocol/sdk` server,
+  `json-schema-to-zod.ts`, and every `mcp__harness-tools__` branch upstream
+  carries (patch 3), including 1.0.142's `HOST_TOOL_PREFIX` in
+  `isExternalMcpTool` and the tool-input stream.
+- Upstream's silence after a host abort: no `terminal error` suppression and
+  no missing ending (patch 29).
+- Upstream's overlap after the teardown grace (patch 30).

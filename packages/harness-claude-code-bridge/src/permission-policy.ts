@@ -5,10 +5,19 @@
  * production: the SDK's evaluation order is hooks → deny rules → ask rules →
  * mode → allow rules → `canUseTool`, and this deployment runs with the mode
  * stage allowing everything, so a refuse list installed on `canUseTool` alone
- * would be a silent no-op. `canUseTool` is still installed for every mode as
- * the belt-and-braces for postures that do reach it — and it never pends,
- * because a headless turn must not wait forever on a callback that is allowed
- * to.
+ * would be a silent no-op. Under `bypassPermissions` (and the harness's
+ * `allow-all`, which maps onto it) the hook is the only layer: upstream
+ * installs no `canUseTool` there, because the bypass guarantees the SDK never
+ * calls it, while hooks still run ahead of the mode stage. Every other mode
+ * still gets `canUseTool` as the belt-and-braces for postures that do reach it
+ * — and it never pends under `approvalPolicy: 'deny'`, because a headless turn
+ * must not wait forever on a callback that is allowed to.
+ *
+ * The evaluator below runs ahead of upstream's question flow in the same hook
+ * (`turn-driver.ts`): an `AskUserQuestion` it decides — deferred, refused, or
+ * answered by a replayed approval or denial — never parks the CLI on a host
+ * answer, and one it leaves undecided goes to the host only under
+ * `approvalPolicy: 'forward'`.
  *
  * A replayed answer is matched on the tool name and the structurally equal
  * input — the action a human actually approved — rather than on the deferred

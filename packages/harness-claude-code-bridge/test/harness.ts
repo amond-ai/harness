@@ -20,6 +20,8 @@ export interface FakeQuery {
   readonly options: Options | undefined
   /** How many times `interrupt()` was called. */
   readonly interruptCount: number
+  /** How many times the query was disposed through `return()`. */
+  readonly returnCount: number
   readonly called: boolean
   /** How many times `query()` was invoked — one per turn the driver started. */
   readonly callCount: number
@@ -50,6 +52,7 @@ export function createFakeQuery(
   let ended = false
   let options: Options | undefined
   let interruptCount = 0
+  let returnCount = 0
   let callCount = 0
 
   const push = (message: Record<string, unknown>): void => {
@@ -114,6 +117,10 @@ export function createFakeQuery(
     const query = {
       [Symbol.asyncIterator]: () => iterator,
       next: () => iterator.next(),
+      return: () => {
+        returnCount++
+        return Promise.resolve({ value: undefined, done: true })
+      },
       interrupt: () => {
         interruptCount++
         if (behaviour.resultOnInterrupt !== false) {
@@ -134,6 +141,9 @@ export function createFakeQuery(
     },
     get interruptCount() {
       return interruptCount
+    },
+    get returnCount() {
+      return returnCount
     },
     get called() {
       return callCount > 0
@@ -200,20 +210,27 @@ export interface Host {
 export async function startHost(input: {
   query: QueryFn
   exit?: (code: number) => void
+  abortFallbackMs?: number
+  turnTeardownGraceMs?: number
 }): Promise<Host> {
   const bridgeStateDir = await mkdtemp(join(tmpdir(), 'turn-host-test-'))
   const token = `t-${Math.random().toString(36).slice(2)}`
+  // Wired the way `main.ts` wires it, `onStop` included.
+  const driver = createTurnDriver({
+    query: input.query,
+    workdir: '/workspace/repo',
+    exit: input.exit ?? (() => {}),
+    abortFallbackMs: input.abortFallbackMs,
+  })
   const handle = await runBridge({
     bridgeType: 'claude-code',
     bridgeStateDir,
     port: 0,
     token,
-    onStart: createTurnDriver({
-      query: input.query,
-      workdir: '/workspace/repo',
-      exit: input.exit ?? (() => {}),
-    }),
+    onStart: driver,
+    onStop: driver.onStop,
     onExit: () => {},
+    turnTeardownGraceMs: input.turnTeardownGraceMs,
   })
   const journalPath = join(bridgeStateDir, 'event-log.ndjson')
   const sockets: WebSocket[] = []
