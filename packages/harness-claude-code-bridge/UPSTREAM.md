@@ -290,6 +290,14 @@ disposing the query with `return()` on every ending, and forwarding
     one rather than summed, because the SDK reports it as a running total.
     Upstream fixed the same sum in vercel/ai `a470e0dee` (#21896), unreleased at
     1.0.142.
+    An interrupt that lands while the turn already waits, before the CLI
+    wakes a turn for the settled work, gets no `result`: on CLI 2.1.289 the
+    idle CLI only stops the background work and resolves `interrupt()`. So
+    once that interrupt settles, the host closes the input. The CLI exits,
+    the stream ends, and the turn finishes as `interrupted` with
+    `interruptedBy`, instead of escalating to a run-phase error and `exit(1)`.
+    A main-thread message ends that idle span. An interrupt during the woken
+    turn aborts it, and its `result` closes the input as usual.
 
 ## Upstream behaviour deliberately dropped
 

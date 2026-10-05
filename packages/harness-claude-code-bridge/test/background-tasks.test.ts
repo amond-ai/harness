@@ -1,5 +1,5 @@
 import type { Frame, Host } from './harness'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import {
   connect,
   createFakeQuery,
@@ -156,4 +156,64 @@ it('ends a turn whose background task never settles through the watchdog interru
   expect(query.interruptCount).toBe(1)
   expect(finish.stopped).toBe('interrupted')
   expect(finish.interruptedBy).toBe('watchdog')
+})
+
+it('finishes as interrupted when an interrupt during the background wait gets no result', async () => {
+  // Measured on CLI 2.1.289: an idle CLI stops its background work on `interrupt()` and
+  // writes no `result`; it exits once its stdin closes.
+  const query = createFakeQuery([
+    initMessage(),
+    backgroundTasks([{ task_id: 'task-1' }]),
+    resultMessage(),
+  ], { resultOnInterrupt: false, endOnInputClose: true })
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  // A short grace, so an ending that relies on the escalation shows up as its error well
+  // within the test's own timeout.
+  client.send({ type: 'start', prompt: 'document the feature', interruptGraceMs: 2_000 })
+  await client.waitFor(frame => frame.type === 'raw'
+    && (frame.rawValue as { type: string }).type === 'result')
+  client.send({ type: 'interrupt', reason: 'watchdog' })
+  const ending = await client.waitFor(frame => frame.type === 'finish' || frame.type === 'error')
+
+  expect(ending).toMatchObject({ type: 'finish', stopped: 'interrupted', interruptedBy: 'watchdog' })
+  expect(query.interruptCount).toBe(1)
+})
+
+it('keeps the input open for the result of a woken turn the interrupt aborts', async () => {
+  // No result on the interrupt itself: the test writes the woken turn's `aborted_streaming`
+  // result only after the interrupt has settled, which is when an early close would have ended
+  // the stream ahead of it.
+  const query = createFakeQuery([
+    initMessage(),
+    backgroundTasks([{ task_id: 'task-1' }]),
+    resultMessage({ total_cost_usd: 0.01 }),
+  ], { resultOnInterrupt: false, endOnInputClose: true })
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'document the feature' })
+  await client.waitFor(frame => frame.type === 'raw'
+    && (frame.rawValue as { type: string }).type === 'result')
+  query.push(backgroundTasks([]))
+  query.push(taskNotification('task-1'))
+  // The settled task woke the main thread: a turn is in flight now.
+  query.push({
+    type: 'assistant',
+    message: { content: [{ type: 'text', text: 'opening the pull request' }] },
+    parent_tool_use_id: null,
+    session_id: 'sess-1',
+  })
+  await client.waitFor(frame => frame.type === 'raw'
+    && (frame.rawValue as { type: string }).type === 'assistant')
+
+  client.send({ type: 'interrupt', reason: 'watchdog' })
+  await vi.waitFor(() => expect(query.interruptCount).toBe(1))
+  query.push(resultMessage({ terminal_reason: 'aborted_streaming', total_cost_usd: 0.04 }))
+  const ending = await client.waitFor(frame => frame.type === 'finish' || frame.type === 'error')
+
+  expect(ending).toMatchObject({ type: 'finish', stopped: 'interrupted', interruptedBy: 'watchdog' })
+  // The aborted turn's result was read: its running total, not the one before the wake.
+  expect(ending.harnessMetadata).toEqual({ 'claude-code': { costUsd: 0.04, sessionId: 'sess-1' } })
 })

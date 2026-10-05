@@ -1029,6 +1029,18 @@ async function runTurn({
    * the CLI child — report the run phase, and exit non-zero so the Worker's
    * own SIGTERM path takes over from a known state.
    */
+  /*
+   * Background work the turn must outlive. The count is the live set of the last
+   * `background_tasks_changed`, which is a level signal: it replaces rather than accumulates, and
+   * starts empty because this turn's query is a fresh CLI process. `awaitingBackground` holds
+   * from a `result` that left work running until the `result` that ends the turn. That span
+   * includes the turn the CLI wakes when the work settles; `backgroundWaitIdle` is the part of it
+   * before that turn starts, when the CLI runs no turn at all. Declared ahead of the
+   * interrupt handler, which reads them.
+   */
+  let liveBackgroundTasks = 0
+  let awaitingBackground = false
+  let backgroundWaitIdle = false
   let interruptRequested = false
   // Remembered rather than only acted on: the ending this host reports echoes the reason back,
   // because the Worker's own memory of the stop it asked for does not survive a step that never
@@ -1043,9 +1055,24 @@ async function runTurn({
     }
     interruptRequested = true
     interruptReason = reason
-    void Promise.resolve(q.interrupt()).catch((err) => {
-      turn.emitWarning({ message: `interrupt (${reason}) failed: ${String(err)}` })
-    })
+    void Promise.resolve(q.interrupt())
+      .catch((err) => {
+        turn.emitWarning({ message: `interrupt (${reason}) failed: ${String(err)}` })
+      })
+      .finally(() => {
+        /*
+         * While the turn waits on background work and the CLI has not yet woken a turn for it,
+         * no turn is in flight, and the CLI answers this interrupt with no `result` (as
+         * measured on CLI 2.1.289): it only stops the background work. Closing the input once the
+         * interrupt has gone out lets the idle CLI exit, which ends the stream, and the turn
+         * finishes as `interrupted` instead of escalating. Not before the interrupt settles: it
+         * travels over the same stdin. Once the woken turn runs, the interrupt aborts it, and its
+         * `result` closes the input as any interrupted turn's does.
+         */
+        if (backgroundWaitIdle) {
+          queryInput.close()
+        }
+      })
     escalation = setTimeout(() => {
       emit({
         type: 'error',
@@ -1065,14 +1092,6 @@ async function runTurn({
 
   let turnUsage: Record<string, unknown> | undefined
   let totalCostUsd: number | undefined
-  /*
-   * Background work the turn must outlive. The count is the live set of the last
-   * `background_tasks_changed`, which is a level signal: it replaces rather than accumulates, and
-   * starts empty because this turn's query is a fresh CLI process. `awaitingBackground` holds
-   * from a `result` that left work running until the `result` that ends the turn.
-   */
-  let liveBackgroundTasks = 0
-  let awaitingBackground = false
   let initCheckFailed = false
   let emittedTerminalFinish = false
 
@@ -1150,6 +1169,15 @@ async function runTurn({
 
       if (type === 'system' && msg.subtype === 'background_tasks_changed') {
         liveBackgroundTasks = countActiveBackgroundTasks(msg)
+      }
+
+      // The main thread speaking again is the woken turn. A background subagent's messages carry
+      // its `parent_tool_use_id` and leave the CLI as idle as before.
+      if (
+        (type === 'assistant' || type === 'user' || type === 'stream_event')
+        && (msg as { parent_tool_use_id?: string | null }).parent_tool_use_id == null
+      ) {
+        backgroundWaitIdle = false
       }
 
       // `emitStreamEvent` forwards the message itself as a `raw` frame, ahead
@@ -1259,7 +1287,9 @@ async function runTurn({
            * - this result is one of a batch of completions answered together. All but the last
            *   of them are empty (`num_turns: 0`), and the last carries the turn.
            * A stop the host asked for never waits. Without `perTaskStopAffordance` the
-           * interrupt stops the background work too, and its result ends the turn. A deferred
+           * interrupt stops the background work too. One that lands while the turn already waits,
+           * before the CLI wakes a turn, gets no result, and the interrupt handler closes the
+           * input instead. A deferred
            * or SDK-interrupted result never waits either: the caller routes the deferral.
            */
           awaitingBackground = !interruptRequested
@@ -1267,6 +1297,7 @@ async function runTurn({
             && !turn.abortSignal.aborted
             && (liveBackgroundTasks > 0
               || (awaitingBackground && isBatchedTaskNotificationResult(msg)))
+          backgroundWaitIdle = awaitingBackground
           if (!awaitingBackground && !queryInput.hasActiveUserMessages()) {
             queryInput.close()
             break

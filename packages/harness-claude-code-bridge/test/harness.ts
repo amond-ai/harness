@@ -41,6 +41,11 @@ export interface FakeQueryOptions {
    * answers at all, which is the case the host's escalation timer exists for.
    */
   resultOnInterrupt?: false | Record<string, unknown>
+  /**
+   * End the stream once the driver's input ends, the way the real CLI exits when its stdin
+   * closes while it is idle. Off by default: the script decides where a stream ends.
+   */
+  endOnInputClose?: boolean
 }
 
 export function createFakeQuery(
@@ -91,6 +96,27 @@ export function createFakeQuery(
         resolve({ value: undefined, done: true })
       }
     }, { once: true })
+    // Per call, for the same reason the abort listener above does not call `end()`: the input
+    // that closed is this turn's, and a later turn on the same fake has its own.
+    let inputEnded = false
+    if (behaviour.endOnInputClose && typeof params.prompt !== 'string') {
+      void (async () => {
+        for await (const _message of params.prompt as AsyncIterable<unknown>) {
+          // Drained only to observe the end of input.
+        }
+      })()
+        .catch(() => {
+          // An input that fails has ended as surely as one that closed.
+        })
+        .finally(() => {
+          inputEnded = true
+          if (waiter) {
+            const resolve = waiter
+            waiter = undefined
+            resolve({ value: undefined, done: true })
+          }
+        })
+    }
     const iterator: AsyncIterator<SDKMessage> = {
       next: () => {
         // An abort tears the real SDK's child down, so anything still queued when it lands is
@@ -106,7 +132,7 @@ export function createFakeQuery(
             done: false,
           })
         }
-        if (ended) {
+        if (ended || inputEnded) {
           return Promise.resolve({ value: undefined, done: true })
         }
         return new Promise<IteratorResult<SDKMessage>>((resolve) => {
