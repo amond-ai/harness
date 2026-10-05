@@ -1065,6 +1065,14 @@ async function runTurn({
 
   let turnUsage: Record<string, unknown> | undefined
   let totalCostUsd: number | undefined
+  /*
+   * Background work the turn must outlive. The count is the live set of the last
+   * `background_tasks_changed`, which is a level signal: it replaces rather than accumulates, and
+   * starts empty because this turn's query is a fresh CLI process. `awaitingBackground` holds
+   * from a `result` that left work running until the `result` that ends the turn.
+   */
+  let liveBackgroundTasks = 0
+  let awaitingBackground = false
   let initCheckFailed = false
   let emittedTerminalFinish = false
 
@@ -1140,6 +1148,10 @@ async function runTurn({
         deferredToolUse = result.deferred_tool_use
       }
 
+      if (type === 'system' && msg.subtype === 'background_tasks_changed') {
+        liveBackgroundTasks = countActiveBackgroundTasks(msg)
+      }
+
       // `emitStreamEvent` forwards the message itself as a `raw` frame, ahead
       // of the parts it derives from it.
       derivedFromStreamEvent = type === 'stream_event'
@@ -1212,8 +1224,10 @@ async function runTurn({
           if (harnessUsage) {
             turnUsage = addUsage(turnUsage, harnessUsage)
           }
+          // A running total across the turns of a streaming-input session, so the latest
+          // result's value is the turn's — summing counted every earlier result again.
           if (typeof msg.total_cost_usd === 'number') {
-            totalCostUsd = (totalCostUsd ?? 0) + msg.total_cost_usd
+            totalCostUsd = msg.total_cost_usd
           }
           if (
             start.responseFormat?.type === 'json'
@@ -1237,7 +1251,23 @@ async function runTurn({
             })
           }
           queryInput.observeResult()
-          if (!queryInput.hasActiveUserMessages()) {
+          /*
+           * A `result` that leaves background work running is not the turn's end: the
+           * CLI wakes the model with a `task-notification` turn when the work settles, and
+           * closing the input here kills that work with the process. Two cases wait:
+           * - work is still running;
+           * - this result is one of a batch of completions answered together. All but the last
+           *   of them are empty (`num_turns: 0`), and the last carries the turn.
+           * A stop the host asked for never waits. Without `perTaskStopAffordance` the
+           * interrupt stops the background work too, and its result ends the turn. A deferred
+           * or SDK-interrupted result never waits either: the caller routes the deferral.
+           */
+          awaitingBackground = !interruptRequested
+            && stoppedFromTerminalReason(terminalReason) === 'completed'
+            && !turn.abortSignal.aborted
+            && (liveBackgroundTasks > 0
+              || (awaitingBackground && isBatchedTaskNotificationResult(msg)))
+          if (!awaitingBackground && !queryInput.hasActiveUserMessages()) {
             queryInput.close()
             break
           }
@@ -1253,7 +1283,13 @@ async function runTurn({
         continue
       }
 
-      if (queryInput.hasObservedResult && !queryInput.hasActiveUserMessages()) {
+      // While background work holds the turn open, every message up to the next `result` is
+      // part of it: the settled task's `task_notification` and the turn it wakes.
+      if (
+        queryInput.hasObservedResult
+        && !awaitingBackground
+        && !queryInput.hasActiveUserMessages()
+      ) {
         queryInput.close()
         break
       }
@@ -1515,6 +1551,31 @@ function createQueryInput({
       },
     },
   }
+}
+
+/**
+ * How many tasks of a `background_tasks_changed` set are activity. `ambient` tasks are excluded,
+ * as the SDK asks: every `skip_transcript` task and every live-update watcher. They are not work
+ * a turn waits on, and a watcher may never settle.
+ */
+function countActiveBackgroundTasks(message: ClaudeMessage): number {
+  const tasks = (message as { tasks?: unknown }).tasks
+  if (!Array.isArray(tasks)) {
+    return 0
+  }
+  return tasks.filter(task =>
+    (task as { ambient?: unknown } | null)?.ambient !== true,
+  ).length
+}
+
+/**
+ * Whether a `result` is one of the empty results the CLI writes when it answers several
+ * background-task completions in one turn. Each completion gets its own result with the
+ * `task-notification` origin. All but the last have `num_turns: 0`, and the last carries the turn.
+ */
+function isBatchedTaskNotificationResult(message: ClaudeMessage): boolean {
+  const result = message as { origin?: { kind?: unknown }, num_turns?: unknown }
+  return result.origin?.kind === 'task-notification' && result.num_turns === 0
 }
 
 function addUsage(

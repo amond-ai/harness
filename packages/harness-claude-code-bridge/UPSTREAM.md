@@ -273,6 +273,24 @@ content and MCP scalars, `dynamic` on approval-gated external MCP calls,
 disposing the query with `return()` on every ending, and forwarding
 `agentProgressSummaries` / `forwardSubagentText`.
 
+35. `fix(turn-host): end a turn only after its background tasks settle` —
+    upstream ends the turn on the first `result`: it closes the streaming input
+    and disposes the query, which kills a subagent or shell the CLI ran in the
+    background. The SDK runs an `Agent` call without `run_in_background` in the
+    background by default. The host now tracks the live set from
+    `background_tasks_changed`, which is a level signal with replace semantics.
+    `ambient` entries are not counted. A `result` that leaves work running keeps
+    the input open, as do the empty `num_turns: 0` results the CLI writes when
+    it answers several `task-notification` completions in one turn. Both exit
+    paths, the `result` and the message after one, wait until a later `result`
+    ends the turn. A stop the host asked for never waits: without
+    `perTaskStopAffordance` the interrupt stops the background work too. A
+    deferred or SDK-interrupted result never waits either. Since a
+    turn can now carry several results, `total_cost_usd` is taken from the latest
+    one rather than summed, because the SDK reports it as a running total.
+    Upstream fixed the same sum in vercel/ai `a470e0dee` (#21896), unreleased at
+    1.0.142.
+
 ## Upstream behaviour deliberately dropped
 
 - The `pnpm install` bootstrap inside the sandbox — the image ships the
