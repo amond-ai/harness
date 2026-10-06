@@ -89,12 +89,13 @@ export async function enterRound(
  *
  * `timeoutMs` bounds the connect and the greeting each: {@link BRIDGE_CONNECT_TIMEOUT_MS}, or the
  * short {@link SPENT_BUDGET_CONNECT_TIMEOUT_MS} for a round that was entered over budget. The
- * greeting's `state` and `lastSeq` come back with the channel, for the early interrupt that acts on them.
+ * greeting's `state`, `lastSeq` and whether it acknowledges a `resume` (`resumeAck`) come
+ * back with the channel, for the early interrupt that acts on them.
  */
 export async function openChannel(
   input: AttachRoundInput,
   timeoutMs: number,
-): Promise<{ channel: TurnChannel, hostState: string | undefined, lastSeq: number | undefined } | undefined> {
+): Promise<{ channel: TurnChannel, hostState: string | undefined, lastSeq: number | undefined, resumeAck: boolean } | undefined> {
   let channel: TurnChannel
   const dial = input.connect()
   try {
@@ -125,7 +126,7 @@ export async function openChannel(
     channel.close()
     return undefined
   }
-  return { channel, hostState: greeting.state, lastSeq: greeting.lastSeq }
+  return { channel, hostState: greeting.state, lastSeq: greeting.lastSeq, resumeAck: greeting.resumeAck === true }
 }
 
 /**

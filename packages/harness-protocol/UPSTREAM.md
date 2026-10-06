@@ -133,6 +133,18 @@ export it.
    `claude-code.ts` duplicates the six `harness-v1/*` lines the way `codex.ts`
    does, for the reason recorded there.
 
+7. `feat(harness-protocol): acknowledge the end of a resume replay` —
+   `harness-v1-bridge-protocol.ts` adds `capabilities.resumeAck` to
+   `bridge-hello` and a `bridge-resumed { upTo }` control frame to the outbound
+   union. A bridge that advertises the capability sends `bridge-resumed` after
+   the replay a `resume` asked for: every journaled frame at or below `upTo` the
+   client had not seen is ahead of it, and every later frame follows it. It is
+   not journaled and carries no `seq`. Without it a client has no replay
+   boundary and has to approximate one from the greeting's `lastSeq`, which
+   also counts live-only frames a replay never sends. This is the one edit to a
+   vendored `harness-v1/` file; it lives there because the frame is part of
+   the shared bridge protocol, so the root and both adapter entries carry it.
+
 One upstream field is deliberately not taken as-is: `claude-code-bridge-protocol.ts`
 declares `thinking` without `.optional()`, so its schema refuses every `start`
 that omits it. `src/protocol.ts` reuses `.shape.thinking` and makes it optional

@@ -1,6 +1,8 @@
+import type { WebSocket } from 'ws'
 import type { Host } from './harness'
 import { readFileSync } from 'node:fs'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
+import { WebSocketServer } from 'ws'
 import {
   connect,
   createFakeQuery,
@@ -575,4 +577,139 @@ it('journals every replayed frame before the resumed socket sees it', async () =
 
   expect(unjournaled).toEqual([])
   first.close()
+})
+
+/*
+ * The replay boundary (`harness-bridge-runtime` UPSTREAM.md patch 36). A client that has to
+ * stop a turn right after the replay cannot find its end from `lastSeq`, which counts live-only
+ * frames no replay sends, so the bridge says where it is.
+ */
+it('advertises the resume acknowledgement in its greeting', async () => {
+  host = await startHost({ query: createFakeQuery([]).fn })
+  const client = await connect(host)
+
+  const hello = await client.waitFor(frame => frame.type === 'bridge-hello')
+  expect(hello.capabilities).toMatchObject({ resumeAck: true })
+  client.close()
+})
+
+it('ends a replayed tail with bridge-resumed naming the boundary it covered', async () => {
+  const query = createFakeQuery([initMessage(), resultMessage()])
+  host = await startHost({ query: query.fn })
+  const first = await connect(host)
+  first.send({ type: 'start', prompt: 'do the thing' })
+  const finish = await first.waitFor(frame => frame.type === 'finish')
+
+  const second = await connect(host)
+  second.send({ type: 'resume', lastSeenEventId: 1 })
+  const resumed = await second.waitFor(frame => frame.type === 'bridge-resumed')
+
+  expect(resumed).toEqual({ type: 'bridge-resumed', upTo: finish.seq })
+  const replayed = second.frames.slice(second.frames.findIndex(frame => frame.type === 'bridge-hello') + 1)
+  // The tail past the cursor, in order, and the ack after the last of it.
+  expect(replayed.map(frame => frame.seq)).toEqual([
+    ...Array.from({ length: finish.seq! - 1 }, (_, index) => index + 2),
+    undefined,
+  ])
+  expect(replayed.at(-1)?.type).toBe('bridge-resumed')
+  second.close()
+  first.close()
+})
+
+it('acknowledges a resume that has nothing to replay', async () => {
+  const query = createFakeQuery([initMessage(), resultMessage()])
+  host = await startHost({ query: query.fn })
+  const first = await connect(host)
+  first.send({ type: 'start', prompt: 'do the thing' })
+  const finish = await first.waitFor(frame => frame.type === 'finish')
+
+  const second = await connect(host)
+  second.send({ type: 'resume', lastSeenEventId: finish.seq })
+  const resumed = await second.waitFor(frame => frame.type === 'bridge-resumed')
+
+  expect(resumed).toEqual({ type: 'bridge-resumed', upTo: finish.seq })
+  expect(second.frames.filter(frame => frame.seq !== undefined)).toEqual([])
+  second.close()
+  first.close()
+})
+
+it('sends a frame emitted after the resume behind the acknowledgement', async () => {
+  const query = createFakeQuery([initMessage()])
+  host = await startHost({ query: query.fn })
+  const first = await connect(host)
+  first.send({ type: 'start', prompt: 'do the thing' })
+  await first.waitFor(frame => frame.type === 'raw')
+
+  const second = await connect(host)
+  second.send({ type: 'resume', lastSeenEventId: 0 })
+  await second.waitFor(frame => frame.type === 'bridge-resumed')
+  query.push({ type: 'assistant', message: { content: [{ type: 'text', text: 'later' }] } })
+  query.push(resultMessage())
+  await second.waitFor(frame => frame.type === 'finish')
+
+  const types = second.frames.map(frame => frame.type)
+  const ack = types.indexOf('bridge-resumed')
+  const upTo = second.frames[ack]?.upTo as number
+  expect(ack).toBeGreaterThan(0)
+  // Everything at or below the boundary is ahead of the ack, everything past it behind.
+  second.frames.forEach((frame, index) => {
+    if (frame.seq !== undefined) {
+      expect(frame.seq <= upTo).toBe(index < ack)
+    }
+  })
+  expect(second.frames.slice(ack + 1).some(frame => frame.type === 'finish')).toBe(true)
+  second.close()
+  first.close()
+})
+
+it('keeps the frame chain alive when a replayed send throws', async () => {
+  // Capture the bridge's own sockets: under bun they are not `ws` WebSocket instances, so the
+  // throw has to be planted on the one socket, not on a prototype.
+  const accepted: WebSocket[] = []
+  const on = WebSocketServer.prototype.on
+  const spy = vi.spyOn(WebSocketServer.prototype, 'on').mockImplementation(function (this: WebSocketServer, event: string | symbol, listener: (...args: any[]) => void) {
+    if (event !== 'connection') {
+      return on.call(this, event, listener)
+    }
+    return on.call(this, event, (ws: WebSocket, ...rest: unknown[]) => {
+      accepted.push(ws)
+      listener(ws, ...rest)
+    })
+  })
+  try {
+    const query = createFakeQuery([initMessage(), resultMessage()])
+    host = await startHost({ query: query.fn })
+    const first = await connect(host)
+    first.send({ type: 'start', prompt: 'do the thing' })
+    const finish = await first.waitFor(frame => frame.type === 'finish')
+
+    const second = await connect(host)
+    await second.waitFor(frame => frame.type === 'bridge-hello')
+    const failing = accepted.at(-1)!
+    const send = failing.send.bind(failing)
+    failing.send = ((data: string, ...rest: never[]) => {
+      if (data.includes('"seq":')) {
+        throw new Error('socket went away')
+      }
+      return send(data, ...rest)
+    }) as WebSocket['send']
+    second.send({ type: 'resume', lastSeenEventId: 0 })
+    // Its tail is counted as delivered, so the socket is dropped rather than left to take
+    // later frames past the gap: the host reconnects and resumes from what it really has.
+    await second.closed
+
+    // A later resume still runs: the throw did not reject the chain it sits behind.
+    const third = await connect(host)
+    third.send({ type: 'resume', lastSeenEventId: 0 })
+    const resumed = await third.waitFor(frame => frame.type === 'bridge-resumed')
+
+    expect(resumed).toEqual({ type: 'bridge-resumed', upTo: finish.seq })
+    // The tail that failed is not acknowledged, so it is never read as a boundary.
+    expect(second.frames.some(frame => frame.type === 'bridge-resumed')).toBe(false)
+    third.close()
+    first.close()
+  }
+  finally {
+    spy.mockRestore()
+  }
 })

@@ -237,4 +237,24 @@ describe('the turn host\'s outbound union', () => {
       expect(turnHostOutboundMessageSchema.safeParse(frame).success).toBe(true)
     }
   })
+
+  it('keeps the resume-ack capability a greeting advertises', () => {
+    const hello = { type: 'bridge-hello', state: 'running', lastSeq: 7, capabilities: { resumeAck: true } }
+    expect(harnessV1BridgeOutboundMessageSchema.parse(hello)).toMatchObject({ capabilities: { resumeAck: true } })
+    expect(turnHostOutboundMessageSchema.parse(hello)).toMatchObject({ capabilities: { resumeAck: true } })
+  })
+
+  /*
+   * The replay boundary. Validated by both unions, because the client reads it through
+   * the extended one and the upstream-shaped one is what the host's own frames are checked
+   * against; a `bridge-resumed` that either refused would be read as unreadable and the round
+   * would wait out the ack's timeout for a frame it already had.
+   */
+  it('accepts a resume acknowledgement and refuses one that names no boundary', () => {
+    const resumed = { type: 'bridge-resumed', upTo: 12 }
+    expect(harnessV1BridgeOutboundMessageSchema.parse(resumed)).toEqual(resumed)
+    expect(turnHostOutboundMessageSchema.parse(resumed)).toEqual(resumed)
+    expect(turnHostOutboundMessageSchema.safeParse({ type: 'bridge-resumed' }).success).toBe(false)
+    expect(turnHostOutboundMessageSchema.safeParse({ type: 'bridge-resumed', upTo: '12' }).success).toBe(false)
+  })
 })

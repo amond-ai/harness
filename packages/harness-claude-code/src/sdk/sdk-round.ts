@@ -35,7 +35,7 @@ import { classifyFrame, isNoRunningTurnReply } from './sdk-frames'
 import { enterRound, openChannel } from './sdk-round-dial'
 import { judgeAfterNoTurn, stopFoundNoTurn, unreachableEnded } from './sdk-round-noturn'
 import { nextFrame, reportFrame } from './sdk-round-observe'
-import { armEarlyJudge, settling, sliceOf } from './sdk-round-settle'
+import { armEarlyJudge, resumeAcknowledged, settling, sliceOf } from './sdk-round-settle'
 import { applyFrame, interruptedResult, observedResult, roundEnded } from './sdk-round-state'
 import { abandoned, budgetOutranks, inheritedCause, timeoutCauseOf } from './sdk-round-verdict'
 
@@ -96,6 +96,11 @@ export interface PumpContext {
   earlyJudgeAt?: number
   /** When that interrupt may go out at the earliest: `RESUME_SETTLE_MS` after the `resume`. */
   earlyJudgeNotBefore?: number
+  /**
+   * For a host that acknowledges `resume`, when its `bridge-resumed` is due by: every judge is
+   * held until it arrives or this passes (`RESUME_ACK_TIMEOUT_MS`).
+   */
+  resumeAckBy?: number
   /** Set once the Worker has asked for a stop, so the pump stops asking again. */
   interruptedBy?: TurnTimeoutCause
   /**
@@ -125,10 +130,10 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
       }
       const dialed = await openChannel(input, dialTimeoutMs)
       if (dialed !== undefined) {
-        const { channel, hostState, lastSeq } = dialed
+        const { channel } = dialed
         try {
           channel.send({ type: 'resume', lastSeenEventId: context.state.since })
-          armEarlyJudge(context, spentAtEntry, hostState, lastSeq)
+          armEarlyJudge(context, spentAtEntry, dialed)
           const ending = await pump(channel, context)
           if (ending !== 'disconnected') {
             return context.state
@@ -251,8 +256,8 @@ async function quietSample(channel: TurnChannel, context: PumpContext): Promise<
 }
 
 /**
- * The cadence's judge, held back while the resume is still settling and for a round whose suspend
- * is requested.
+ * The cadence's judge, held back while the resume is still settling or its acknowledgement is
+ * awaited, and for a round whose suspend is requested.
  *
  * Both guards are checked here, after whatever the caller awaited: a stop sent inside the settle
  * window could be recorded as the cause of an ending the host reached on its own, and a suspend
@@ -265,7 +270,8 @@ async function judgeIfDue(channel: TurnChannel, context: PumpContext): Promise<b
 
 /**
  * The interrupt a round entered over budget owes its host, once the replay has reached
- * `earlyJudgeAt` and the resume has settled. The guard against a requested suspend is
+ * `earlyJudgeAt` and the resume has settled — or, on a host that acknowledges `resume`,
+ * once its `bridge-resumed` is in. The guard against a requested suspend is
  * {@link judgeIfDue}'s.
  */
 async function earlyJudge(channel: TurnChannel, context: PumpContext): Promise<boolean> {
@@ -275,6 +281,7 @@ async function earlyJudge(channel: TurnChannel, context: PumpContext): Promise<b
   }
   context.earlyJudgeAt = undefined
   context.earlyJudgeNotBefore = undefined
+  context.resumeAckBy = undefined
   return await judgeIfDue(channel, context)
 }
 
@@ -288,6 +295,9 @@ async function consume(frame: string, context: PumpContext): Promise<boolean> {
   }
   if (isNoRunningTurnReply(effect)) {
     return stopFoundNoTurn(context)
+  }
+  if (effect.kind === 'resumed') {
+    return resumeAcknowledged(context)
   }
   reportFrame(frame, 'seq' in effect ? effect.seq : undefined, context.input.onFrame)
   if (effect.kind === 'log') {

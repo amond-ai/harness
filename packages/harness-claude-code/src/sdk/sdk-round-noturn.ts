@@ -29,9 +29,14 @@ import { unreachableTimeout } from './sdk-round-verdict'
  * that never ends after the reply would otherwise be re-stopped, and re-answered, by every later
  * round. The round's deadline is held past that bound so the window cannot cut it short.
  *
- * The one case left is the real terminal arriving *before* this reply — a replay later than the
- * settle that is an un-echoed run error. That is read as the escalation, as any interrupt racing
- * a turn that fails at the same instant is.
+ * A host that acknowledges `resume` is sent the early interrupt only once its
+ * `bridge-resumed` is in, so on it this reply covers only the race any interrupt has with a turn
+ * ending at the same instant — unless no acknowledgement comes within `RESUME_ACK_TIMEOUT_MS`, in
+ * which case the early interrupt falls back to the `lastSeq` target and the reply covers what it
+ * does on an older host. On a host older than the acknowledgement, whose early interrupt still
+ * rests on the settle and `lastSeq`, it also covers a replay later than the settle. The one case left there is
+ * the real terminal arriving *before* this reply — a late replay that is an un-echoed run error.
+ * That is read as the escalation, as any interrupt racing a turn that fails at the same instant is.
  */
 export function stopFoundNoTurn(context: PumpContext): false {
   const cause = context.interruptedBy

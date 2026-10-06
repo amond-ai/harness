@@ -55,7 +55,10 @@ export type TerminalObservation
  * arrival, not frame kind.
  */
 export type FrameEffect
-  = | { kind: 'hello', state?: string, lastSeq?: number }
+  // `resumeAck` is present, and `true`, only when the greeting advertised the capability.
+  = | { kind: 'hello', state?: string, lastSeq?: number, resumeAck?: boolean }
+    // The end of a resume's replay, from a host whose greeting advertised `resumeAck`.
+    | { kind: 'resumed', upTo: number }
     | { kind: 'transcript', seq?: number, line: string }
     | { kind: 'liveness', seq?: number }
     | { kind: 'log', stream: 'stdout' | 'stderr', line: string }
@@ -121,7 +124,11 @@ function effectOf(frame: Record<string, unknown>, seq: number | undefined): Fram
         kind: 'hello',
         state: typeof frame.state === 'string' ? frame.state : undefined,
         lastSeq: typeof frame.lastSeq === 'number' ? frame.lastSeq : undefined,
+        ...resumeAckOf(frame),
       }
+    case 'bridge-resumed':
+      // The schema has already refused one without a numeric `upTo` as unreadable.
+      return { kind: 'resumed', upTo: frame.upTo as number }
     case 'raw':
       // The SDK's messages *are* the CLI's `stream-json` lines, so one `raw` re-emits one line
       // of the NDJSON every existing consumer already decodes (D2, "the same NDJSON").
@@ -161,6 +168,16 @@ function effectOf(frame: Record<string, unknown>, seq: number | undefined): Fram
     default:
       return { kind: 'liveness', seq }
   }
+}
+
+/**
+ * Whether the greeting says the host acknowledges a `resume` with `bridge-resumed`, as a
+ * spreadable fragment: the key is left out for a host that does not, which is every host older
+ * than the capability.
+ */
+function resumeAckOf(frame: Record<string, unknown>): { resumeAck?: true } {
+  const capabilities = frame.capabilities as { resumeAck?: unknown } | undefined
+  return capabilities?.resumeAck === true ? { resumeAck: true } : {}
 }
 
 /**

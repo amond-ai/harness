@@ -795,6 +795,13 @@ export async function runBridge<TStart extends { type: 'start' }>(
    * token deltas) queued at the moment of the resume: it is not in `eventLog`,
    * so nothing replays it. That matches what a resume already means for those
    * frames, which are liveness, not transcript, and are never replayed.
+   *
+   * The tail ends in `bridge-resumed { upTo }`, sent from the same chain step.
+   * That placement is what makes it a boundary: it goes out behind the
+   * claimed entries, and ahead of the send step of any frame emitted later, so
+   * the host knows the replay is over without guessing from `lastSeq` — which
+   * counts the live-only frames above that no replay sends. It goes out even
+   * when there was nothing to replay, is not journaled, and takes no `seq`.
    */
   const replay = (ws: WebSocket, afterSeq: number): void => {
     const upTo = seqCounter
@@ -802,11 +809,32 @@ export async function runBridge<TStart extends { type: 'start' }>(
     // even when the log holds nothing newer to send.
     deliveredSeq = Math.max(afterSeq, upTo)
     journalChain = journalChain.then(() => {
-      for (const entry of eventLog) {
-        if (entry.seq > afterSeq && entry.seq <= upTo && ws.readyState === WS_OPEN) {
-          ws.send(entry.line)
+      try {
+        for (const entry of eventLog) {
+          if (entry.seq > afterSeq && entry.seq <= upTo && ws.readyState === WS_OPEN) {
+            ws.send(entry.line)
+          }
         }
       }
+      catch {
+        // Best-effort, as the chain's own send step is: a throw here would reject
+        // `journalChain` and skip every later append and send. But the mark above
+        // already counts the whole tail as delivered, so this socket must not stay
+        // the stream owner: later frames would reach it past the gap. Detach it now
+        // and close it, so the host reconnects and resumes from what it has; the log
+        // still holds the tail. No acknowledgement follows a tail that did not go out.
+        if (activeSocket === ws) {
+          activeSocket = undefined
+        }
+        try {
+          ws.close(1011, 'resume replay failed')
+        }
+        catch {
+          // already going away
+        }
+        return
+      }
+      sendControl(ws, { type: 'bridge-resumed', upTo })
     })
   }
 
@@ -1377,7 +1405,7 @@ export async function runBridge<TStart extends { type: 'start' }>(
       type: 'bridge-hello',
       state: currentTurnState,
       lastSeq: seqCounter,
-      capabilities: { experimental_userMessageResponses: true },
+      capabilities: { experimental_userMessageResponses: true, resumeAck: true },
     })
 
     ws.on('message', (raw: ArrayBufferLike | string) => {

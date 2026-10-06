@@ -151,6 +151,24 @@ are where it departs.
     `matches`. What the adapter does with the answer stayed with the Claude
     bridge under the same number.
 
+36. `feat(turn-host): acknowledge the end of a resume replay` — upstream's
+    `resume` replays the tail and says nothing, so a client cannot tell where
+    the replay ends. The runtime now advertises `capabilities.resumeAck` in
+    `bridge-hello` and ends every replay with `bridge-resumed { upTo }`
+    (`harness-protocol` patch 7), even one with nothing to send. It is sent
+    from the same journal-chain step as the replayed entries: behind the
+    frames the replay claimed and ahead of the send step of any frame emitted
+    later, which is what makes it a boundary. It is not journaled and takes no
+    `seq`. A client can then stop a turn whose budget is already spent right
+    after this frame, instead of waiting out a settle and a `lastSeq` target
+    that counts live-only frames no replay sends. The replay's sends are now
+    best-effort, like the chain's own send step: upstream let a throwing
+    `ws.send` reject the journal chain, which skipped every later append and
+    send. A tail that fails is not acknowledged, and its socket is detached
+    and closed, so later frames never reach it past the gap and the client
+    resumes from what it really received. Every adapter on this runtime
+    advertises it, the Codex bridge included.
+
 Upstream behaviour deliberately dropped: `BRIDGE_REPLAY_FROM_DISK` as the gate on
 disk-first journaling — it is unconditional here; the env var still selects
 reload-on-start.

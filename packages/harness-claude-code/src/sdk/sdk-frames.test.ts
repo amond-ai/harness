@@ -59,6 +59,15 @@ describe('classifyFrame', () => {
       .toEqual({ kind: 'liveness', seq: 9 })
   })
 
+  it('reads the resume acknowledgement and the greeting that promises it', () => {
+    expect(classifyFrame(JSON.stringify({ type: 'bridge-hello', state: 'running', lastSeq: 4, capabilities: { resumeAck: true } })))
+      .toEqual({ kind: 'hello', state: 'running', lastSeq: 4, resumeAck: true })
+    const unpromised = classifyFrame(JSON.stringify({ type: 'bridge-hello', state: 'running', capabilities: { resumeAck: 'yes' } }))
+    expect('resumeAck' in unpromised).toBe(false)
+    expect(classifyFrame(JSON.stringify({ type: 'bridge-resumed', upTo: 12 }))).toEqual({ kind: 'resumed', upTo: 12 })
+    expect(classifyFrame(JSON.stringify({ type: 'bridge-resumed' }))).toMatchObject({ kind: 'unreadable' })
+  })
+
   it('reads the streamed tool input as liveness, not as an unreadable frame', () => {
     // The host streams a tool call's arguments as they are generated (harness@1.0.138). They are
     // evidence the turn is alive and nothing more: the record of the call is its `raw` message.
