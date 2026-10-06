@@ -67,7 +67,9 @@ export {
   sdkJournalTranscript,
 } from './sdk/sdk-journal'
 export type { AttachRoundInput } from './sdk/sdk-round'
-export { BRIDGE_CONNECT_TIMEOUT_MS, ROUND_RECONNECT_BACKOFF_MS, runAttachRound } from './sdk/sdk-round'
+export { ROUND_RECONNECT_BACKOFF_MS, runAttachRound } from './sdk/sdk-round'
+export { BRIDGE_CONNECT_TIMEOUT_MS, SPENT_BUDGET_CONNECT_TIMEOUT_MS } from './sdk/sdk-round-dial'
+export { RESUME_SETTLE_MS } from './sdk/sdk-round-settle'
 export {
   applyFrame,
   interruptedResult,

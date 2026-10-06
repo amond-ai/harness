@@ -1,0 +1,149 @@
+import type { LiveMirror } from '../mirror'
+import type { TurnChannel } from './sdk-channel'
+import type { AttachRoundInput, PumpContext } from './sdk-round'
+/**
+ * The entry and the dial of one attach round, moved out of `sdk-round.ts` (the file had
+ * grown past the 500-line limit and `runAttachRound` carried its own entry logic).
+ *
+ * Everything here happens before the round has a socket to pump: building the round's context
+ * from the carried state, deciding whether the turn's budget is already spent, and dialling the
+ * bridge with the bound that decision picks.
+ */
+import { describeCause as describe } from '@amond-ai/redact'
+import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
+import { createTurnResultScanner } from '../turn-result-scan'
+import { ROUND_WINDOW_MS, turnBudgetExhausted } from '../watchdog'
+import { createTurnChannel } from './sdk-channel'
+import { classifyFrame } from './sdk-frames'
+import { nextFrame } from './sdk-round-observe'
+
+/** How long a connect and its `bridge-hello` may take before the round calls the socket dead. */
+export const BRIDGE_CONNECT_TIMEOUT_MS = 30_000
+
+/**
+ * The same bound for a round entered with the turn's wall-clock budget already spent.
+ *
+ * That round has one job — stop the turn — and the full {@link BRIDGE_CONNECT_TIMEOUT_MS} twice
+ * over (connect, then `bridge-hello`) is a minute the budget no longer has: an unreachable bridge
+ * would let the turn overrun by that much before the round reached the verdict it already knew.
+ * Short enough that a dead bridge ends the round quickly, long enough for a healthy one to answer.
+ */
+export const SPENT_BUDGET_CONNECT_TIMEOUT_MS = 5_000
+
+/**
+ * What a round starts from: its context, whether its budget was already spent on entry, and the
+ * dial bound that follows from it.
+ */
+export async function enterRound(
+  input: AttachRoundInput,
+): Promise<{ context: PumpContext, spentAtEntry: boolean, dialTimeoutMs: number }> {
+  // Read after the process lookup, not before: it is a sandbox round trip, and a budget that ran
+  // out during it would otherwise be judged on a clock from before it and dialled with the full bound.
+  const hostProcess = await input.session.getProcess(input.handle.processId)
+  const now = input.now()
+  const carried = input.previous ?? { since: 0, lastActivityAt: now }
+  const context: PumpContext = {
+    input,
+    process: hostProcess,
+    // Never behind what the mirror has already published: the mirror's cursor is durable at every
+    // flush inside the round, `state.since` only when the round's step commits. A round re-entered
+    // after an eviction that resumed from the older of the two would be sent frames the re-seeded
+    // mirror already holds, and `append` does not dedupe — the transcript would repeat a prefix.
+    //
+    // Silence is judged inside a round's own observation. Replayed frames refresh the clock with
+    // their arrival time (`applyFrame`), so a re-entry that replays nothing — the cursor above is
+    // floored at what the mirror already published — must not read the gap it never watched as
+    // silence and interrupt a healthy host seconds in. The cost is that a host that went quiet at
+    // the end of one round gets a fresh watchdog window in the next, bounded by `watchdogTimeoutMs`.
+    state: {
+      ...carried,
+      since: Math.max(carried.since, mirrorCursor(input.mirror)),
+      lastActivityAt: Math.max(carried.lastActivityAt, now),
+    },
+    interruptedBy: carried.interruptedBy,
+    // A round that inherits an outstanding interrupt gets the remains of that stop's settle
+    // budget, not a fresh window: the stop was decided a window ago and what is left to decide is
+    // only whether the host answered it. Never in the past, so the round still takes one sample.
+    deadline: carried.interruptedBy !== undefined && carried.interruptedAt !== undefined
+      ? Math.max(
+          now + input.config.livenessSampleIntervalMs,
+          carried.interruptedAt + INTERRUPT_SETTLE_TIMEOUT_MS + KILL_SETTLE_TIMEOUT_MS,
+        )
+      : now + ROUND_WINDOW_MS,
+    lastFlushAt: now,
+    lastJudgedAt: now,
+    scanner: createTurnResultScanner(carried.verdict),
+  }
+  // A budget already spent when the round starts is decided before the first dial, not after it.
+  // Not when the carried state holds an outstanding interrupt: that stop was decided a
+  // window ago and the round only has to wait out its settle budget, as the deadline above says.
+  const spentAtEntry = carried.interruptedBy === undefined
+    && input.handle.startedAtMs !== undefined
+    && turnBudgetExhausted({ startedAt: input.handle.startedAtMs, now, budgetMs: input.budgetMs })
+  const dialTimeoutMs = spentAtEntry ? SPENT_BUDGET_CONNECT_TIMEOUT_MS : BRIDGE_CONNECT_TIMEOUT_MS
+  return { context, spentAtEntry, dialTimeoutMs }
+}
+
+/**
+ * Dial and shake hands, answering `undefined` for a dial the round should simply retry.
+ *
+ * `timeoutMs` bounds the connect and the greeting each: {@link BRIDGE_CONNECT_TIMEOUT_MS}, or the
+ * short {@link SPENT_BUDGET_CONNECT_TIMEOUT_MS} for a round that was entered over budget. The
+ * greeting's `state` and `lastSeq` come back with the channel, for the early interrupt that acts on them.
+ */
+export async function openChannel(
+  input: AttachRoundInput,
+  timeoutMs: number,
+): Promise<{ channel: TurnChannel, hostState: string | undefined, lastSeq: number | undefined } | undefined> {
+  let channel: TurnChannel
+  const dial = input.connect()
+  try {
+    channel = createTurnChannel(await withTimeout(dial, timeoutMs))
+  }
+  catch (cause) {
+    // The dial is not cancellable, so a socket that arrives after the deadline is closed on
+    // arrival instead of being abandoned: the bridge keeps only one active socket, and a late
+    // greeting would displace the one the *current* round is pumping and starve it.
+    void dial.then(socket => socket.close(), () => undefined)
+    console.warn(`bridge connect failed process_id=${input.handle.processId} error="${describe(cause)}"`)
+    return undefined
+  }
+  // `bridge-hello` before anything else: some sandbox runtimes complete the upgrade before the
+  // connection reaches the bridge process, and a `resume` sent into that gap is dropped.
+  //
+  // Waited through `nextFrame` rather than `channel.next` so the wait is raced against a suspend:
+  // a bridge that completes the upgrade and then never greets would otherwise hold a
+  // `doSuspendTurn` for the full connect timeout with nothing to show for it.
+  const hello = await nextFrame(channel, timeoutMs, input.signal)
+  if (hello === 'aborted') {
+    channel.close()
+    return undefined
+  }
+  const greeting = 'frame' in hello ? classifyFrame(hello.frame) : undefined
+  if (greeting?.kind !== 'hello') {
+    console.warn(`bridge did not greet the connection process_id=${input.handle.processId}`)
+    channel.close()
+    return undefined
+  }
+  return { channel, hostState: greeting.state, lastSeq: greeting.lastSeq }
+}
+
+/**
+ * What the mirror says it has already published, as a `seq`.
+ *
+ * The sdk path appends with the frame's own `seq` as the cursor, so the stored cursor and
+ * `TurnRoundState.since` are the same unit; anything unreadable counts as nothing published.
+ */
+function mirrorCursor(mirror: LiveMirror | undefined): number {
+  const cursor = Number(mirror?.cursor)
+  return Number.isFinite(cursor) ? cursor : 0
+}
+
+/** A promise with a deadline; the loser is abandoned rather than cancelled — there is no cancel. */
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${String(timeoutMs)}ms`)), timeoutMs)
+  })
+  return await Promise.race([promise, deadline]).finally(() => clearTimeout(timer))
+}

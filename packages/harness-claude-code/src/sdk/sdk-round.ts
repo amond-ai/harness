@@ -20,26 +20,24 @@ import type { WsLike } from '@amond-ai/harness-transport'
 import type { SandboxProcessHandle, SandboxSession } from '@amond-ai/sandbox'
 import type { TurnDriverConfig } from '../config'
 import type { LiveMirror } from '../mirror'
-import type { TurnTimeoutCause, TurnVerdict } from '../outcome'
+import type { TurnTimeoutCause } from '../outcome'
 import type { AttemptResult, TurnHandle, TurnRoundSpec } from '../turn-driver'
 import type { TurnResultScanner } from '../turn-result-scan'
-import type { TurnChannel } from './sdk-channel'
+import type { ChannelEnd, TurnChannel } from './sdk-channel'
 import type { TerminalObservation } from './sdk-frames'
 import type { TurnRoundState } from './sdk-round-state'
 import { describeCause as describe } from '@amond-ai/redact'
 import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from '../cli-turn-kill'
 import { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS } from '../mirror'
 import { flushOnInterval } from '../turn-mirror-flush'
-import { createTurnResultScanner, withVerdict } from '../turn-result-scan'
-import { ROUND_WINDOW_MS, turnBudgetExhausted, turnTimeoutCause } from '../watchdog'
-import { createTurnChannel } from './sdk-channel'
-import { classifyFrame } from './sdk-frames'
-import { readJournalEnding } from './sdk-journal'
+import { withVerdict } from '../turn-result-scan'
+import { classifyFrame, isNoRunningTurnReply } from './sdk-frames'
+import { enterRound, openChannel } from './sdk-round-dial'
+import { judgeAfterNoTurn, stopFoundNoTurn, unreachableEnded } from './sdk-round-noturn'
 import { nextFrame, reportFrame } from './sdk-round-observe'
+import { armEarlyJudge, settling, sliceOf } from './sdk-round-settle'
 import { applyFrame, interruptedResult, observedResult, roundEnded } from './sdk-round-state'
-
-/** How long a connect and its `bridge-hello` may take before the round calls the socket dead. */
-export const BRIDGE_CONNECT_TIMEOUT_MS = 30_000
+import { abandoned, budgetOutranks, inheritedCause, timeoutCauseOf } from './sdk-round-verdict'
 
 /**
  * How long a round waits between two dials.
@@ -76,7 +74,7 @@ export interface AttachRoundInput {
 }
 
 /** Everything the frame pump reads and writes, past the five-argument limit. */
-interface PumpContext {
+export interface PumpContext {
   input: AttachRoundInput
   process: SandboxProcessHandle | null
   state: TurnRoundState
@@ -91,45 +89,30 @@ interface PumpContext {
    * the carried state so an earlier round's reading survives this one.
    */
   scanner: TurnResultScanner
+  /**
+   * The cursor the current dial's replay has to reach before a round entered over budget sends
+   * its interrupt; cleared once it has been judged, so it fires once per dial.
+   */
+  earlyJudgeAt?: number
+  /** When that interrupt may go out at the earliest: `RESUME_SETTLE_MS` after the `resume`. */
+  earlyJudgeNotBefore?: number
   /** Set once the Worker has asked for a stop, so the pump stops asking again. */
   interruptedBy?: TurnTimeoutCause
+  /**
+   * Set when the host answered an `interrupt` with "no running turn": when the reply came and the
+   * cause the forgotten stop named. `judge` sends nothing more, and waits one interrupt grace
+   * from `at` for a real ending before the kill ladder.
+   *
+   * Kept across the round's dials rather than reset per dial: a socket lost after the reply must
+   * not turn the unreachable-host verdict into a kill inside that grace, and a redial's replay is
+   * where the ending comes. No later reply can mix in, because a reply is only taken while a stop
+   * of ours is outstanding (`stopFoundNoTurn`) and nothing sends another once this is set.
+   */
+  noTurn?: { at: number, cause: TurnTimeoutCause }
 }
 
 export async function runAttachRound(input: AttachRoundInput): Promise<TurnRoundState> {
-  const now = input.now()
-  const carried = input.previous ?? { since: 0, lastActivityAt: now }
-  const context: PumpContext = {
-    input,
-    process: await input.session.getProcess(input.handle.processId),
-    // Never behind what the mirror has already published: the mirror's cursor is durable at every
-    // flush inside the round, `state.since` only when the round's step commits. A round re-entered
-    // after an eviction that resumed from the older of the two would be sent frames the re-seeded
-    // mirror already holds, and `append` does not dedupe — the transcript would repeat a prefix.
-    //
-    // Silence is judged inside a round's own observation. Replayed frames refresh the clock with
-    // their arrival time (`applyFrame`), so a re-entry that replays nothing — the cursor above is
-    // floored at what the mirror already published — must not read the gap it never watched as
-    // silence and interrupt a healthy host seconds in. The cost is that a host that went quiet at
-    // the end of one round gets a fresh watchdog window in the next, bounded by `watchdogTimeoutMs`.
-    state: {
-      ...carried,
-      since: Math.max(carried.since, mirrorCursor(input.mirror)),
-      lastActivityAt: Math.max(carried.lastActivityAt, now),
-    },
-    interruptedBy: carried.interruptedBy,
-    // A round that inherits an outstanding interrupt gets the remains of that stop's settle
-    // budget, not a fresh window: the stop was decided a window ago and what is left to decide is
-    // only whether the host answered it. Never in the past, so the round still takes one sample.
-    deadline: carried.interruptedBy !== undefined && carried.interruptedAt !== undefined
-      ? Math.max(
-          now + input.config.livenessSampleIntervalMs,
-          carried.interruptedAt + INTERRUPT_SETTLE_TIMEOUT_MS + KILL_SETTLE_TIMEOUT_MS,
-        )
-      : now + ROUND_WINDOW_MS,
-    lastFlushAt: now,
-    lastJudgedAt: now,
-    scanner: createTurnResultScanner(carried.verdict),
-  }
+  const { context, spentAtEntry, dialTimeoutMs } = await enterRound(input)
   const sleep = input.sleep ?? (async (ms: number) => {
     await new Promise(resolve => setTimeout(resolve, ms))
   })
@@ -140,10 +123,12 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
         // while the bridge is unreachable is not left to wait out the whole window.
         return context.state
       }
-      const channel = await openChannel(input)
-      if (channel !== undefined) {
+      const dialed = await openChannel(input, dialTimeoutMs)
+      if (dialed !== undefined) {
+        const { channel, hostState, lastSeq } = dialed
         try {
           channel.send({ type: 'resume', lastSeenEventId: context.state.since })
+          armEarlyJudge(context, spentAtEntry, hostState, lastSeq)
           const ending = await pump(channel, context)
           if (ending !== 'disconnected') {
             return context.state
@@ -165,9 +150,7 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
         context.state = { ...context.state, outcome: await abandoned(input, context.interruptedBy, context.state.verdict) }
         return context.state
       }
-      const unreachable = await unreachableTimeout(context)
-      if (unreachable !== undefined) {
-        context.state = { ...context.state, outcome: unreachable }
+      if (await unreachableEnded(context)) {
         return context.state
       }
       if (input.now() >= context.deadline) {
@@ -184,40 +167,6 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
   }
 }
 
-/** Dial and shake hands, answering `undefined` for a dial the round should simply retry. */
-async function openChannel(input: AttachRoundInput): Promise<TurnChannel | undefined> {
-  let channel: TurnChannel
-  const dial = input.connect()
-  try {
-    channel = createTurnChannel(await withTimeout(dial, BRIDGE_CONNECT_TIMEOUT_MS))
-  }
-  catch (cause) {
-    // The dial is not cancellable, so a socket that arrives after the deadline is closed on
-    // arrival instead of being abandoned: the bridge keeps only one active socket, and a late
-    // greeting would displace the one the *current* round is pumping and starve it.
-    void dial.then(socket => socket.close(), () => undefined)
-    console.warn(`bridge connect failed process_id=${input.handle.processId} error="${describe(cause)}"`)
-    return undefined
-  }
-  // `bridge-hello` before anything else: some sandbox runtimes complete the upgrade before the
-  // connection reaches the bridge process, and a `resume` sent into that gap is dropped.
-  //
-  // Waited through `nextFrame` rather than `channel.next` so the wait is raced against a suspend:
-  // a bridge that completes the upgrade and then never greets would otherwise hold a
-  // `doSuspendTurn` for the full connect timeout with nothing to show for it.
-  const hello = await nextFrame(channel, BRIDGE_CONNECT_TIMEOUT_MS, input.signal)
-  if (hello === 'aborted') {
-    channel.close()
-    return undefined
-  }
-  if (!('frame' in hello) || classifyFrame(hello.frame).kind !== 'hello') {
-    console.warn(`bridge did not greet the connection process_id=${input.handle.processId}`)
-    channel.close()
-    return undefined
-  }
-  return channel
-}
-
 /** Why the pump stopped. */
 type PumpEnding = 'terminal' | 'window' | 'disconnected'
 
@@ -227,25 +176,22 @@ async function pump(channel: TurnChannel, context: PumpContext): Promise<PumpEnd
     if (context.input.signal?.aborted) {
       return 'window'
     }
+    if (await earlyJudge(channel, context)) {
+      return 'terminal'
+    }
     const remaining = context.deadline - context.input.now()
     if (remaining <= 0) {
       return 'window'
     }
-    const slice = Math.min(context.input.config.livenessSampleIntervalMs, remaining)
+    const slice = sliceOf(context, remaining)
     const next = await nextFrame(channel, slice, context.input.signal)
     if (next === 'aborted') {
       return 'window'
     }
     if ('end' in next) {
-      if (next.end === 'closed') {
-        return 'disconnected'
-      }
-      // A liveness sample with no frame in it. `status()` is called for its side effect as much
-      // as its answer: it is a request into the container, so `sleepAfter` cannot expire under a
-      // turn that is quietly working (D4 point 1).
-      await context.process?.status().catch(() => undefined)
-      if (await judge(channel, context)) {
-        return 'terminal'
+      const ending = await unframedEnding(channel, context, next.end)
+      if (ending !== undefined) {
+        return ending
       }
       continue
     }
@@ -256,11 +202,80 @@ async function pump(channel: TurnChannel, context: PumpContext): Promise<PumpEnd
     // one sample interval never reaches that arm, so its budget would never be read — and the
     // wedge #358 recorded was loud, which is exactly the turn that has to be interrupted rather
     // than left to a round exhaustion's bare kill.
-    if (context.input.now() - context.lastJudgedAt >= context.input.config.livenessSampleIntervalMs
-      && await judge(channel, context)) {
+    if (await cadenceJudge(channel, context)) {
       return 'terminal'
     }
   }
+}
+
+/** What a read that came back without a frame means: a lost socket, or a quiet sample. */
+async function unframedEnding(
+  channel: TurnChannel,
+  context: PumpContext,
+  end: ChannelEnd,
+): Promise<'disconnected' | 'terminal' | undefined> {
+  return end === 'closed' ? 'disconnected' : await quietSample(channel, context)
+}
+
+/** The judge a loud host gets once a sample interval has passed since the last one. */
+async function cadenceJudge(channel: TurnChannel, context: PumpContext): Promise<boolean> {
+  return context.input.now() - context.lastJudgedAt >= context.input.config.livenessSampleIntervalMs
+    && await judgeIfDue(channel, context)
+}
+
+/**
+ * A liveness sample with no frame in it, answering whether it ended the turn (`'terminal'`) or
+ * not (`undefined`).
+ *
+ * `status()` is called for its side effect as much as its answer: it is a request into the
+ * container, so `sleepAfter` cannot expire under a turn that is quietly working (D4 point 1).
+ */
+async function quietSample(channel: TurnChannel, context: PumpContext): Promise<'terminal' | undefined> {
+  // Before the probe: `status()` is an unbounded round trip and must not hold back a stop that
+  // is already due. Nor may it hold back the host's answer to one just sent, so a probe is not
+  // started behind it: the next read takes the answer, and the loop's own cadence probes later.
+  const asked = context.interruptedBy
+  if (await earlyJudge(channel, context)) {
+    return 'terminal'
+  }
+  if (context.interruptedBy !== asked) {
+    return undefined
+  }
+  // Not while a "no running turn" reply is outstanding: the wait is for a terminal frame the
+  // socket will deliver, bounded by `judge`'s grace, and a probe that stalls would hold both the
+  // frame and that bound behind an unbounded round trip.
+  if (context.noTurn === undefined) {
+    await context.process?.status().catch(() => undefined)
+  }
+  return await judgeIfDue(channel, context) ? 'terminal' : undefined
+}
+
+/**
+ * The cadence's judge, held back while the resume is still settling and for a round whose suspend
+ * is requested.
+ *
+ * Both guards are checked here, after whatever the caller awaited: a stop sent inside the settle
+ * window could be recorded as the cause of an ending the host reached on its own, and a suspend
+ * ends observation and leaves the turn running, so a stop sent once it has landed — for instance
+ * while a `status()` probe was in flight — would outrun the abort guard at the top of the loop.
+ */
+async function judgeIfDue(channel: TurnChannel, context: PumpContext): Promise<boolean> {
+  return !settling(context) && context.input.signal?.aborted !== true && await judge(channel, context)
+}
+
+/**
+ * The interrupt a round entered over budget owes its host, once the replay has reached
+ * `earlyJudgeAt` and the resume has settled. The guard against a requested suspend is
+ * {@link judgeIfDue}'s.
+ */
+async function earlyJudge(channel: TurnChannel, context: PumpContext): Promise<boolean> {
+  const target = context.earlyJudgeAt
+  if (target === undefined || context.state.since < target || settling(context)) {
+    return false
+  }
+  context.earlyJudgeAt = undefined
+  context.earlyJudgeNotBefore = undefined
+  return await judgeIfDue(channel, context)
 }
 
 /** Fold one frame in, answering whether it ended the turn. */
@@ -270,6 +285,9 @@ async function consume(frame: string, context: PumpContext): Promise<boolean> {
   if (effect.kind === 'unreadable') {
     console.warn(`bridge frame unreadable process_id=${context.input.handle.processId} reason="${effect.reason}"`)
     return false
+  }
+  if (isNoRunningTurnReply(effect)) {
+    return stopFoundNoTurn(context)
   }
   reportFrame(frame, 'seq' in effect ? effect.seq : undefined, context.input.onFrame)
   if (effect.kind === 'log') {
@@ -371,6 +389,9 @@ async function teardown(context: PumpContext): Promise<number | undefined> {
 async function judge(channel: TurnChannel, context: PumpContext): Promise<boolean> {
   const now = context.input.now()
   context.lastJudgedAt = now
+  if (context.noTurn !== undefined) {
+    return await judgeAfterNoTurn(context, context.noTurn, now)
+  }
   // Once asked, the host is judged on its grace alone: a frame it emits meanwhile refreshes the
   // silence clock, and re-reading the thresholds would let a stop that was already decided
   // lapse — the turn then outlives its grace and ends as a round exhaustion, cause lost.
@@ -404,143 +425,6 @@ async function judge(channel: TurnChannel, context: PumpContext): Promise<boolea
   return true
 }
 
-/**
- * A spent budget outranks a `watchdog` cause, whoever named it.
- *
- * The host's echo answers "what was I asked", not "which deadline has passed", and the two come
- * apart across a step that never committed: silence is checked before the wall clock, so round N
- * interrupts on `watchdog`, and by the time round N+1 attaches and reads the host's answer the
- * budget is spent as well. Taken at face value that is a `watchdog` timeout, and
- * `shouldStopAttemptLoop` starts another attempt with a fresh budget — the #358 shape
- * `inheritedCause` exists to prevent, arriving through the echo instead.
- *
- * Only this side can make the correction: an exhausted budget stays exhausted whatever timer
- * fired first, and it is a pure function of the handle's start that the host cannot see. The
- * other direction is never taken — a `budget` cause is not downgraded, because a turn the
- * budget stopped is over on this side's own arithmetic.
- */
-function budgetOutranks(result: AttemptResult, input: AttachRoundInput, now: number): AttemptResult {
-  if (result.outcome !== 'timed-out' || result.timedOutBy !== 'watchdog') {
-    return result
-  }
-  return turnBudgetExhausted({ startedAt: input.handle.startedAtMs ?? now, now, budgetMs: input.budgetMs })
-    ? { ...result, timedOutBy: 'budget' }
-    : result
-}
-
-/**
- * The cause of a stop *this* round did not send but is being answered — the fallback for a host
- * older than the echo.
- *
- * A round re-entered after a failed step — a retry, or a workflow restart — carries no
- * `interruptedBy`: the interrupt the failed attempt sent is not durable, and neither is the
- * reason it named. What comes back is a `finish { stopped: 'interrupted' }` for a stop this
- * process has no record of asking for, and without a cause `observedResult` would report the
- * turn as one that merely ended, losing `timedOutBy` — which is what `shouldStopAttemptLoop`
- * reads to decide whether the attempt loop may run another turn.
- *
- * A current host answers that outright: it echoes `interruptedBy` on the ending the interrupt
- * caused (#388), and `observedResult` prefers the echo over anything read here. This inference
- * is what is left when the host names none.
- *
- * Only one of the two causes has to survive the gap, because the other is recomputable: the
- * budget is a pure function of the handle's `startedAtMs` and the round's `budgetMs`, and once
- * exhausted it stays exhausted, so {@link turnBudgetExhausted} answers the same question a
- * window later. Anything else is the watchdog by elimination — this Worker sends exactly those
- * two reasons, and `operator` is a protocol member nothing here originates.
- *
- * Only a `finish` is inferred from. A run-phase `error` that carries the host's echo is read as
- * the escalation it is, but one that does not is the ordinary shape of a turn that failed and
- * nothing tells the two apart — so it is left the failure it looks like rather than guessed at.
- */
-function inheritedCause(
-  observation: TerminalObservation,
-  input: AttachRoundInput,
-  now: number,
-): TurnTimeoutCause | undefined {
-  if (observation.type !== 'finish' || observation.stopped !== 'interrupted') {
-    return undefined
-  }
-  return turnBudgetExhausted({
-    startedAt: input.handle.startedAtMs ?? now,
-    now,
-    budgetMs: input.budgetMs,
-  })
-    ? 'budget'
-    : 'watchdog'
-}
-
-/** The watchdog's decision over this round's carried state — `watchdog.ts`'s, from frames. */
-function timeoutCauseOf(context: PumpContext, now: number): TurnTimeoutCause | undefined {
-  return turnTimeoutCause({
-    startedAt: context.input.handle.startedAtMs ?? context.state.lastActivityAt,
-    lastLogActivityAt: context.state.lastActivityAt,
-    now,
-    budgetMs: context.input.budgetMs,
-    watchdogTimeoutMs: context.input.config.watchdogTimeoutMs,
-    livenessWindowMs: context.input.config.livenessWindowMs,
-  })
-}
-
-/**
- * The same verdict {@link judge} makes, for a turn there is no channel to ask.
- *
- * The dial loop waits out its window, and the rounds after it do the same, so a live-but-
- * unreachable host would burn every remaining round — about forty more minutes at the default
- * budget — before `awaitRounds` killed it. The decision function is the shared one; only the
- * stop differs, because a graceful `interrupt` needs a socket and there is none: the kill ladder
- * is the whole of it, and the result still names the timer that fired.
- */
-async function unreachableTimeout(context: PumpContext): Promise<AttemptResult | undefined> {
-  const timedOutBy = timeoutCauseOf(context, context.input.now())
-  if (timedOutBy === undefined) {
-    return undefined
-  }
-  console.warn(`unreachable turn host timed out process_id=${context.input.handle.processId} reason=${timedOutBy}`)
-  return interruptedResult(timedOutBy, await killTurn(context.input.session, context.input.handle.processId))
-}
-
-/**
- * A round that lost its socket and found the process gone.
- *
- * The journal is consulted before that is called a timeout. A host can write its `finish` and
- * exit in the instant the socket was down, and the frame is then only on disk — reported as an
- * unnamed timeout, it *outranks* the transcript the settle replays (`failureOf`), so a completed
- * turn would be recorded as one that wedged. A journal that holds no terminal frame, or that
- * cannot be read at all, leaves the two readings the cli path makes unchanged.
- *
- * The same read answers what the turn said about itself, for the same reason (`readJournalEnding`).
- */
-async function abandoned(
-  input: AttachRoundInput,
-  interruptedBy: TurnTimeoutCause | undefined,
-  carried: TurnVerdict | undefined,
-): Promise<AttemptResult> {
-  const stateDir = input.handle.bridgeStateDir
-  const journal = stateDir === undefined
-    ? { verdict: carried }
-    : await readJournalEnding(input.session, stateDir, carried)
-  if (journal.terminal !== undefined) {
-    console.warn(`turn host is gone, its ending read from the journal process_id=${input.handle.processId}`)
-    const now = input.now()
-    const observed = observedResult(journal.terminal, interruptedBy ?? inheritedCause(journal.terminal, input, now))
-    return withVerdict(budgetOutranks(observed, input, now), journal.verdict)
-  }
-  console.warn(`turn host is gone with no terminal frame process_id=${input.handle.processId}`)
-  return { outcome: 'timed-out', killConfirmed: await killTurn(input.session, input.handle.processId) }
-}
-
-/**
- * What the mirror says it has already published, as a `seq`.
- *
- * The sdk path appends with the frame's own `seq` as the cursor, so the stored cursor and
- * `TurnRoundState.since` are the same unit; anything unreadable counts as nothing published.
- */
-function mirrorCursor(mirror: LiveMirror | undefined): number {
-  const cursor = Number(mirror?.cursor)
-  return Number.isFinite(cursor) ? cursor : 0
-}
-
 async function processGone(session: SandboxSession, processId: string): Promise<boolean> {
   try {
     const process = await session.getProcess(processId)
@@ -572,13 +456,4 @@ async function flushRound(context: PumpContext): Promise<void> {
     LIVE_MIRROR_FLUSH_TIMEOUT_MS,
     handle.processId,
   )
-}
-
-/** A promise with a deadline; the loser is abandoned rather than cancelled — there is no cancel. */
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`timed out after ${String(timeoutMs)}ms`)), timeoutMs)
-  })
-  return await Promise.race([promise, deadline]).finally(() => clearTimeout(timer))
 }

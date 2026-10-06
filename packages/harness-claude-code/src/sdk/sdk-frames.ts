@@ -185,3 +185,22 @@ function describeFrameError(error: unknown): string {
   }
   return JSON.stringify(error) ?? 'unknown'
 }
+
+/**
+ * What the host answers an `interrupt` with when it has no running turn to stop, character for
+ * character as `bridge-runtime.ts` writes it (`case 'interrupt'`).
+ *
+ * It is a reply on the sending socket only, through `sendControl`: never journaled, never on the
+ * event stream, and so carrying no `seq`. That is the whole of what tells it apart from a turn
+ * that failed — the text alone would be a message a turn could in principle raise itself.
+ */
+export const NO_RUNNING_TURN_ERROR = 'no running turn to interrupt'
+
+/** Whether a frame is the host's "nothing to stop" reply to our `interrupt`, not a turn's ending. */
+export function isNoRunningTurnReply(effect: FrameEffect): boolean {
+  return effect.kind === 'terminal'
+    && effect.seq === undefined
+    && effect.observation.type === 'error'
+    && effect.observation.phase === 'run'
+    && effect.observation.error === NO_RUNNING_TURN_ERROR
+}
