@@ -1,11 +1,13 @@
 import type { TurnTimeoutCause } from '../outcome'
 import type { PumpContext } from './sdk-round'
 /**
- * What a round does with the host's "no running turn to interrupt" reply, moved out of
- * `sdk-round.ts` (the file was at the 500-line limit).
+ * What a round does with the host's no-seq replies to its `interrupt` — "no running turn to
+ * interrupt" and "unknown interrupt reason" — moved out of `sdk-round.ts` (the file was at the
+ * 500-line limit).
  *
- * The reply forgets the stop and starts a bounded wait for a real ending; `judgeAfterNoTurn` is
- * where that wait ends in the kill ladder. When to call each stays with the pump.
+ * The first forgets the stop and starts a bounded wait for a real ending; `judgeAfterNoTurn` is
+ * where that wait ends in the kill ladder. The second is a refused stop and takes the kill ladder
+ * at once (`stopRefused`). When to call each stays with the pump.
  */
 import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from '../cli-turn-kill'
 import { interruptedResult } from './sdk-round-state'
@@ -51,6 +53,27 @@ export function stopFoundNoTurn(context: PumpContext): false {
   const { interruptedBy: _by, interruptedAt: _at, ...state } = context.state
   context.state = state
   return false
+}
+
+/**
+ * The host's refusal of our stop's reason, answering whether it ended the round.
+ *
+ * The host checks for a running turn before it reads the reason, so this reply says a turn is
+ * running and was left running: the stop did not land, and the turn will not end on it. Read as a
+ * terminal run error it would settle the run as failed while the turn goes on in the sandbox. No
+ * grace is owed either, since the host never asked for one — so it is the kill ladder at once,
+ * under the cause the stop named, the same ending a stop that outlived its grace takes. A reply
+ * with no stop of ours outstanding is not ours to act on.
+ */
+export async function stopRefused(context: PumpContext): Promise<boolean> {
+  const cause = context.interruptedBy
+  if (cause === undefined) {
+    return false
+  }
+  console.warn(`interrupt refused process_id=${context.input.handle.processId} reason=${cause}; killing the turn`)
+  const killed = await killTurn(context.input.session, context.input.handle.processId)
+  context.state = { ...context.state, outcome: interruptedResult(cause, killed) }
+  return true
 }
 
 /** After the host's "no running turn" reply: one interrupt grace for a real ending, then the kill. */

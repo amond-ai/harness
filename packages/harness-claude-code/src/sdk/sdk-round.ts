@@ -31,9 +31,9 @@ import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from '.
 import { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS } from '../mirror'
 import { flushOnInterval } from '../turn-mirror-flush'
 import { withVerdict } from '../turn-result-scan'
-import { classifyFrame, isNoRunningTurnReply } from './sdk-frames'
+import { classifyFrame, isNoRunningTurnReply, isRefusedInterruptReply } from './sdk-frames'
 import { enterRound, openChannel } from './sdk-round-dial'
-import { judgeAfterNoTurn, stopFoundNoTurn, unreachableEnded } from './sdk-round-noturn'
+import { judgeAfterNoTurn, stopFoundNoTurn, stopRefused, unreachableEnded } from './sdk-round-noturn'
 import { nextFrame, reportFrame } from './sdk-round-observe'
 import { armEarlyJudge, resumeAcknowledged, settling, sliceOf } from './sdk-round-settle'
 import { applyFrame, interruptedResult, observedResult, roundEnded } from './sdk-round-state'
@@ -295,6 +295,9 @@ async function consume(frame: string, context: PumpContext): Promise<boolean> {
   }
   if (isNoRunningTurnReply(effect)) {
     return stopFoundNoTurn(context)
+  }
+  if (isRefusedInterruptReply(effect)) {
+    return await stopRefused(context)
   }
   if (effect.kind === 'resumed') {
     return resumeAcknowledged(context)

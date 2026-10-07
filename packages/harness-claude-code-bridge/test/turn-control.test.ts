@@ -1,5 +1,6 @@
 import type { QueryFn } from '../src/turn-driver'
 import type { FakeQuery, Host } from './harness'
+import { classifyFrame, isNoRunningTurnReply, isRefusedInterruptReply } from '@amond-ai/harness-claude-code'
 import { afterEach, expect, it } from 'vitest'
 import {
   connect,
@@ -260,6 +261,9 @@ it('answers an interrupt with no running turn on that socket alone', async () =>
 
   expect(error.phase).toBe('run')
   expect(error.error).toBe('no running turn to interrupt')
+  // The client's recogniser keeps a copy of this string; if the host rewords it, the client reads
+  // the reply as a terminal failure again, so the real reply is held against that copy here.
+  expect(isNoRunningTurnReply(classifyFrame(JSON.stringify(error)))).toBe(true)
   // A control frame, not an event: it consumes no `seq` and is not journaled.
   expect(error.seq).toBeUndefined()
   expect(await host.readJournal()).toHaveLength(0)
@@ -284,6 +288,8 @@ it('refuses an interrupt reason it has no meaning for, leaving the turn running'
 
   expect(error.phase).toBe('run')
   expect(error.error).toContain('unknown interrupt reason')
+  // Same copy on the client's side: a reworded refusal would be read as a failed turn.
+  expect(isRefusedInterruptReply(classifyFrame(JSON.stringify(error)))).toBe(true)
   // A control frame on this socket alone: no `seq`, and the turn was never touched.
   expect(error.seq).toBeUndefined()
   expect(query.interruptCount).toBe(0)

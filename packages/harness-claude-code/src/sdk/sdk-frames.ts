@@ -215,9 +215,28 @@ export const NO_RUNNING_TURN_ERROR = 'no running turn to interrupt'
 
 /** Whether a frame is the host's "nothing to stop" reply to our `interrupt`, not a turn's ending. */
 export function isNoRunningTurnReply(effect: FrameEffect): boolean {
+  return isControlReply(effect, error => error === NO_RUNNING_TURN_ERROR)
+}
+
+/**
+ * How the host's refusal of an `interrupt` reason it has no meaning for begins, character for
+ * character as `bridge-runtime.ts` writes it (`case 'interrupt'`): the reason follows, quoted.
+ *
+ * It travels like {@link NO_RUNNING_TURN_ERROR} — on the sending socket only, with no `seq` — and
+ * says the opposite about the turn: one is running, and the host left it running. Only a client
+ * that names a stop cause the host's image does not know yet produces it.
+ */
+export const UNKNOWN_INTERRUPT_REASON_ERROR = 'unknown interrupt reason \''
+
+/** Whether a frame is the host refusing our `interrupt`'s reason, not a turn's ending. */
+export function isRefusedInterruptReply(effect: FrameEffect): boolean {
+  return isControlReply(effect, error => error.startsWith(UNKNOWN_INTERRUPT_REASON_ERROR))
+}
+
+function isControlReply(effect: FrameEffect, matches: (error: string) => boolean): boolean {
   return effect.kind === 'terminal'
     && effect.seq === undefined
     && effect.observation.type === 'error'
     && effect.observation.phase === 'run'
-    && effect.observation.error === NO_RUNNING_TURN_ERROR
+    && matches(effect.observation.error)
 }

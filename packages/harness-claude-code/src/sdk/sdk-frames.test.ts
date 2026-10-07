@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyFrame } from './sdk-frames'
+import { classifyFrame, isNoRunningTurnReply, isRefusedInterruptReply } from './sdk-frames'
 
 describe('classifyFrame', () => {
   it('re-emits a raw frame as one line of the same NDJSON the cli path produces', () => {
@@ -66,6 +66,15 @@ describe('classifyFrame', () => {
     expect('resumeAck' in unpromised).toBe(false)
     expect(classifyFrame(JSON.stringify({ type: 'bridge-resumed', upTo: 12 }))).toEqual({ kind: 'resumed', upTo: 12 })
     expect(classifyFrame(JSON.stringify({ type: 'bridge-resumed' }))).toMatchObject({ kind: 'unreadable' })
+  })
+
+  it('tells the host\'s refusal of a stop reason from a turn that failed with the same words', () => {
+    const refusal = { type: 'error', phase: 'run', error: 'unknown interrupt reason \'budget\'' }
+
+    expect(isRefusedInterruptReply(classifyFrame(JSON.stringify(refusal)))).toBe(true)
+    expect(isNoRunningTurnReply(classifyFrame(JSON.stringify(refusal)))).toBe(false)
+    // A journaled frame is the turn's own ending, whatever it says: only the no-seq reply is the host's.
+    expect(isRefusedInterruptReply(classifyFrame(JSON.stringify({ ...refusal, seq: 9 })))).toBe(false)
   })
 
   it('reads the streamed tool input as liveness, not as an unreadable frame', () => {

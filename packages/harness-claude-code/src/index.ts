@@ -56,7 +56,13 @@ export {
 export type { ChannelEnd, TurnChannel } from './sdk/sdk-channel'
 export { createTurnChannel } from './sdk/sdk-channel'
 export type { FrameEffect, TerminalObservation } from './sdk/sdk-frames'
-export { classifyFrame } from './sdk/sdk-frames'
+export {
+  classifyFrame,
+  isNoRunningTurnReply,
+  isRefusedInterruptReply,
+  NO_RUNNING_TURN_ERROR,
+  UNKNOWN_INTERRUPT_REASON_ERROR,
+} from './sdk/sdk-frames'
 export type { JournalTail } from './sdk/sdk-journal'
 export {
   JOURNAL_TAIL_TIMEOUT_MS,
