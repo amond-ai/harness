@@ -45,21 +45,20 @@ export async function enterRound(
   const context: PumpContext = {
     input,
     process: hostProcess,
-    // Never behind what the mirror has already published: the mirror's cursor is durable at every
-    // flush inside the round, `state.since` only when the round's step commits. A round re-entered
-    // after an eviction that resumed from the older of the two would be sent frames the re-seeded
-    // mirror already holds, and `append` does not dedupe — the transcript would repeat a prefix.
+    // From the committed cursor, not the mirror's: they differ only after a failed step,
+    // and what that attempt folded — its `verdict`, the background wait — is not durable. The
+    // host's in-memory event log still holds the whole turn, so the replay is folded again here.
+    // The mirror's cursor, durable at every flush (`append` does not dedupe), is the separate
+    // `mirrorFloor` that keeps the replay from repeating a transcript prefix.
     //
-    // Silence is judged inside a round's own observation. Replayed frames refresh the clock with
-    // their arrival time (`applyFrame`), so a re-entry that replays nothing — the cursor above is
-    // floored at what the mirror already published — must not read the gap it never watched as
-    // silence and interrupt a healthy host seconds in. The cost is that a host that went quiet at
-    // the end of one round gets a fresh watchdog window in the next, bounded by `watchdogTimeoutMs`.
+    // Silence is judged inside a round's own observation: replayed frames refresh the clock with
+    // their arrival time (`applyFrame`), and a re-entry must not read a gap it never watched as
+    // silence. The cost is a fresh watchdog window per round, bounded by `watchdogTimeoutMs`.
     state: {
       ...carried,
-      since: Math.max(carried.since, mirrorCursor(input.mirror)),
       lastActivityAt: Math.max(carried.lastActivityAt, now),
     },
+    mirrorFloor: mirrorCursor(input.mirror),
     interruptedBy: carried.interruptedBy,
     // A round that inherits an outstanding interrupt gets the remains of that stop's settle
     // budget, not a fresh window: the stop was decided a window ago and what is left to decide is

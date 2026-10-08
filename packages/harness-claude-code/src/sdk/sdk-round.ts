@@ -20,7 +20,7 @@ import type { WsLike } from '@amond-ai/harness-transport'
 import type { SandboxProcessHandle, SandboxSession } from '@amond-ai/sandbox'
 import type { TurnDriverConfig } from '../config'
 import type { LiveMirror } from '../mirror'
-import type { TurnTimeoutCause } from '../outcome'
+import type { HostLossSocket, TurnTimeoutCause } from '../outcome'
 import type { AttemptResult, TurnHandle, TurnRoundSpec } from '../turn-driver'
 import type { TurnResultScanner } from '../turn-result-scan'
 import type { ChannelEnd, TurnChannel } from './sdk-channel'
@@ -31,10 +31,12 @@ import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from '.
 import { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS } from '../mirror'
 import { flushOnInterval } from '../turn-mirror-flush'
 import { withVerdict } from '../turn-result-scan'
+import { foldBackgroundWait } from './sdk-background-wait'
 import { classifyFrame, isNoRunningTurnReply, isRefusedInterruptReply } from './sdk-frames'
 import { enterRound, openChannel } from './sdk-round-dial'
+import { confirmedHostLoss } from './sdk-round-gone'
 import { judgeAfterNoTurn, stopFoundNoTurn, stopRefused, unreachableEnded } from './sdk-round-noturn'
-import { nextFrame, reportFrame } from './sdk-round-observe'
+import { nextFrame, publishFrame } from './sdk-round-observe'
 import { armEarlyJudge, resumeAcknowledged, settling, sliceOf } from './sdk-round-settle'
 import { applyFrame, interruptedResult, observedResult, roundEnded } from './sdk-round-state'
 import { abandoned, budgetOutranks, inheritedCause, timeoutCauseOf } from './sdk-round-verdict'
@@ -78,6 +80,14 @@ export interface PumpContext {
   input: AttachRoundInput
   process: SandboxProcessHandle | null
   state: TurnRoundState
+  /**
+   * The highest `seq` the live mirror had already published when the round entered.
+   *
+   * A frame at or below it is folded into the state like any other but not appended, reported or
+   * logged again: a retry resumes from the committed cursor, which can be behind what the failed
+   * attempt published, and `append` does not dedupe.
+   */
+  mirrorFloor: number
   /** The channel the current dial is pumping, so the teardown can say `destroy` on it. */
   channel?: TurnChannel
   deadline: number
@@ -121,6 +131,7 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
   const sleep = input.sleep ?? (async (ms: number) => {
     await new Promise(resolve => setTimeout(resolve, ms))
   })
+  const backoff = async (): Promise<void> => await sleep(ROUND_RECONNECT_BACKOFF_MS)
   try {
     for (;;) {
       if (input.signal?.aborted) {
@@ -129,6 +140,8 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
         return context.state
       }
       const dialed = await openChannel(input, dialTimeoutMs)
+      // How this pass lost its channel, for the reading a gone host is abandoned on.
+      let socket: HostLossSocket = 'dial-failed'
       if (dialed !== undefined) {
         const { channel } = dialed
         try {
@@ -138,21 +151,29 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
           if (ending !== 'disconnected') {
             return context.state
           }
+          socket = 'socket-closed'
         }
         finally {
           channel.close()
         }
       }
-      // Before the probe rather than only at the top of the loop: `processGone` is an unbounded
-      // sandbox round trip, so a suspend that landed during the dial would otherwise wait it out
-      // and the backoff behind it before the check above sees it.
+      // Before the probe rather than only at the top of the loop: `confirmedHostLoss` is an
+      // unbounded sandbox round trip, so a suspend that landed during the dial would otherwise
+      // wait it out and the backoff behind it before the check above sees it.
       if (input.signal?.aborted) {
         return context.state
       }
-      if (await processGone(input.session, input.handle.processId)) {
+      // A gone host is confirmed before it is abandoned: one reading that says gone is probed
+      // again a `backoff` later, and only a second that agrees ends the turn — a probe that
+      // misread a live host as gone would otherwise have the round kill it.
+      const reading = await confirmedHostLoss(input.session, input.handle.processId, backoff)
+      if (reading !== undefined) {
         // Gone, and nothing terminal came back with the replay: the same two readings
         // `abandonedWaitResult` makes on the cli path, decided the same way.
-        context.state = { ...context.state, outcome: await abandoned(input, context.interruptedBy, context.state.verdict) }
+        context.state = {
+          ...context.state,
+          outcome: await abandoned(input, context.interruptedBy, context.state.verdict, { reading, socket, noTurnCause: context.noTurn?.cause }),
+        }
         return context.state
       }
       if (await unreachableEnded(context)) {
@@ -164,7 +185,7 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
         console.warn(`sdk round could not reach the turn host process_id=${input.handle.processId}`)
         return context.state
       }
-      await sleep(ROUND_RECONNECT_BACKOFF_MS)
+      await backoff()
     }
   }
   finally {
@@ -302,15 +323,16 @@ async function consume(frame: string, context: PumpContext): Promise<boolean> {
   if (effect.kind === 'resumed') {
     return resumeAcknowledged(context)
   }
-  reportFrame(frame, 'seq' in effect ? effect.seq : undefined, context.input.onFrame)
-  if (effect.kind === 'log') {
-    // The host's captured console output — the `cli` driver's stderr side channel, live.
-    console.warn(`turn host ${effect.stream}: ${effect.line}`)
+  const seq = 'seq' in effect ? effect.seq : undefined
+  // Already published by the attempt that saw it first: folded again, not re-emitted.
+  const published = seq !== undefined && seq <= context.mirrorFloor
+  if (!published) {
+    publishFrame(frame, effect, context)
   }
   if (effect.kind === 'transcript') {
-    context.input.mirror?.append(new TextEncoder().encode(effect.line), String(effect.seq ?? context.state.since))
-    // One `raw` frame is one line by construction, so the scan needs no reassembly here.
+    // One `raw` frame is one line by construction, so neither read needs reassembly here.
     context.scanner.text(effect.line)
+    context.state = foldBackgroundWait(context.state, effect.line)
   }
   context.state = scanned(applyFrame(context.state, effect, now), context.scanner)
   context.lastFlushAt = await flushOnInterval(
@@ -436,17 +458,6 @@ async function judge(channel: TurnChannel, context: PumpContext): Promise<boolea
     outcome: interruptedResult(context.interruptedBy, await killTurn(context.input.session, context.input.handle.processId)),
   }
   return true
-}
-
-async function processGone(session: SandboxSession, processId: string): Promise<boolean> {
-  try {
-    const process = await session.getProcess(processId)
-    return !process || (await process.status()).state !== 'running'
-  }
-  catch {
-    // Unknown is not gone: a control-plane blip must not end a turn that is still running.
-    return false
-  }
 }
 
 /**

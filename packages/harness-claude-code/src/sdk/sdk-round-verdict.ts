@@ -5,7 +5,7 @@
  * What the round says about a turn that ended or timed out — which timer fired, whether a spent
  * budget outranks the host's own echo, and how a turn that cannot be reached or is gone is read.
  */
-import type { TurnTimeoutCause, TurnVerdict } from '../outcome'
+import type { HostLoss, HostLossSocket, HostReading, TurnTimeoutCause, TurnVerdict } from '../outcome'
 import type { AttemptResult } from '../turn-driver'
 import type { TerminalObservation } from './sdk-frames'
 import type { AttachRoundInput, PumpContext } from './sdk-round'
@@ -81,8 +81,26 @@ export function inheritedCause(
     : 'watchdog'
 }
 
-/** The watchdog's decision over this round's carried state — `watchdog.ts`'s, from frames. */
+/**
+ * The watchdog's decision over this round's carried state — `watchdog.ts`'s, from frames.
+ *
+ * Except while the host waits on background work: it holds a completed turn open on
+ * purpose until the CLI wakes a turn for the work that settled, and emits nothing while it
+ * does, so silence there is the expected shape of a healthy turn rather than a wedge. Only the
+ * wall-clock budget can stop it then, and the budget is what bounds a background task that never
+ * settles.
+ */
 export function timeoutCauseOf(context: PumpContext, now: number): TurnTimeoutCause | undefined {
+  const stopAsked = context.interruptedBy !== undefined || context.state.interruptedBy !== undefined
+  if (context.state.awaitingBackground === true && !stopAsked) {
+    return turnBudgetExhausted({
+      startedAt: context.input.handle.startedAtMs ?? context.state.lastActivityAt,
+      now,
+      budgetMs: context.input.budgetMs,
+    })
+      ? 'budget'
+      : undefined
+  }
   return turnTimeoutCause({
     startedAt: context.input.handle.startedAtMs ?? context.state.lastActivityAt,
     lastLogActivityAt: context.state.lastActivityAt,
@@ -125,11 +143,17 @@ export async function unreachableTimeout(context: PumpContext): Promise<AttemptR
  * cannot be read at all, leaves the two readings the cli path makes unchanged.
  *
  * The same read answers what the turn said about itself, for the same reason (`readJournalEnding`).
+ *
+ * A turn abandoned with no terminal frame carries why on its result: the probe's reading
+ * of the process, how the socket had ended, and any stop this side had asked for. Without it the
+ * run recorded a bare timeout, and a host that died could not be told from a wedge the watchdog
+ * stopped — nor a real death from a probe that misread a live host.
  */
 export async function abandoned(
   input: AttachRoundInput,
   interruptedBy: TurnTimeoutCause | undefined,
   carried: TurnVerdict | undefined,
+  gone: { reading: HostReading, socket: HostLossSocket, noTurnCause?: TurnTimeoutCause },
 ): Promise<AttemptResult> {
   const stateDir = input.handle.bridgeStateDir
   const journal = stateDir === undefined
@@ -141,6 +165,28 @@ export async function abandoned(
     const observed = observedResult(journal.terminal, interruptedBy ?? inheritedCause(journal.terminal, input, now))
     return withVerdict(budgetOutranks(observed, input, now), journal.verdict)
   }
-  console.warn(`turn host is gone with no terminal frame process_id=${input.handle.processId}`)
-  return { outcome: 'timed-out', killConfirmed: await killTurn(input.session, input.handle.processId) }
+  const stopAsked = interruptedBy ?? gone.noTurnCause
+  const hostLost: HostLoss = {
+    ...gone.reading,
+    socket: gone.socket,
+    ...(stopAsked === undefined ? {} : { stopAsked }),
+  }
+  console.warn(`turn host is gone with no terminal frame process_id=${input.handle.processId} ${describeLoss(hostLost)}`)
+  const result: AttemptResult = {
+    outcome: 'timed-out',
+    killConfirmed: await killTurn(input.session, input.handle.processId),
+    hostLost,
+    ...(stopAsked === undefined ? {} : { timedOutBy: stopAsked }),
+  }
+  return budgetOutranks(result, input, input.now())
+}
+
+/** The reading as `key=value` pairs for the warning, absent fields left out. */
+function describeLoss(loss: HostLoss): string {
+  return [
+    `process=${loss.process}`,
+    ...(loss.exitCode === undefined ? [] : [`exit_code=${String(loss.exitCode)}`]),
+    `socket=${loss.socket}`,
+    ...(loss.stopAsked === undefined ? [] : [`stop_asked=${loss.stopAsked}`]),
+  ].join(' ')
 }

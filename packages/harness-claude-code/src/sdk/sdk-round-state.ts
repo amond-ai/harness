@@ -48,6 +48,24 @@ export interface TurnRoundState {
    * ({@link TurnVerdict}).
    */
   verdict?: TurnVerdict
+  /**
+   * How many non-ambient background tasks the turn has live, as the last
+   * `background_tasks_changed` said (`sdk-background-wait.ts`). Absent when none.
+   *
+   * Carried for the reason {@link verdict} is: the message that set it and the `result` that
+   * starts the wait can land in different rounds, and a round that started without the count
+   * would read a completed `result` with work still running as the turn's end.
+   */
+  backgroundTasks?: number
+  /**
+   * Set while the host holds a completed turn open for its background work and the CLI has not
+   * woken a turn for it yet — the span the host emits nothing in, which the
+   * silence watchdog must not read as a wedge. Absent otherwise, so the step result stays small.
+   *
+   * Across the boundary because the wait routinely outlasts a window: a round that started
+   * without it would interrupt a healthy host `watchdogTimeoutMs` into its first silent round.
+   */
+  awaitingBackground?: true
 }
 
 /**

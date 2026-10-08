@@ -59,6 +59,11 @@ describe('classifyFrame', () => {
       .toEqual({ kind: 'liveness', seq: 9 })
   })
 
+  it('carries the seq of a host log line, so a replayed one can be told from a new one', () => {
+    expect(classifyFrame(JSON.stringify({ type: 'sandbox-log', seq: 7, source: 'claude-code', stream: 'stdout', line: 'x' })))
+      .toEqual({ kind: 'log', seq: 7, stream: 'stdout', line: 'x' })
+  })
+
   it('reads the resume acknowledgement and the greeting that promises it', () => {
     expect(classifyFrame(JSON.stringify({ type: 'bridge-hello', state: 'running', lastSeq: 4, capabilities: { resumeAck: true } })))
       .toEqual({ kind: 'hello', state: 'running', lastSeq: 4, resumeAck: true })

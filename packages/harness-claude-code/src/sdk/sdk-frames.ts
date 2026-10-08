@@ -61,7 +61,7 @@ export type FrameEffect
     | { kind: 'resumed', upTo: number }
     | { kind: 'transcript', seq?: number, line: string }
     | { kind: 'liveness', seq?: number }
-    | { kind: 'log', stream: 'stdout' | 'stderr', line: string }
+    | { kind: 'log', seq?: number, stream: 'stdout' | 'stderr', line: string }
     | { kind: 'terminal', seq?: number, observation: TerminalObservation }
     | { kind: 'unreadable', reason: string }
 
@@ -136,6 +136,7 @@ function effectOf(frame: Record<string, unknown>, seq: number | undefined): Fram
     case 'sandbox-log':
       return {
         kind: 'log',
+        seq,
         stream: frame.stream === 'stderr' ? 'stderr' : 'stdout',
         line: typeof frame.line === 'string' ? frame.line : '',
       }

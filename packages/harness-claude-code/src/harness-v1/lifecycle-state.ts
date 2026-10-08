@@ -44,6 +44,8 @@ export const claudeCodeRoundSchema = z.object({
   round: z.number(),
   interruptedBy: z.enum(TURN_TIMEOUT_CAUSES).optional(),
   interruptedAt: z.number().optional(),
+  backgroundTasks: z.number().optional(),
+  awaitingBackground: z.literal(true).optional(),
 })
 
 /** The two files the turn leaves behind, as the host named them (ADR D8). */

@@ -9,6 +9,8 @@
 import type { TurnHostOutboundMessage } from '@amond-ai/harness-protocol/claude-code'
 import type { TurnRoundSpec } from '../turn-driver'
 import type { ChannelEnd, TurnChannel } from './sdk-channel'
+import type { FrameEffect } from './sdk-frames'
+import type { PumpContext } from './sdk-round'
 import { turnHostOutboundMessageSchema } from '@amond-ai/harness-protocol/claude-code'
 
 /**
@@ -77,4 +79,27 @@ export function reportFrame(
     return
   }
   onFrame(validated.data as TurnHostOutboundMessage, seq)
+}
+
+/**
+ * A frame's outward effects — the observer's report, the host's log line, the mirror's append —
+ * for a frame no earlier attempt has published.
+ *
+ * Apart from the fold because a retry re-reads frames the failed attempt already published
+ *: the round folds those into its state again, which is what recovers what the failed
+ * step never committed, but emits them only once.
+ */
+export function publishFrame(
+  frame: string,
+  effect: Exclude<FrameEffect, { kind: 'unreadable' }>,
+  context: PumpContext,
+): void {
+  reportFrame(frame, 'seq' in effect ? effect.seq : undefined, context.input.onFrame)
+  if (effect.kind === 'log') {
+    // The host's captured console output — the `cli` driver's stderr side channel, live.
+    console.warn(`turn host ${effect.stream}: ${effect.line}`)
+  }
+  if (effect.kind === 'transcript') {
+    context.input.mirror?.append(new TextEncoder().encode(effect.line), String(effect.seq ?? context.state.since))
+  }
 }
