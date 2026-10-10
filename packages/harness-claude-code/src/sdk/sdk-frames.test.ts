@@ -67,8 +67,10 @@ describe('classifyFrame', () => {
   it('reads the resume acknowledgement and the greeting that promises it', () => {
     expect(classifyFrame(JSON.stringify({ type: 'bridge-hello', state: 'running', lastSeq: 4, capabilities: { resumeAck: true } })))
       .toEqual({ kind: 'hello', state: 'running', lastSeq: 4, resumeAck: true })
-    const unpromised = classifyFrame(JSON.stringify({ type: 'bridge-hello', state: 'running', capabilities: { resumeAck: 'yes' } }))
-    expect('resumeAck' in unpromised).toBe(false)
+    // A greeting that validates and declines the capability, so `resumeAckOf` itself is what
+    // leaves the flag off — not a schema refusal that never reaches it.
+    expect(classifyFrame(JSON.stringify({ type: 'bridge-hello', state: 'running', capabilities: { resumeAck: false } })))
+      .toEqual({ kind: 'hello', state: 'running' })
     expect(classifyFrame(JSON.stringify({ type: 'bridge-resumed', upTo: 12 }))).toEqual({ kind: 'resumed', upTo: 12 })
     expect(classifyFrame(JSON.stringify({ type: 'bridge-resumed' }))).toMatchObject({ kind: 'unreadable' })
   })

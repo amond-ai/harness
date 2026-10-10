@@ -72,8 +72,9 @@ export function asTurnTimeoutCause(value: unknown): TurnTimeoutCause | undefined
  * What a probe of the turn host's process read when a round found it gone.
  *
  * The four answers are the four ways `getProcess` + `status()` can say "not running", kept apart
- * because they send an operator to different places: a process the sandbox no longer knows was
- * lost with its container, one that `exited` left a code behind (137 is an OOM kill), one in
+ * because they send an operator to different places: a process with no usable sandbox record
+ * (lost with its container, or never handed back), one that `exited` left a code behind (137 is a
+ * SIGKILL, which an OOM kill is one source of, not proof of), one in
  * `error` with `no_exit_record` vanished without the supervisor seeing it go, and anything else is
  * a state this build has no name for.
  */

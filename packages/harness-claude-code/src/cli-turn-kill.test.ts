@@ -23,12 +23,17 @@ interface FakeTurn {
   status?: ProcessStatus
   /** Rejects the default (signal-less) kill, as a backend whose process is gone may. */
   defaultKillRejects?: Error
+  /** Rejects the SIGINT, as a backend that cannot send a named signal may. */
+  interruptKillRejects?: Error
 }
 
 function fakeSession(turn: FakeTurn) {
   const kill = vi.fn(async (signal?: number) => {
     if (signal === undefined && turn.defaultKillRejects) {
       throw turn.defaultKillRejects
+    }
+    if (signal === SIGINT && turn.interruptKillRejects) {
+      throw turn.interruptKillRejects
     }
   })
   const waitForExit = vi.fn(async (_options?: WaitForExitOptions) => {
@@ -110,6 +115,30 @@ describe('killTurn', () => {
       [{ timeout: INTERRUPT_SETTLE_TIMEOUT_MS }],
       [{ timeout: KILL_SETTLE_TIMEOUT_MS }],
     ])
+  })
+
+  it('escalates to a waited default kill when the interrupt cannot be sent', async () => {
+    const { sandbox, kill, waitForExit } = fakeSession({
+      waits: [{ code: 143, signal: 15, timedOut: false }],
+      interruptKillRejects: new Error('signal not supported'),
+    })
+
+    expect(await killTurn(sandbox, 'p1')).toBe(true)
+    expect(kill.mock.calls).toEqual([[SIGINT], []])
+    expect(waitForExit.mock.calls).toEqual([[{ timeout: KILL_SETTLE_TIMEOUT_MS }]])
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('watchdog interrupt request failed'))
+  })
+
+  it('leaves the verdict to the re-check when the escalated kill itself fails', async () => {
+    const { sandbox, kill } = fakeSession({
+      waits: [new SandboxWaitTimeoutError('p1', INTERRUPT_SETTLE_TIMEOUT_MS)],
+      defaultKillRejects: new Error('control plane down'),
+      status: RUNNING,
+    })
+
+    expect(await killTurn(sandbox, 'p1')).toBe(false)
+    expect(kill.mock.calls).toEqual([[SIGINT], []])
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('watchdog kill failed'))
   })
 
   it('signals nothing when the process is already gone', async () => {
