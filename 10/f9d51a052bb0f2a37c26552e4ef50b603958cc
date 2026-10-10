@@ -1,0 +1,44 @@
+packages/harness-claude-code/src/harness-v1/claude-code-session.ts
+  h_a6c74771a358b0 411-412,423-424
+packages/harness-claude-code/src/harness-v1/lifecycle-state.test.ts
+  h_a6c74771a358b0 48-58
+packages/harness-claude-code/src/harness-v1/lifecycle-state.ts
+  h_a6c74771a358b0 47-48
+packages/harness-claude-code/src/index.ts
+  h_a6c74771a358b0 35-36
+packages/harness-claude-code/src/outcome.ts
+  h_a6c74771a358b0 70-107
+packages/harness-claude-code/src/sdk/sdk-background-wait.test.ts
+  h_a6c74771a358b0 1-101
+packages/harness-claude-code/src/sdk/sdk-background-wait.ts
+  h_a6c74771a358b0 1-115
+packages/harness-claude-code/src/sdk/sdk-frames.test.ts
+  h_a6c74771a358b0 62-66
+packages/harness-claude-code/src/sdk/sdk-frames.ts
+  h_a6c74771a358b0 64,139
+packages/harness-claude-code/src/sdk/sdk-round-dial.ts
+  h_a6c74771a358b0 48-52,54-56,61
+packages/harness-claude-code/src/sdk/sdk-round-gone.ts
+  h_a6c74771a358b0 1-67
+packages/harness-claude-code/src/sdk/sdk-round-observe.ts
+  h_a6c74771a358b0 12-13,83-105
+packages/harness-claude-code/src/sdk/sdk-round-state.ts
+  h_a6c74771a358b0 51-68
+packages/harness-claude-code/src/sdk/sdk-round-verdict.ts
+  h_a6c74771a358b0 8,84-92,94-103,146-150,156,168-191
+packages/harness-claude-code/src/sdk/sdk-round.ts
+  h_a6c74771a358b0 23,34,37,39,83-90,134,143-144,154,160-162,166-170,173-176,188,326-330,333,335
+packages/harness-claude-code/src/turn-driver.ts
+  h_a6c74771a358b0 32,262-263,288,291-295,322
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "10f9d51a052bb0f2a37c26552e4ef50b603958cc",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
