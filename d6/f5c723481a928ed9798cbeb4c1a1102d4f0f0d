@@ -1,0 +1,20 @@
+packages/harness-claude-code/src/index.ts
+  h_a6c74771a358b0 89
+packages/harness-claude-code/src/sdk/sdk-round-dial.ts
+  h_a6c74771a358b0 143
+packages/harness-claude-code/src/sdk/sdk-turn-start.test.ts
+  h_a6c74771a358b0 2-4,181-265
+packages/harness-claude-code/src/sdk/sdk-turn-start.ts
+  h_a6c74771a358b0 19,24,112,116-136,336,345,352,355,358-360,367,370,375-381
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d6f5c723481a928ed9798cbeb4c1a1102d4f0f0d",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
