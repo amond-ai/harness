@@ -1,0 +1,22 @@
+packages/sandbox/src/journal/follow.ts
+  h_a6c74771a358b0 172
+packages/sandbox/src/journal/index.test.ts
+  h_a6c74771a358b0 2,20-35
+packages/sandbox/src/journal/paths.ts
+  h_a6c74771a358b0 107-110
+packages/sandbox/src/journal/reads.ts
+  h_a6c74771a358b0 188-193
+packages/sandbox/src/journal/replay.ts
+  h_a6c74771a358b0 56-57,64-67,77-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "016784c95b3077a27a174f011fece06ad155251c",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
