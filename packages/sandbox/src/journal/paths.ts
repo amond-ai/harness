@@ -104,7 +104,10 @@ export function parseJournalMeta(raw: string): JournalMeta | undefined {
   // The elements are checked, not just the array: `command` is a `SandboxCommand`, and a
   // journal file is untrusted input — it lives in the sandbox the agent itself writes to.
   // `["claude", 5]` would otherwise pass the cast and violate the tuple's own invariant.
-  if (typeof candidate.id !== 'string' || typeof candidate.pid !== 'number'
+  // The id is held to what `journalPaths` accepts: a listing builds paths from it, and one
+  // forged id would otherwise throw there and take every valid entry down with it.
+  if (typeof candidate.id !== 'string' || !isProcessId(candidate.id)
+    || typeof candidate.pid !== 'number'
     || !Array.isArray(candidate.command) || candidate.command.length === 0
     || !candidate.command.every(element => typeof element === 'string')
     || (candidate.cwd !== undefined && typeof candidate.cwd !== 'string')

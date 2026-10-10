@@ -166,10 +166,10 @@ export async function* followJournal(
   /** How the stream ends once {@link JournalTail.isGone} has agreed the process is gone. */
   async function* ending(): AsyncGenerator<ProcessLogEvent> {
     yield* drain()
-    const settled = await tail.readExitCode()
     if (!options.terminal) {
       return
     }
+    const settled = await tail.readExitCode()
     const cursor = encodeCursor(at.stdout, at.stderr)
     yield settled === undefined
       // The wrapper died before recording `$?`. Named exactly as `statusOf` names it, so a

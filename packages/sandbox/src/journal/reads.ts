@@ -185,7 +185,12 @@ export function createProcessLogs(
         caller?.removeEventListener('abort', onAbort)
       }
     }
-    return pulledStream(followed(), () => stop.abort())
+    // The listener is also dropped at cancel, so its removal does not rest on `followed` having
+    // started: a generator returned before its first `next()` never runs its `finally`.
+    return pulledStream(followed(), () => {
+      stop.abort()
+      caller?.removeEventListener('abort', onAbort)
+    })
   }
 
   return async (logOptions) => {

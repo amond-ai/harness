@@ -53,16 +53,18 @@ export interface JournalSlice {
 /**
  * Events for a read the caller has already positioned.
  *
- * Separate from {@link replayEvents} because the two reads want opposite things from the
- * journal. An unpositioned read is `replayTurn` asking for the whole transcript and how the
+ * Separate from the unpositioned read (`wholeTranscript` in `reads.ts`) because the two reads
+ * want opposite things from the journal. An unpositioned read is `replayTurn` asking for the whole transcript and how the
  * turn ended, so holding all of it is inherent — and it happens once. A positioned read is
  * the watchdog sampling liveness every few seconds for the length of a turn: it needs only
  * what arrived since last time, and taking the whole file to slice the tail off it made
  * each sample cost O(total transcript) in a 128MB isolate, so a healthy turn could fail
  * purely because its output grew (codex review, PR #260).
  *
- * The cursor still encodes the files' full lengths, not how much was served — it is a
- * position in the journal, and `data.length` is only the part that came after the last one.
+ * The cursor still encodes the files' lengths, not how much was served — it is a position in
+ * the journal, and `data.length` is only the part that came after the last one. The last event
+ * carries both full lengths; a stdout event followed by a stderr one carries stderr's position
+ * before that event, so a reader that stops between the two resumes at the stderr it missed.
  * No terminal event, for the reason the module docblock gives.
  */
 export function replayPositioned(
@@ -72,7 +74,10 @@ export function replayPositioned(
   const cursor = encodeCursor(slices.stdout.total, slices.stderr.total)
   const events: ProcessLogEvent[] = []
   if (slices.stdout.data.length > 0) {
-    events.push({ type: 'stdout', cursor, timestamp: at, data: slices.stdout.data })
+    // Each event's cursor covers only what has been delivered once it is consumed: a reader that
+    // stops after stdout must not resume past stderr bytes it never received.
+    const stderrStart = slices.stderr.total - slices.stderr.data.length
+    events.push({ type: 'stdout', cursor: encodeCursor(slices.stdout.total, stderrStart), timestamp: at, data: slices.stdout.data })
   }
   if (slices.stderr.data.length > 0) {
     events.push({ type: 'stderr', cursor, timestamp: at, data: slices.stderr.data })
