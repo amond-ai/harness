@@ -67,3 +67,42 @@ export function asTurnTimeoutCause(value: unknown): TurnTimeoutCause | undefined
     ? value as TurnTimeoutCause
     : undefined
 }
+
+/**
+ * What a probe of the turn host's process read when a round found it gone.
+ *
+ * The four answers are the four ways `getProcess` + `status()` can say "not running", kept apart
+ * because they send an operator to different places: a process with no usable sandbox record
+ * (lost with its container, or never handed back), one that `exited` left a code behind (137 is a
+ * SIGKILL, which an OOM kill is one source of, not proof of), one in
+ * `error` with `no_exit_record` vanished without the supervisor seeing it go, and anything else is
+ * a state this build has no name for.
+ */
+export const HOST_LOSS_PROCESSES = ['unknown-to-sandbox', 'exited', 'no-exit-record', 'not-running'] as const
+
+export type HostLossProcess = typeof HOST_LOSS_PROCESSES[number]
+
+/** How the round's socket had ended when the probe ran: never opened, or opened and then lost. */
+export const HOST_LOSS_SOCKETS = ['dial-failed', 'socket-closed'] as const
+
+export type HostLossSocket = typeof HOST_LOSS_SOCKETS[number]
+
+/** One probe's reading of a gone host: which way it was gone, and its exit code where it left one. */
+export interface HostReading {
+  process: HostLossProcess
+  exitCode?: number
+}
+
+/**
+ * Why a round abandoned its turn as gone with no terminal frame.
+ *
+ * Before this the abandoned reading recorded only `{ outcome: 'timed-out', killConfirmed: true }`,
+ * and a run that ended that way could not be told apart from one the watchdog stopped — nor could
+ * a host that really died from a probe that misread a live one. The reading travels to the run's
+ * result so the settle can say which it was. `stopAsked` is an interrupt this side had already
+ * sent, because a host that exits on a stop it was asked for is the expected ending of that stop.
+ */
+export interface HostLoss extends HostReading {
+  socket: HostLossSocket
+  stopAsked?: TurnTimeoutCause
+}

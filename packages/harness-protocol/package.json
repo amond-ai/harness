@@ -62,6 +62,7 @@
   },
   "devDependencies": {
     "@ai-sdk/provider": "4.0.8",
+    "@ai-sdk/provider-utils": "catalog:",
     "@pleaseai/eslint-config": "catalog:",
     "bun-types": "catalog:",
     "eslint": "catalog:",

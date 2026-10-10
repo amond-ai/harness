@@ -45,6 +45,30 @@ describe('the claude-code lifecycle state', () => {
     expect(claudeCodeLifecycleStateSchema.parse(data)).toEqual(data)
   })
 
+  it('round-trips a background wait, so a slice boundary does not lose the latch', () => {
+    const data = {
+      sandboxId: 'sbx-1',
+      handle: { processId: 'host-1', startedAtMs: 1, port: 41_001, token: 'tok', bridgeStateDir: '/s' },
+      round: { since: 12, lastActivityAt: 2, round: 3, backgroundTasks: 2, awaitingBackground: true as const },
+      attempt: 1,
+    }
+
+    expect(claudeCodeLifecycleStateSchema.parse(data)).toEqual(data)
+  })
+
+  it('refuses a background task count that is not a count', () => {
+    for (const backgroundTasks of [-1, 1.5]) {
+      const data = {
+        sandboxId: 'sbx-1',
+        handle: { processId: 'host-1', startedAtMs: 1, port: 41_001, token: 'tok', bridgeStateDir: '/s' },
+        round: { since: 12, lastActivityAt: 2, round: 3, backgroundTasks },
+        attempt: 1,
+      }
+
+      expect(claudeCodeLifecycleStateSchema.safeParse(data).success).toBe(false)
+    }
+  })
+
   it('round-trips a parked session: the artifacts, and no turn to attach to', () => {
     const data = {
       sandboxId: 'sbx-1',

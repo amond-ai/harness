@@ -29,7 +29,7 @@ import type { WsLike } from '@amond-ai/harness-transport'
 import type { SandboxProvider } from '@amond-ai/sandbox'
 import type { TurnDriverConfig } from './config'
 import type { LiveMirror } from './mirror'
-import type { AttemptOutcome, TurnTimeoutCause, TurnVerdict } from './outcome'
+import type { AttemptOutcome, HostLoss, TurnTimeoutCause, TurnVerdict } from './outcome'
 import type { PermissionMode } from './permission-mode'
 import type { TurnRoundState } from './sdk/sdk-round-state'
 import type { TurnDriverKind } from './turn-driver-kind'
@@ -259,6 +259,8 @@ export type AttemptResult
     killConfirmed?: undefined
     /** Only a timeout has a timer to name, so this is never set here. */
     timedOutBy?: undefined
+    /** Only an abandoned wait reads a lost host, and that ending is a timeout. */
+    hostLost?: undefined
     /** `sdk` only, and only from a `finish`: an `error` frame names no artifacts. */
     session?: TurnSession
     /**
@@ -283,9 +285,14 @@ export type AttemptResult
     /**
      * Which of the watchdog's two timers fired. Optional because the other two timeout paths
      * have no answer: a supervisor timeout was decided outside this workflow, and an abandoned
-     * wait ended for a reason it did not name.
+     * wait names only the stop this side asked for, if any.
      */
     timedOutBy?: TurnTimeoutCause
+    /**
+     * `sdk` only: why a round abandoned the turn as gone with no terminal frame — what the
+     * probe read and how the socket had ended. Absent on every other timeout.
+     */
+    hostLost?: HostLoss
     /**
      * `sdk` only. Present on this member too, because the *good* ending of a stop is a
      * `finish { stopped: 'interrupted' }` — a turn that answered `query.interrupt()` with a
@@ -312,6 +319,7 @@ export type AttemptResult
     exitCode?: undefined
     killConfirmed?: undefined
     timedOutBy?: undefined
+    hostLost?: undefined
     /** The session the next attempt resumes to deliver the answer into the same conversation. */
     session?: TurnSession
     /** A deferral is a pending question, never a transient failure to retry. See above. */

@@ -7,6 +7,7 @@
 // `start`/`resume` transfer that ownership. The adapter supplies only `onStart`
 // (drive its CLI/SDK and translate to wire events) and lifecycle cleanup hooks.
 
+import type { ToolResultPart } from '@ai-sdk/provider-utils'
 import type { WebSocket } from 'ws'
 import { Buffer } from 'node:buffer'
 import { randomUUID } from 'node:crypto'
@@ -294,10 +295,31 @@ export interface BridgeTurn {
    * Register interest in a host-executed tool result and resolve when the
    * matching `tool-result` arrives. The adapter emits the `tool-call` event
    * itself (via {@link emit}) using the same `toolCallId`.
+   *
+   * A result whose `toolCallId` names no pending request is kept, and a later
+   * request takes it when the id matches or its `matches` accepts it — a host
+   * can answer before the adapter asked, or under the id it saw on an earlier
+   * attempt of the same call. Both live for one turn: when it ends, or the
+   * next starts, the kept results are dropped and a request still waiting
+   * settles as an `isError` result. A result for an id already taken or
+   * settled is dropped.
    */
   requestToolResult: (
-    toolCallId: string,
-  ) => Promise<{ output: unknown, isError?: boolean }>
+    input:
+      | string
+      | {
+        toolCallId: string
+        matches?: (result: {
+          output: unknown
+          isError?: boolean
+          toolResult?: ToolResultPart
+        }) => boolean
+      },
+  ) => Promise<{
+    output: unknown
+    isError?: boolean
+    toolResult?: ToolResultPart
+  }>
 
   /**
    * Register interest in a host approval decision and resolve when the matching
@@ -393,8 +415,26 @@ export interface RunBridgeOptions<TStart extends { type: 'start' }> {
   bridgeType: string
   /** Directory for `bridge-meta.json` / `start-config.json`. Created if absent. */
   bridgeStateDir: string
-  /** Drive one prompt turn. Rejections surface to the host as an `error` event. */
+  /**
+   * Drive one prompt turn. Rejections surface to the host as an `error`
+   * event.
+   *
+   * Contract: once `turn.abortSignal` fires, wind down promptly — turns are
+   * serialized, and a `start` that arrives while an aborted turn is still
+   * tearing down waits up to {@link turnTeardownGraceMs} for this promise to
+   * settle before it is refused.
+   */
   onStart: (start: TStart, turn: BridgeTurn) => Promise<void>
+  /**
+   * How long a `start` waits for an aborted turn's teardown, in milliseconds.
+   * Turns are serialized so an aborted turn cannot emit into its replacement's
+   * event log or overlap its runtime process. Upstream lets the new turn
+   * proceed anyway once the bound passes; this bridge refuses it instead, with
+   * the same `start`-phase error a start during a running turn gets, so two
+   * turns never overlap. The default of ten seconds exceeds the turn driver's
+   * five-second hard-abort fallback.
+   */
+  turnTeardownGraceMs?: number
   /**
    * Produce the adapter-defined runtime resume data for `stop`. Defaults to
    * `{}`.
@@ -423,6 +463,7 @@ type InboundControl
     toolCallId: string
     output: unknown
     isError?: boolean
+    toolResult?: ToolResultPart
   }
   | {
     type: 'tool-approval-response'
@@ -456,6 +497,7 @@ export async function runBridge<TStart extends { type: 'start' }>(
   options: RunBridgeOptions<TStart>,
 ): Promise<BridgeHandle> {
   const { bridgeType, bridgeStateDir, onStart, onStop, onDestroy } = options
+  const teardownGraceMs = options.turnTeardownGraceMs ?? 10_000
   const expectedToken = options.token ?? procEnv.BRIDGE_CHANNEL_TOKEN ?? ''
   /*
    * Fail closed. The server binds `0.0.0.0`, and the token is the only thing
@@ -498,6 +540,12 @@ export async function runBridge<TStart extends { type: 'start' }>(
   let isFirstTurn = true
   let turnAbort: AbortController | undefined
   let currentUserMessages: InternalBridgeUserMessageQueue | undefined
+  /**
+   * Settles when the in-flight turn has fully wound down — `onStart`
+   * returned or threw AND its completion state was recorded. `undefined`
+   * between turns. A new `start` fences on this so turns never overlap.
+   */
+  let activeTurn: Promise<void> | undefined
   // The running turn's `interrupt` handler, registered by the adapter through
   // `turn.onInterrupt`. Cleared when the turn settles, so a late `interrupt`
   // is answered rather than silently dropped.
@@ -619,8 +667,65 @@ export async function runBridge<TStart extends { type: 'start' }>(
 
   const pendingToolResults = new Map<
     string,
-    (output: { output: unknown, isError?: boolean }) => void
+    {
+      resolve: (output: {
+        output: unknown
+        isError?: boolean
+        toolResult?: ToolResultPart
+      }) => void
+      matches?: (output: {
+        output: unknown
+        isError?: boolean
+        toolResult?: ToolResultPart
+      }) => boolean
+    }
   >()
+  const bufferedToolResults: Array<{
+    toolCallId: string
+    result: {
+      output: unknown
+      isError?: boolean
+      toolResult?: ToolResultPart
+    }
+  }> = []
+  /*
+   * Every id a request already took a result under, or was settled for. A
+   * retransmitted `tool-result` for one is dropped rather than buffered:
+   * buffered, a later request's `matches` could take it, and an old answer
+   * would then answer a new question.
+   */
+  const consumedToolCallIds = {
+    current: new Set<string>(),
+    previous: new Set<string>(),
+    has(toolCallId: string): boolean {
+      return this.current.has(toolCallId) || this.previous.has(toolCallId)
+    },
+    add(toolCallId: string): void {
+      this.current.add(toolCallId)
+    },
+    /** A new turn: ids stay dropped through the turn after theirs, then are forgotten. */
+    rotate(): void {
+      this.previous = this.current
+      this.current = new Set()
+    },
+  }
+  /*
+   * Buffered results and pending requests belong to one turn. When the turn
+   * ends — finish, error, abort, interrupt — or a new one starts, the buffer is
+   * dropped and every pending request is settled as an error result (never an
+   * answer), so a parked `PreToolUse` hook unblocks and nothing carries over.
+   */
+  const endTurnToolResults = (reason: string): void => {
+    for (const { toolCallId } of bufferedToolResults) {
+      consumedToolCallIds.add(toolCallId)
+    }
+    bufferedToolResults.length = 0
+    for (const [toolCallId, pending] of pendingToolResults) {
+      consumedToolCallIds.add(toolCallId)
+      pending.resolve({ output: reason, isError: true })
+    }
+    pendingToolResults.clear()
+  }
   const pendingToolApprovals = new Map<
     string,
     (response: { approved: boolean, reason?: string }) => void
@@ -690,6 +795,13 @@ export async function runBridge<TStart extends { type: 'start' }>(
    * token deltas) queued at the moment of the resume: it is not in `eventLog`,
    * so nothing replays it. That matches what a resume already means for those
    * frames, which are liveness, not transcript, and are never replayed.
+   *
+   * The tail ends in `bridge-resumed { upTo }`, sent from the same chain step.
+   * That placement is what makes it a boundary: it goes out behind the
+   * claimed entries, and ahead of the send step of any frame emitted later, so
+   * the host knows the replay is over without guessing from `lastSeq` — which
+   * counts the live-only frames above that no replay sends. It goes out even
+   * when there was nothing to replay, is not journaled, and takes no `seq`.
    */
   const replay = (ws: WebSocket, afterSeq: number): void => {
     const upTo = seqCounter
@@ -697,11 +809,32 @@ export async function runBridge<TStart extends { type: 'start' }>(
     // even when the log holds nothing newer to send.
     deliveredSeq = Math.max(afterSeq, upTo)
     journalChain = journalChain.then(() => {
-      for (const entry of eventLog) {
-        if (entry.seq > afterSeq && entry.seq <= upTo && ws.readyState === WS_OPEN) {
-          ws.send(entry.line)
+      try {
+        for (const entry of eventLog) {
+          if (entry.seq > afterSeq && entry.seq <= upTo && ws.readyState === WS_OPEN) {
+            ws.send(entry.line)
+          }
         }
       }
+      catch {
+        // Best-effort, as the chain's own send step is: a throw here would reject
+        // `journalChain` and skip every later append and send. But the mark above
+        // already counts the whole tail as delivered, so this socket must not stay
+        // the stream owner: later frames would reach it past the gap. Detach it now
+        // and close it, so the host reconnects and resumes from what it has; the log
+        // still holds the tail. No acknowledgement follows a tail that did not go out.
+        if (activeSocket === ws) {
+          activeSocket = undefined
+        }
+        try {
+          ws.close(1011, 'resume replay failed')
+        }
+        catch {
+          // already going away
+        }
+        return
+      }
+      sendControl(ws, { type: 'bridge-resumed', upTo })
     })
   }
 
@@ -887,15 +1020,52 @@ export async function runBridge<TStart extends { type: 'start' }>(
          * stream. The bridge refuses it instead (ADR: turns run through the
          * Agent SDK in a turn host), on the sending socket alone and without
          * touching any state, so the running turn is unharmed.
+         *
+         * A turn the client already aborted is different: it is on its way
+         * out, and a retry's `start` can arrive while it is still tearing
+         * down (a graceful interrupt). Upstream fences on that teardown for
+         * up to the grace and then lets the new turn run regardless; this
+         * bridge waits the same bound and refuses rather than overlap two
+         * turns, whose runtimes would then emit onto one stream. Re-checked
+         * after every wait, so two `start`s racing on one teardown cannot
+         * both get through.
          */
-        if (currentTurnState === 'running') {
-          sendControl(ws, {
-            type: 'error',
-            phase: 'start',
-            error: 'a bridge turn is already running',
-          })
-          return
+        for (;;) {
+          const pendingTurn = activeTurn
+          if (pendingTurn == null) {
+            break
+          }
+          if (turnAbort?.signal.aborted !== true) {
+            sendControl(ws, {
+              type: 'error',
+              phase: 'start',
+              error: 'a bridge turn is already running',
+            })
+            return
+          }
+          let graceTimer: ReturnType<typeof setTimeout> | undefined
+          const settled = await Promise.race([
+            pendingTurn.then(() => true as const),
+            new Promise<false>((resolve) => {
+              graceTimer = setTimeout(resolve, teardownGraceMs, false)
+              graceTimer.unref?.()
+            }),
+          ])
+          clearTimeout(graceTimer)
+          if (!settled) {
+            sendControl(ws, {
+              type: 'error',
+              phase: 'start',
+              error: `the aborted bridge turn did not finish tearing down within ${teardownGraceMs}ms`,
+            })
+            return
+          }
         }
+        let turnFinished!: () => void
+        const thisTurn = new Promise<void>((resolve) => {
+          turnFinished = resolve
+        })
+        activeTurn = thisTurn
         activeSocket = ws // asking for a turn claims the event stream
         // A new turn clears the replay log, so nothing stamped before it can
         // ever reach this socket: mark it all delivered rather than leaking a
@@ -913,7 +1083,14 @@ export async function runBridge<TStart extends { type: 'start' }>(
         journalChain = journalChain.then(() =>
           writeFile(eventLogPath, '').catch(() => {}),
         )
+        endTurnToolResults('a new bridge turn started before the host answered')
+        consumedToolCallIds.rotate()
         turnAbort = new AbortController()
+        turnAbort.signal.addEventListener(
+          'abort',
+          () => endTurnToolResults('the turn was aborted before the host answered'),
+          { once: true },
+        )
         currentTurnState = 'running'
         // Acknowledged now, not by the query's first message: a cold `query()` can take longer
         // to say anything than a client is willing to wait for proof that its `start` was
@@ -937,10 +1114,34 @@ export async function runBridge<TStart extends { type: 'start' }>(
         const userMessages = createBridgeUserMessageQueue({ respond: emit })
         const turn: BridgeTurn = {
           emit,
-          requestToolResult: toolCallId =>
-            new Promise((resolve) => {
-              pendingToolResults.set(toolCallId, resolve)
-            }),
+          requestToolResult: (requestInput) => {
+            const request
+              = typeof requestInput === 'string'
+                ? { toolCallId: requestInput }
+                : requestInput
+            const bufferedIndex = bufferedToolResults.findIndex(
+              buffered =>
+                buffered.toolCallId === request.toolCallId
+                || request.matches?.(buffered.result) === true,
+            )
+            if (bufferedIndex >= 0) {
+              const buffered = bufferedToolResults.splice(bufferedIndex, 1)[0]!
+              consumedToolCallIds.add(buffered.toolCallId)
+              consumedToolCallIds.add(request.toolCallId)
+              for (let i = bufferedToolResults.length - 1; i >= 0; i--) {
+                if (consumedToolCallIds.has(bufferedToolResults[i]!.toolCallId)) {
+                  bufferedToolResults.splice(i, 1)
+                }
+              }
+              return Promise.resolve(buffered.result)
+            }
+            return new Promise((resolve) => {
+              pendingToolResults.set(request.toolCallId, {
+                resolve,
+                matches: request.matches,
+              })
+            })
+          },
           requestToolApproval: approvalId =>
             new Promise((resolve) => {
               pendingToolApprovals.set(approvalId, resolve)
@@ -980,21 +1181,63 @@ export async function runBridge<TStart extends { type: 'start' }>(
           emitError({ error: err, message: 'bridge turn failed' })
         }
         finally {
+          endTurnToolResults('the turn ended before the host answered')
           userMessages.close()
           if (currentUserMessages === userMessages) {
             currentUserMessages = undefined
           }
-          currentInterrupt = undefined
-          currentTurnState = 'waiting'
-          void writeBridgeMeta('waiting')
+          // Only the still-active turn records completion. Turns never
+          // overlap here, so this always holds; it is upstream's guard, kept
+          // so a future change to the fence cannot mark the bridge waiting
+          // underneath a running turn.
+          if (activeTurn === thisTurn) {
+            activeTurn = undefined
+            currentInterrupt = undefined
+            currentTurnState = 'waiting'
+            void writeBridgeMeta('waiting')
+          }
+          turnFinished()
         }
         return
       }
       case 'tool-result': {
-        const resolver = pendingToolResults.get(msg.toolCallId)
-        if (resolver) {
-          pendingToolResults.delete(msg.toolCallId)
-          resolver({ output: msg.output, isError: msg.isError })
+        if (consumedToolCallIds.has(msg.toolCallId)) {
+          return
+        }
+        const result = {
+          output: msg.output,
+          isError: msg.isError,
+          toolResult: msg.toolResult,
+        }
+        const exactPending = pendingToolResults.get(msg.toolCallId)
+        const matchingPending
+          = exactPending == null
+            ? Array.from(pendingToolResults.entries()).find(
+                ([, pending]) => pending.matches?.(result) === true,
+              )
+            : undefined
+        const pending = exactPending ?? matchingPending?.[1]
+        const pendingId
+          = exactPending != null ? msg.toolCallId : matchingPending?.[0]
+        if (pending != null && pendingId != null) {
+          pendingToolResults.delete(pendingId)
+          consumedToolCallIds.add(pendingId)
+          consumedToolCallIds.add(msg.toolCallId)
+          pending.resolve(result)
+        }
+        // Buffered only while a turn runs: the buffer is the turn's, and one
+        // that arrives between turns would be dropped by the next `start`
+        // anyway, after sitting in memory for as long as the bridge idles.
+        else if (
+          activeTurn != null
+          && !bufferedToolResults.some(
+            buffered => buffered.toolCallId === msg.toolCallId,
+          )
+        ) {
+          bufferedToolResults.push({
+            toolCallId: msg.toolCallId,
+            result,
+          })
         }
         return
       }
@@ -1065,6 +1308,9 @@ export async function runBridge<TStart extends { type: 'start' }>(
           })
           return
         }
+        // An interrupt ends the turn: a question still parked would hold the
+        // CLI on its `PreToolUse` hook past the stop it was asked for.
+        endTurnToolResults('the turn was interrupted before the host answered')
         currentInterrupt(msg.reason)
         return
       }
@@ -1163,7 +1409,7 @@ export async function runBridge<TStart extends { type: 'start' }>(
       type: 'bridge-hello',
       state: currentTurnState,
       lastSeq: seqCounter,
-      capabilities: { experimental_userMessageResponses: true },
+      capabilities: { experimental_userMessageResponses: true, resumeAck: true },
     })
 
     ws.on('message', (raw: ArrayBufferLike | string) => {

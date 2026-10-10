@@ -5,9 +5,11 @@ than depended on: it must run inside the sandbox image against a pinned CLI, and
 the patches below are not upstream yet.
 
 - **Repository**: [vercel/ai](https://github.com/vercel/ai)
-- **Commit**: `3d3afacf9b587f5df1edd6cfdb91b3771d1c7e4e`
-- **Tag**: `@ai-sdk/harness-claude-code@1.0.90`
-- **Packages taken from**: `@ai-sdk/harness@1.0.87`
+- **Commit**: `eb77f09e3c06c28e860d92e0de941b143c2eecec`
+- **Tag**: `@ai-sdk/harness-claude-code@1.0.142` (the same commit carries
+  `@ai-sdk/harness@1.0.138`)
+- **Packages taken from**: `@ai-sdk/harness@1.0.138` (re-vendored from
+  `1.0.87`)
 - **License**: Apache-2.0
 
 ## File-by-file mapping
@@ -33,8 +35,15 @@ and [`harness-codex-bridge/UPSTREAM.md`](../harness-codex-bridge/UPSTREAM.md),
 kept rather than renumbered.** They are cited by number in commit messages and in
 a test comment, and a renumbering would silently repoint every one of those
 citations at a different patch. The gaps are the patches that stayed with an
-adapter; a number above 22 belongs to the Codex adapter, which arrived after the
-Claude list stopped growing.
+adapter; 23–25 belong to the Codex adapter, which arrived after the Claude list
+had stopped growing, and 26–34 to the Claude adapter's re-vendor onto
+`@ai-sdk/harness-claude-code@1.0.142`, which therefore starts above them.
+
+The `1.0.138` re-vendor took upstream's runtime as-is for the inbound
+`tool-result`'s structured `toolResult` (typed as `@ai-sdk/provider-utils`'s
+`ToolResultPart`, a type-only devDependency that is erased from the bundle) and
+the `requestToolResult({ toolCallId, matches })` form; patches 30 and 31 below
+are where it departs.
 
 5. `feat(turn-host): journal frames to disk before sending them` — the disk
    append is awaited before the frame reaches the socket, unconditionally;
@@ -118,6 +127,48 @@ Claude list stopped growing.
     (**the runtime's half**) — `emitError` forwards an optional `interruptedBy`
     the way it forwards `sessionArtifacts`, omitting the key when the caller
     names none. Deciding *when* an ending carries one is the adapter's.
+
+30. `feat(turn-host): fence a start on the aborted turn's teardown`
+    (**the runtime's half**) — upstream's `activeTurn` fence and
+    `turnTeardownGraceMs` (ten seconds by default): a `start` that arrives while
+    an aborted turn is still tearing down waits up to the grace for it. Where
+    upstream then lets the new turn run anyway, the runtime refuses it with the
+    same `start`-phase error a start during a running turn gets (patch 12), so
+    two turns never overlap. The fence is re-checked after every wait, so two
+    `start`s racing on one teardown cannot both get through, and only the
+    still-active turn records its completion.
+
+31. `feat(turn-host): answer AskUserQuestion through the host behind the run
+    policy` (**the runtime's half**) — upstream buffers a `tool-result` nobody
+    asked for yet and keeps its buffer and pending requests for the whole
+    process. Here both are scoped to the turn: on teardown (finish, error,
+    abort, interrupt) and on a new `start` the buffer is dropped and every
+    pending request settles as an `isError` result, never an answer; a result
+    that arrives while no turn runs is not buffered at all. One result
+    is buffered per `toolCallId` (first wins, and consuming one drops its
+    duplicates), and every id a request took a result under or was settled for
+    is remembered through the turn after its own, so a retransmitted answer is
+    dropped rather than answering a later, identical question through
+    `matches`. What the adapter does with the answer stayed with the Claude
+    bridge under the same number.
+
+36. `feat(turn-host): acknowledge the end of a resume replay` — upstream's
+    `resume` replays the tail and says nothing, so a client cannot tell where
+    the replay ends. The runtime now advertises `capabilities.resumeAck` in
+    `bridge-hello` and ends every replay with `bridge-resumed { upTo }`
+    (`harness-protocol` patch 7), even one with nothing to send. It is sent
+    from the same journal-chain step as the replayed entries: behind the
+    frames the replay claimed and ahead of the send step of any frame emitted
+    later, which is what makes it a boundary. It is not journaled and takes no
+    `seq`. A client can then stop a turn whose budget is already spent right
+    after this frame, instead of waiting out a settle and a `lastSeq` target
+    that counts live-only frames no replay sends. The replay's sends are now
+    best-effort, like the chain's own send step: upstream let a throwing
+    `ws.send` reject the journal chain, which skipped every later append and
+    send. A tail that fails is not acknowledged, and its socket is detached
+    and closed, so later frames never reach it past the gap and the client
+    resumes from what it really received. Every adapter on this runtime
+    advertises it, the Codex bridge included.
 
 Upstream behaviour deliberately dropped: `BRIDGE_REPLAY_FROM_DISK` as the gate on
 disk-first journaling — it is unconditional here; the env var still selects

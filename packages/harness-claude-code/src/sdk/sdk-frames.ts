@@ -55,10 +55,13 @@ export type TerminalObservation
  * arrival, not frame kind.
  */
 export type FrameEffect
-  = | { kind: 'hello', state?: string, lastSeq?: number }
+  // `resumeAck` is present, and `true`, only when the greeting advertised the capability.
+  = | { kind: 'hello', state?: string, lastSeq?: number, resumeAck?: boolean }
+    // The end of a resume's replay, from a host whose greeting advertised `resumeAck`.
+    | { kind: 'resumed', upTo: number }
     | { kind: 'transcript', seq?: number, line: string }
     | { kind: 'liveness', seq?: number }
-    | { kind: 'log', stream: 'stdout' | 'stderr', line: string }
+    | { kind: 'log', seq?: number, stream: 'stdout' | 'stderr', line: string }
     | { kind: 'terminal', seq?: number, observation: TerminalObservation }
     | { kind: 'unreadable', reason: string }
 
@@ -121,7 +124,11 @@ function effectOf(frame: Record<string, unknown>, seq: number | undefined): Fram
         kind: 'hello',
         state: typeof frame.state === 'string' ? frame.state : undefined,
         lastSeq: typeof frame.lastSeq === 'number' ? frame.lastSeq : undefined,
+        ...resumeAckOf(frame),
       }
+    case 'bridge-resumed':
+      // The schema has already refused one without a numeric `upTo` as unreadable.
+      return { kind: 'resumed', upTo: frame.upTo as number }
     case 'raw':
       // The SDK's messages *are* the CLI's `stream-json` lines, so one `raw` re-emits one line
       // of the NDJSON every existing consumer already decodes (D2, "the same NDJSON").
@@ -129,6 +136,7 @@ function effectOf(frame: Record<string, unknown>, seq: number | undefined): Fram
     case 'sandbox-log':
       return {
         kind: 'log',
+        seq,
         stream: frame.stream === 'stderr' ? 'stderr' : 'stdout',
         line: typeof frame.line === 'string' ? frame.line : '',
       }
@@ -164,6 +172,16 @@ function effectOf(frame: Record<string, unknown>, seq: number | undefined): Fram
 }
 
 /**
+ * Whether the greeting says the host acknowledges a `resume` with `bridge-resumed`, as a
+ * spreadable fragment: the key is left out for a host that does not, which is every host older
+ * than the capability.
+ */
+function resumeAckOf(frame: Record<string, unknown>): { resumeAck?: true } {
+  const capabilities = frame.capabilities as { resumeAck?: unknown } | undefined
+  return capabilities?.resumeAck === true ? { resumeAck: true } : {}
+}
+
+/**
  * The host's echo of the interrupt it answered, as a spreadable fragment.
  *
  * The key is omitted rather than set to `undefined` when the frame carries none, so "this host
@@ -184,4 +202,42 @@ function describeFrameError(error: unknown): string {
     return (error as { message: string }).message
   }
   return JSON.stringify(error) ?? 'unknown'
+}
+
+/**
+ * What the host answers an `interrupt` with when it has no running turn to stop, character for
+ * character as `bridge-runtime.ts` writes it (`case 'interrupt'`).
+ *
+ * It is a reply on the sending socket only, through `sendControl`: never journaled, never on the
+ * event stream, and so carrying no `seq`. That is the whole of what tells it apart from a turn
+ * that failed — the text alone would be a message a turn could in principle raise itself.
+ */
+export const NO_RUNNING_TURN_ERROR = 'no running turn to interrupt'
+
+/** Whether a frame is the host's "nothing to stop" reply to our `interrupt`, not a turn's ending. */
+export function isNoRunningTurnReply(effect: FrameEffect): boolean {
+  return isControlReply(effect, error => error === NO_RUNNING_TURN_ERROR)
+}
+
+/**
+ * How the host's refusal of an `interrupt` reason it has no meaning for begins, character for
+ * character as `bridge-runtime.ts` writes it (`case 'interrupt'`): the reason follows, quoted.
+ *
+ * It travels like {@link NO_RUNNING_TURN_ERROR} — on the sending socket only, with no `seq` — and
+ * says the opposite about the turn: one is running, and the host left it running. Only a client
+ * that names a stop cause the host's image does not know yet produces it.
+ */
+export const UNKNOWN_INTERRUPT_REASON_ERROR = 'unknown interrupt reason \''
+
+/** Whether a frame is the host refusing our `interrupt`'s reason, not a turn's ending. */
+export function isRefusedInterruptReply(effect: FrameEffect): boolean {
+  return isControlReply(effect, error => error.startsWith(UNKNOWN_INTERRUPT_REASON_ERROR))
+}
+
+function isControlReply(effect: FrameEffect, matches: (error: string) => boolean): boolean {
+  return effect.kind === 'terminal'
+    && effect.seq === undefined
+    && effect.observation.type === 'error'
+    && effect.observation.phase === 'run'
+    && matches(effect.observation.error)
 }

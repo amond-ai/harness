@@ -22,6 +22,9 @@ import {
   harnessV1TextStartPartSchema,
   harnessV1ToolApprovalRequestPartSchema,
   harnessV1ToolCallPartSchema,
+  harnessV1ToolInputDeltaPartSchema,
+  harnessV1ToolInputEndPartSchema,
+  harnessV1ToolInputStartPartSchema,
   harnessV1ToolResultPartSchema,
 } from './harness-v1-stream-part'
 
@@ -41,8 +44,9 @@ import {
  *     member schemas from `harness-v1-stream-part.ts`), because the part type is
  *     compile-time only and the frames need runtime validation at the boundary.
  *  2. The transport/control frames that are NOT consumer events — `bridge-hello`
- *     (handshake), `bridge-stop` (runtime resume data), `bridge-thread` (a resume
- *     coordinate some runtimes announce). These ride the same socket.
+ *     (handshake), `bridge-resumed` (the end of a resume replay), `bridge-stop`
+ *     (runtime resume data), `bridge-thread` (a resume coordinate some runtimes
+ *     announce). These ride the same socket.
  *  3. The INBOUND command vocabulary the host sends back: the shared commands
  *     live here; the per-adapter `start` payload extends
  *     `harnessV1BridgeStartBaseSchema` and assembles the final inbound union in
@@ -137,8 +141,25 @@ export const harnessV1BridgeHelloSchema = z.object({
   capabilities: z
     .object({
       experimental_userMessageResponses: z.boolean().optional(),
+      /**
+       * The bridge acknowledges each `resume` with a `bridge-resumed` frame,
+       * so the host can tell where the replay ends instead of guessing it.
+       */
+      resumeAck: z.boolean().optional(),
     })
     .optional(),
+})
+
+/**
+ * The bridge's acknowledgement of a `resume`, sent on the resuming socket after
+ * the replay. Every journaled frame at or below `upTo` that the host had not
+ * seen has already gone out ahead of it on that socket; anything emitted later
+ * carries a higher `seq` and follows it. Not journaled, and carries no `seq`.
+ * Sent only by a bridge whose `bridge-hello` advertises `resumeAck`.
+ */
+export const harnessV1BridgeResumedSchema = z.object({
+  type: z.literal('bridge-resumed'),
+  upTo: z.number(),
 })
 
 export const experimental_harnessV1BridgeUserMessageResponseSchema = z.object({
@@ -214,6 +235,9 @@ export const harnessV1BridgeOutboundMessageSchema = z.discriminatedUnion(
     harnessV1ReasoningStartPartSchema,
     harnessV1ReasoningDeltaPartSchema,
     harnessV1ReasoningEndPartSchema,
+    harnessV1ToolInputStartPartSchema,
+    harnessV1ToolInputDeltaPartSchema,
+    harnessV1ToolInputEndPartSchema,
     harnessV1ToolCallPartSchema,
     harnessV1ToolApprovalRequestPartSchema,
     harnessV1ToolResultPartSchema,
@@ -224,6 +248,7 @@ export const harnessV1BridgeOutboundMessageSchema = z.discriminatedUnion(
     harnessV1ErrorPartSchema,
     harnessV1RawPartSchema,
     harnessV1BridgeHelloSchema,
+    harnessV1BridgeResumedSchema,
     experimental_harnessV1BridgeUserMessageResponseSchema,
     harnessV1BridgeStopSchema,
     harnessV1BridgeThreadSchema,
@@ -234,6 +259,10 @@ export const harnessV1BridgeOutboundMessageSchema = z.discriminatedUnion(
 
 export type HarnessV1BridgeOutboundMessage = z.infer<
   typeof harnessV1BridgeOutboundMessageSchema
+>
+
+export type HarnessV1BridgeResumed = z.infer<
+  typeof harnessV1BridgeResumedSchema
 >
 
 export type Experimental_HarnessV1BridgeUserMessageResponse = z.infer<
@@ -290,6 +319,7 @@ export const harnessV1BridgeToolResultInboundSchema = z.object({
   toolCallId: z.string(),
   output: z.unknown(),
   isError: z.boolean().optional(),
+  toolResult: z.unknown().optional(),
 })
 
 export const harnessV1BridgeToolApprovalResponseInboundSchema = z.object({

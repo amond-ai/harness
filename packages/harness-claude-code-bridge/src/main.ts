@@ -38,14 +38,17 @@ if (!args.bridgeStateDir) {
 }
 
 try {
+  const driver = createTurnDriver({ query, workdir: args.workdir })
   // eslint-disable-next-line antfu/no-top-level-await
   await runBridge<StartMessage>({
     bridgeType: 'claude-code',
     bridgeStateDir: args.bridgeStateDir,
-    onStart: createTurnDriver({ query, workdir: args.workdir }),
-    // Claude Code's session state lives on the sandbox filesystem; the resume
-    // payload is empty.
-    onStop: () => ({}),
+    onStart: driver,
+    // Claude Code's conversation state lives in the runtime's own store, keyed
+    // by working directory. The resume payload names the exact conversation so
+    // a later resume does not have to fall back to "most recent in this
+    // workdir".
+    onStop: driver.onStop,
   })
 }
 catch (err) {

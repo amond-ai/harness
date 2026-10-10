@@ -52,6 +52,7 @@
     "ws": "catalog:sandbox-image"
   },
   "devDependencies": {
+    "@ai-sdk/provider-utils": "catalog:",
     "@amond-ai/harness-protocol": "workspace:*",
     "@pleaseai/eslint-config": "catalog:",
     "@types/ws": "catalog:",

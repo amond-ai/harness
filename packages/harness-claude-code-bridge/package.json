@@ -51,6 +51,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@amond-ai/harness-claude-code": "workspace:*",
     "@pleaseai/eslint-config": "catalog:",
     "@types/ws": "catalog:",
     "bun-types": "catalog:",

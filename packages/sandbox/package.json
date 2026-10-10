@@ -29,6 +29,10 @@
     ".": {
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
+    },
+    "./journal": {
+      "types": "./dist/journal/index.d.mts",
+      "default": "./dist/journal/index.mjs"
     }
   },
   "main": "./dist/index.mjs",
@@ -41,7 +45,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsdown src/index.ts --dts",
+    "build": "tsdown src/index.ts src/journal/index.ts --dts",
     "check": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

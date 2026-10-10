@@ -32,8 +32,8 @@ export type { LogSample } from './log-sample'
 export { LOG_READ_TIMEOUT_MS, readLogSample } from './log-sample'
 export type { LiveMirror } from './mirror'
 export { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS, LIVE_MIRROR_MAX_BYTES } from './mirror'
-export type { AttemptOutcome, TurnTimeoutCause, TurnVerdict } from './outcome'
-export { asTurnTimeoutCause, ATTEMPT_OUTCOMES, TURN_TIMEOUT_CAUSES } from './outcome'
+export type { AttemptOutcome, HostLoss, HostLossProcess, HostLossSocket, HostReading, TurnTimeoutCause, TurnVerdict } from './outcome'
+export { asTurnTimeoutCause, ATTEMPT_OUTCOMES, HOST_LOSS_PROCESSES, HOST_LOSS_SOCKETS, TURN_TIMEOUT_CAUSES } from './outcome'
 export type { PermissionMode } from './permission-mode'
 export { parsePermissionMode, PERMISSION_MODES } from './permission-mode'
 export type { DemuxedProcessStream, ProcessLogEvent, ProcessSideChannel } from './process-ndjson'
@@ -56,7 +56,13 @@ export {
 export type { ChannelEnd, TurnChannel } from './sdk/sdk-channel'
 export { createTurnChannel } from './sdk/sdk-channel'
 export type { FrameEffect, TerminalObservation } from './sdk/sdk-frames'
-export { classifyFrame } from './sdk/sdk-frames'
+export {
+  classifyFrame,
+  isNoRunningTurnReply,
+  isRefusedInterruptReply,
+  NO_RUNNING_TURN_ERROR,
+  UNKNOWN_INTERRUPT_REASON_ERROR,
+} from './sdk/sdk-frames'
 export type { JournalTail } from './sdk/sdk-journal'
 export {
   JOURNAL_TAIL_TIMEOUT_MS,
@@ -67,7 +73,9 @@ export {
   sdkJournalTranscript,
 } from './sdk/sdk-journal'
 export type { AttachRoundInput } from './sdk/sdk-round'
-export { BRIDGE_CONNECT_TIMEOUT_MS, ROUND_RECONNECT_BACKOFF_MS, runAttachRound } from './sdk/sdk-round'
+export { ROUND_RECONNECT_BACKOFF_MS, runAttachRound } from './sdk/sdk-round'
+export { BRIDGE_CONNECT_TIMEOUT_MS, SPENT_BUDGET_CONNECT_TIMEOUT_MS } from './sdk/sdk-round-dial'
+export { RESUME_ACK_TIMEOUT_MS, RESUME_SETTLE_MS } from './sdk/sdk-round-settle'
 export {
   applyFrame,
   interruptedResult,
@@ -78,7 +86,7 @@ export {
 export type { SdkTurnDriverInput } from './sdk/sdk-turn-driver'
 export { sdkTurnDriver } from './sdk/sdk-turn-driver'
 export type { SdkHandOffInput, SdkStartInput } from './sdk/sdk-turn-start'
-export { BRIDGE_READY_TIMEOUT_MS, handTurnToHost, startTurnHost } from './sdk/sdk-turn-start'
+export { BRIDGE_READY_TIMEOUT_MS, handTurnToHost, startTurnHost, TurnHostBootError } from './sdk/sdk-turn-start'
 export type {
   AttemptResult,
   ClaudeArgv,

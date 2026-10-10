@@ -20,6 +20,8 @@ export interface FakeQuery {
   readonly options: Options | undefined
   /** How many times `interrupt()` was called. */
   readonly interruptCount: number
+  /** How many times the query was disposed through `return()`. */
+  readonly returnCount: number
   readonly called: boolean
   /** How many times `query()` was invoked — one per turn the driver started. */
   readonly callCount: number
@@ -39,6 +41,11 @@ export interface FakeQueryOptions {
    * answers at all, which is the case the host's escalation timer exists for.
    */
   resultOnInterrupt?: false | Record<string, unknown>
+  /**
+   * End the stream once the driver's input ends, the way the real CLI exits when its stdin
+   * closes while it is idle. Off by default: the script decides where a stream ends.
+   */
+  endOnInputClose?: boolean
 }
 
 export function createFakeQuery(
@@ -50,6 +57,7 @@ export function createFakeQuery(
   let ended = false
   let options: Options | undefined
   let interruptCount = 0
+  let returnCount = 0
   let callCount = 0
 
   const push = (message: Record<string, unknown>): void => {
@@ -74,8 +82,49 @@ export function createFakeQuery(
   const fn: QueryFn = (params) => {
     callCount++
     options = params.options
+    // The real SDK ends its iteration when the controller it was handed aborts; a host `abort`
+    // frame reaches the query through that controller and nothing else. `next()` below reads the
+    // signal itself, which covers a controller the driver had already aborted before it called
+    // us, so this listener exists only to wake a `next()` that is already waiting. It must not
+    // call `end()`: `ended` belongs to the whole fake, and a later turn on the same one would
+    // then read this turn's abort as its own end of stream.
+    const signal = params.options?.abortController?.signal
+    signal?.addEventListener('abort', () => {
+      if (waiter) {
+        const resolve = waiter
+        waiter = undefined
+        resolve({ value: undefined, done: true })
+      }
+    }, { once: true })
+    // Per call, for the same reason the abort listener above does not call `end()`: the input
+    // that closed is this turn's, and a later turn on the same fake has its own.
+    let inputEnded = false
+    if (behaviour.endOnInputClose && typeof params.prompt !== 'string') {
+      void (async () => {
+        for await (const _message of params.prompt as AsyncIterable<unknown>) {
+          // Drained only to observe the end of input.
+        }
+      })()
+        .catch(() => {
+          // An input that fails has ended as surely as one that closed.
+        })
+        .finally(() => {
+          inputEnded = true
+          if (waiter) {
+            const resolve = waiter
+            waiter = undefined
+            resolve({ value: undefined, done: true })
+          }
+        })
+    }
     const iterator: AsyncIterator<SDKMessage> = {
       next: () => {
+        // An abort tears the real SDK's child down, so anything still queued when it lands is
+        // never delivered. Draining the script past that point would let a test observe messages
+        // no aborted turn can produce.
+        if (signal?.aborted) {
+          return Promise.resolve({ value: undefined, done: true })
+        }
         const next = queued.shift()
         if (next !== undefined) {
           return Promise.resolve({
@@ -83,7 +132,7 @@ export function createFakeQuery(
             done: false,
           })
         }
-        if (ended) {
+        if (ended || inputEnded) {
           return Promise.resolve({ value: undefined, done: true })
         }
         return new Promise<IteratorResult<SDKMessage>>((resolve) => {
@@ -94,6 +143,10 @@ export function createFakeQuery(
     const query = {
       [Symbol.asyncIterator]: () => iterator,
       next: () => iterator.next(),
+      return: () => {
+        returnCount++
+        return Promise.resolve({ value: undefined, done: true })
+      },
       interrupt: () => {
         interruptCount++
         if (behaviour.resultOnInterrupt !== false) {
@@ -114,6 +167,9 @@ export function createFakeQuery(
     },
     get interruptCount() {
       return interruptCount
+    },
+    get returnCount() {
+      return returnCount
     },
     get called() {
       return callCount > 0
@@ -180,20 +236,27 @@ export interface Host {
 export async function startHost(input: {
   query: QueryFn
   exit?: (code: number) => void
+  abortFallbackMs?: number
+  turnTeardownGraceMs?: number
 }): Promise<Host> {
   const bridgeStateDir = await mkdtemp(join(tmpdir(), 'turn-host-test-'))
   const token = `t-${Math.random().toString(36).slice(2)}`
+  // Wired the way `main.ts` wires it, `onStop` included.
+  const driver = createTurnDriver({
+    query: input.query,
+    workdir: '/workspace/repo',
+    exit: input.exit ?? (() => {}),
+    abortFallbackMs: input.abortFallbackMs,
+  })
   const handle = await runBridge({
     bridgeType: 'claude-code',
     bridgeStateDir,
     port: 0,
     token,
-    onStart: createTurnDriver({
-      query: input.query,
-      workdir: '/workspace/repo',
-      exit: input.exit ?? (() => {}),
-    }),
+    onStart: driver,
+    onStop: driver.onStop,
     onExit: () => {},
+    turnTeardownGraceMs: input.turnTeardownGraceMs,
   })
   const journalPath = join(bridgeStateDir, 'event-log.ndjson')
   const sockets: WebSocket[] = []

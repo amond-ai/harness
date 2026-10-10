@@ -32,6 +32,21 @@ describe('the turn host\'s start schema', () => {
       }).success).toBe(true)
     }
   })
+  it('accepts the start fields taken at harness-claude-code@1.0.142', () => {
+    const parsed = startMessageSchema.safeParse({
+      type: 'start',
+      prompt: 'do the thing',
+      agentProgressSummaries: true,
+      forwardSubagentText: false,
+      resumeSessionId: 'sess-1',
+    })
+    expect(parsed.success).toBe(true)
+    expect(parsed.data).toMatchObject({
+      agentProgressSummaries: true,
+      forwardSubagentText: false,
+      resumeSessionId: 'sess-1',
+    })
+  })
 })
 
 describe('the inbound union', () => {
@@ -46,6 +61,13 @@ describe('the inbound union', () => {
       type: 'interrupt',
       reason: 'whenever',
     }).success).toBe(false)
+  })
+
+  it('keeps the structured tool result on an inbound tool-result', () => {
+    const toolResult = { type: 'tool-result', toolCallId: 'call-1', toolName: 'askUserQuestions', output: { type: 'json', value: {} } }
+    const parsed = inboundMessageSchema.safeParse({ type: 'tool-result', toolCallId: 'call-1', output: {}, toolResult })
+    expect(parsed.success).toBe(true)
+    expect(parsed.data).toMatchObject({ toolResult })
   })
 })
 
@@ -187,6 +209,25 @@ describe('the turn host\'s outbound union', () => {
     }).success).toBe(true)
   })
 
+  it('accepts the tool-input parts and a counted tool call, in both unions', () => {
+    for (const frame of [
+      { type: 'tool-input-start', id: 'toolu_1', toolName: 'bash', providerExecuted: true },
+      { type: 'tool-input-delta', id: 'toolu_1', delta: '{"command":' },
+      { type: 'tool-input-end', id: 'toolu_1' },
+      { type: 'tool-call', toolCallId: 'toolu_1', toolName: 'bash', input: '{}', stepToolCallCount: 2 },
+    ]) {
+      expect(harnessV1BridgeOutboundMessageSchema.safeParse(frame).success).toBe(true)
+      expect(turnHostOutboundMessageSchema.safeParse(frame).success).toBe(true)
+    }
+    expect(turnHostOutboundMessageSchema.safeParse({
+      type: 'tool-call',
+      toolCallId: 'toolu_1',
+      toolName: 'bash',
+      input: '{}',
+      stepToolCallCount: 0,
+    }).success).toBe(false)
+  })
+
   it('still accepts every frame the upstream union carries', () => {
     for (const frame of [
       { type: 'bridge-hello', state: 'waiting', lastSeq: 0 },
@@ -195,5 +236,25 @@ describe('the turn host\'s outbound union', () => {
     ]) {
       expect(turnHostOutboundMessageSchema.safeParse(frame).success).toBe(true)
     }
+  })
+
+  it('keeps the resume-ack capability a greeting advertises', () => {
+    const hello = { type: 'bridge-hello', state: 'running', lastSeq: 7, capabilities: { resumeAck: true } }
+    expect(harnessV1BridgeOutboundMessageSchema.parse(hello)).toMatchObject({ capabilities: { resumeAck: true } })
+    expect(turnHostOutboundMessageSchema.parse(hello)).toMatchObject({ capabilities: { resumeAck: true } })
+  })
+
+  /*
+   * The replay boundary. Validated by both unions, because the client reads it through
+   * the extended one and the upstream-shaped one is what the host's own frames are checked
+   * against; a `bridge-resumed` that either refused would be read as unreadable and the round
+   * would wait out the ack's timeout for a frame it already had.
+   */
+  it('accepts a resume acknowledgement and refuses one that names no boundary', () => {
+    const resumed = { type: 'bridge-resumed', upTo: 12 }
+    expect(harnessV1BridgeOutboundMessageSchema.parse(resumed)).toEqual(resumed)
+    expect(turnHostOutboundMessageSchema.parse(resumed)).toEqual(resumed)
+    expect(turnHostOutboundMessageSchema.safeParse({ type: 'bridge-resumed' }).success).toBe(false)
+    expect(turnHostOutboundMessageSchema.safeParse({ type: 'bridge-resumed', upTo: '12' }).success).toBe(false)
   })
 })

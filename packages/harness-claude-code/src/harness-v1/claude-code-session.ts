@@ -408,6 +408,8 @@ function previousRound(cursor: ClaudeCodeRoundCursor | undefined): TurnRoundStat
     lastActivityAt: cursor.lastActivityAt,
     ...(cursor.interruptedBy === undefined ? {} : { interruptedBy: cursor.interruptedBy }),
     ...(cursor.interruptedAt === undefined ? {} : { interruptedAt: cursor.interruptedAt }),
+    ...(cursor.backgroundTasks === undefined ? {} : { backgroundTasks: cursor.backgroundTasks }),
+    ...(cursor.awaitingBackground === undefined ? {} : { awaitingBackground: cursor.awaitingBackground }),
   }
 }
 
@@ -418,6 +420,8 @@ function roundCursor(state: TurnRoundState): Omit<ClaudeCodeRoundCursor, 'round'
     lastActivityAt: state.lastActivityAt,
     ...(state.interruptedBy === undefined ? {} : { interruptedBy: state.interruptedBy }),
     ...(state.interruptedAt === undefined ? {} : { interruptedAt: state.interruptedAt }),
+    ...(state.backgroundTasks === undefined ? {} : { backgroundTasks: state.backgroundTasks }),
+    ...(state.awaitingBackground === undefined ? {} : { awaitingBackground: state.awaitingBackground }),
   }
 }
 
