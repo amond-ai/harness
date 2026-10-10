@@ -1,0 +1,26 @@
+packages/harness-claude-code/src/sdk/sdk-round-noturn.ts
+  h_a6c74771a358b0 1-84
+packages/harness-claude-code/src/index.ts
+  h_a6c74771a358b0 70-72
+packages/harness-claude-code/src/sdk/sdk-round-dial.ts
+  h_a6c74771a358b0 1-149
+packages/harness-claude-code/src/sdk/sdk-round-verdict.ts
+  h_a6c74771a358b0 1-146
+packages/harness-claude-code/src/sdk/sdk-frames.ts
+  h_a6c74771a358b0 188-206
+packages/harness-claude-code/src/sdk/sdk-round-settle.ts
+  h_a6c74771a358b0 1-83
+packages/harness-claude-code/src/sdk/sdk-round.ts
+  h_a6c74771a358b0 23,26,33-36,38,40,77,92-98,101-111,115,126-128,131,153,179-181,186,192-194,205,211-280,289-291,392-394
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1ca6498e32f57a17ad44574c7f574c2ea1378db9",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
