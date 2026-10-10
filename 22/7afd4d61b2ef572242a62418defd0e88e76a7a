@@ -1,0 +1,26 @@
+packages/harness-bridge-runtime/UPSTREAM.md
+  h_a6c74771a358b0 146-147
+packages/harness-bridge-runtime/src/bridge-runtime.ts
+  h_a6c74771a358b0 1228-1230,1232-1233
+packages/harness-claude-code-bridge/UPSTREAM.md
+  h_a6c74771a358b0 173-178,229-230,236-238
+packages/harness-claude-code-bridge/src/create-emit-stream-event.ts
+  h_a6c74771a358b0 354-357,689-690,692-694,696-698
+packages/harness-claude-code-bridge/src/turn-driver.ts
+  h_a6c74771a358b0 377-381,388-389,398-400,406-408
+packages/harness-claude-code-bridge/test/frames.test.ts
+  h_a6c74771a358b0 377-398
+packages/harness-claude-code-bridge/test/question-tool.test.ts
+  h_a6c74771a358b0 111-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "227afd4d61b2ef572242a62418defd0e88e76a7a",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
