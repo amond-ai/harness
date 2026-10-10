@@ -1,0 +1,18 @@
+packages/harness-claude-code-bridge/UPSTREAM.md
+  h_a6c74771a358b0 239-241
+packages/harness-claude-code-bridge/src/turn-driver.ts
+  h_a6c74771a358b0 234-235,252-264,301,311,766,775,795
+packages/harness-claude-code-bridge/test/question-tool.test.ts
+  h_a6c74771a358b0 135-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c0c36729ec70a3b14d7796d60061122dd79525cf",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
