@@ -15,7 +15,7 @@ import type { SandboxProcessHandle } from '@amond-ai/sandbox'
 import type { PermissionMode } from '../permission-mode'
 import type { TurnHandle } from '../turn-driver'
 import type { TurnChannel } from './sdk-channel'
-import { describeCause as describe } from '@amond-ai/redact'
+import { describeCause as describe, maskCredentialLines } from '@amond-ai/redact'
 import { INTERRUPT_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
 import { iterateStream } from '../process-ndjson'
 import { readBridgeAnnouncement } from './sdk-bridge-config'
@@ -273,30 +273,64 @@ function listField(
 }
 
 /**
+ * How much of the host's stderr an exit-before-ready error carries, after masking.
+ *
+ * A diagnostic, not a log: the last lines say why a process died, and an error message that
+ * carried the whole stream would be a different failure.
+ */
+const HOST_STDERR_TAIL_CHARS = 2_048
+
+/** How much masked stderr is kept — a bound on memory, wider than the tail it feeds. */
+const HOST_STDERR_KEEP_CHARS = 16_384
+
+/** Stands in for an unterminated stderr line too long to keep whole, and so too long to mask. */
+const HOST_STDERR_DROPPED_LINE = '[stderr line too long to keep]'
+
+/** What the host's log has said so far, accumulated across cursor batches. */
+interface HostLog {
+  stdout: string
+  /** Complete stderr lines, each masked exactly once, as it ended. Safe to cut anywhere. */
+  stderr: string
+  /** The stderr line still being written: never masked yet, so never cut. */
+  stderrLine: string
+  since: string | undefined
+  /** Present once the log or the process status says the host has ended. */
+  exit?: { code: number | undefined }
+}
+
+/**
  * Read the host's stdout until it says it is listening.
  *
  * Through the process log cursor rather than a connect-retry loop, because the two failures look
  * identical from a socket and completely different in the log: a host still booting and a host
  * that died at `bridge-fatal` both refuse a connection, and only the log says which.
+ *
+ * A host that *exits* without announcing is the third case, and it must not wait out the budget
+ * either: a shim that refuses to run (an untrusted mise config) prints to stderr and exits 1, and
+ * nothing will ever appear on stdout. Once the process has ended, the log is read one last time —
+ * late output still counts, a `ready` or `fatal` in it is honored first — and the failure carries
+ * the exit code and the masked tail of stderr.
  */
 async function awaitBridgeReady(process: SandboxProcessHandle): Promise<void> {
   const deadline = Date.now() + BRIDGE_READY_TIMEOUT_MS
-  let since: string | undefined
-  let text = ''
-  // One decoder for the whole wait, not one per poll: the announcement is ASCII, but anything
-  // else the host prints need not be, and a multi-byte character split across two cursor batches
-  // only survives if the same streaming decoder sees both halves.
-  const decoder = new TextDecoder()
+  const log: HostLog = { stdout: '', stderr: '', stderrLine: '', since: undefined }
+  // One decoder per stream for the whole wait, not one per poll: the announcement is ASCII, but
+  // anything else the host prints need not be, and a multi-byte character split across two cursor
+  // batches only survives if the same streaming decoder sees both halves.
+  const decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() }
   for (;;) {
-    const batch = await readStdout(process, since, decoder)
-    since = batch.cursor ?? since
-    text += batch.text
-    const announcement = readBridgeAnnouncement(text)
-    if (announcement?.status === 'ready') {
+    await readHostLog(process, log, decoders)
+    if (isAnnounced(log.stdout)) {
       return
     }
-    if (announcement?.status === 'fatal') {
-      throw new Error(`turn host refused to start: ${announcement.message}`)
+    log.exit ??= await hostExit(process)
+    if (log.exit) {
+      // The exit may have outrun the last read: one more, so late output is not missed.
+      await readHostLog(process, log, decoders)
+      if (isAnnounced(log.stdout)) {
+        return
+      }
+      throw new Error(exitedBeforeReady(log))
     }
     if (Date.now() >= deadline) {
       throw new Error(`turn host did not announce a listening socket within ${String(BRIDGE_READY_TIMEOUT_MS)}ms`)
@@ -305,27 +339,89 @@ async function awaitBridgeReady(process: SandboxProcessHandle): Promise<void> {
   }
 }
 
-/** One cursor batch of the host's stdout, and where the next read resumes from. */
-async function readStdout(
-  process: SandboxProcessHandle,
-  since: string | undefined,
-  decoder: TextDecoder,
-): Promise<{ text: string, cursor: string | undefined }> {
+/** Whether stdout holds `bridge-ready`; a `bridge-fatal` is raised as the failure it is. */
+function isAnnounced(stdout: string): boolean {
+  const announcement = readBridgeAnnouncement(stdout)
+  if (announcement?.status === 'fatal') {
+    throw new Error(`turn host refused to start: ${announcement.message}`)
+  }
+  return announcement?.status === 'ready'
+}
+
+/**
+ * Fold one decoded stderr chunk into `log`, masking each line once as it completes.
+ *
+ * Masked per line rather than over the kept text at the end, because the kept text is cut to bound
+ * memory, and a cut before the masker leaves half a credential no shape matches. Masking a line
+ * when it ends, and cutting only text already masked, means no cut can land inside an unmasked
+ * value. The masker is also run only once over any text (`maskCredentialLines`), which a
+ * mask-on-every-trim scheme would break. The line still being written is the one unmasked piece; it
+ * is dropped whole if it outgrows the bound, never kept in part.
+ */
+function appendStderr(log: HostLog, chunk: string): void {
+  const lines = (log.stderrLine + chunk).split('\n')
+  log.stderrLine = lines.pop() ?? ''
+  if (lines.length > 0) {
+    log.stderr += `${maskCredentialLines(lines.join('\n'))}\n`
+  }
+  if (log.stderrLine.length > HOST_STDERR_KEEP_CHARS) {
+    log.stderr += `${HOST_STDERR_DROPPED_LINE}\n`
+    log.stderrLine = ''
+  }
+  if (log.stderr.length > HOST_STDERR_KEEP_CHARS * 2) {
+    log.stderr = log.stderr.slice(-HOST_STDERR_KEEP_CHARS)
+  }
+}
+
+function exitedBeforeReady(log: HostLog): string {
+  const code = log.exit?.code === undefined ? 'unknown' : String(log.exit.code)
+  // The unfinished last line is masked here, its one and only pass; everything before it already
+  // was, so the cut below lands in masked text.
+  const line = log.stderrLine ? maskCredentialLines(log.stderrLine) : ''
+  const tail = `${log.stderr}${line}`.trim().slice(-HOST_STDERR_TAIL_CHARS)
+  return `turn host exited with code ${code} before announcing a listening socket${tail ? `: ${tail}` : ''}`
+}
+
+/** The host's exit, when its status says it has ended; a status that cannot be read says nothing. */
+async function hostExit(process: SandboxProcessHandle): Promise<HostLog['exit']> {
   try {
-    const logs = await process.logs({ since, replay: true, follow: false })
-    let text = ''
-    let cursor = since
+    const status = await process.status()
+    if (status.state === 'exited') {
+      return { code: status.exit.code }
+    }
+    return status.state === 'error' ? { code: undefined } : undefined
+  }
+  catch (cause) {
+    console.warn(`turn host status read failed process_id=${process.id} error="${describe(cause)}"`)
+    return undefined
+  }
+}
+
+/** One cursor batch of the host's output, folded into `log`. */
+async function readHostLog(
+  process: SandboxProcessHandle,
+  log: HostLog,
+  decoders: { stdout: TextDecoder, stderr: TextDecoder },
+): Promise<void> {
+  try {
+    const logs = await process.logs({ since: log.since, replay: true, follow: false })
     for await (const event of iterateStream(logs)) {
-      cursor = event.cursor ?? cursor
+      log.since = event.cursor ?? log.since
       if (event.type === 'stdout' && event.data) {
-        text += decoder.decode(event.data, { stream: true })
+        log.stdout += decoders.stdout.decode(event.data, { stream: true })
+      }
+      else if (event.type === 'stderr' && event.data) {
+        // Bounded as it accumulates, not only when it is read: a host that floods stderr while
+        // still booting would otherwise hold the whole stream in the caller's memory.
+        appendStderr(log, decoders.stderr.decode(event.data, { stream: true }))
+      }
+      else if (event.type === 'terminal') {
+        log.exit = { code: event.state === 'exited' ? event.exit.code : undefined }
       }
     }
-    return { text, cursor }
   }
   catch (cause) {
     // A read that failed is not an announcement that will not come; the deadline decides.
     console.warn(`turn host readiness read failed process_id=${process.id} error="${describe(cause)}"`)
-    return { text: '', cursor: since }
   }
 }
