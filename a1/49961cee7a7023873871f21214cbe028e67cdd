@@ -1,0 +1,16 @@
+packages/harness-claude-code/src/sdk/sdk-background-wait.test.ts
+  h_a6c74771a358b0 46-48,100-103
+packages/harness-claude-code/src/sdk/sdk-background-wait.ts
+  h_a6c74771a358b0 15,40,75-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a149961cee7a7023873871f21214cbe028e67cdd",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
