@@ -1,0 +1,18 @@
+packages/harness-claude-code/src/cli-turn-kill.test.ts
+  h_a6c74771a358b0 26-27,35-37,120-143
+packages/harness-claude-code/src/outcome.ts
+  h_a6c74771a358b0 75-77
+packages/harness-claude-code/src/sdk/sdk-frames.test.ts
+  h_a6c74771a358b0 70-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fe99c71fd8ca70b57f0e65dd8a379273e6c8a7fa",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
