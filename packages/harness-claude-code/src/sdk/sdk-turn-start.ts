@@ -315,6 +315,11 @@ interface HostLog {
   stderr: string
   /** The stderr line still being written: never masked yet, so never cut. */
   stderrLine: string
+  /**
+   * Set when the line being written outgrew the bound and was dropped: everything up to its
+   * newline is the rest of that line, not a line of its own, so it is dropped too.
+   */
+  stderrDropping: boolean
   since: string | undefined
   /** Present once the log or the process status says the host has ended. */
   exit?: { code: number | undefined }
@@ -335,7 +340,7 @@ interface HostLog {
  */
 async function awaitBridgeReady(process: SandboxProcessHandle, host: BootingHost): Promise<void> {
   const deadline = Date.now() + BRIDGE_READY_TIMEOUT_MS
-  const log: HostLog = { stdout: '', stderr: '', stderrLine: '', since: undefined }
+  const log: HostLog = { stdout: '', stderr: '', stderrLine: '', stderrDropping: false, since: undefined }
   // One decoder per stream for the whole wait, not one per poll: the announcement is ASCII, but
   // anything else the host prints need not be, and a multi-byte character split across two cursor
   // batches only survives if the same streaming decoder sees both halves.
@@ -387,10 +392,20 @@ async function stopHungHost(process: SandboxProcessHandle): Promise<void> {
  * when it ends, and cutting only text already masked, means no cut can land inside an unmasked
  * value. The masker is also run only once over any text (`maskCredentialLines`), which a
  * mask-on-every-trim scheme would break. The line still being written is the one unmasked piece; it
- * is dropped whole if it outgrows the bound, never kept in part.
+ * is dropped whole if it outgrows the bound, never kept in part — including the rest of it that
+ * later chunks carry up to its newline, which alone would no longer match the masker.
  */
 function appendStderr(log: HostLog, chunk: string): void {
-  const lines = (log.stderrLine + chunk).split('\n')
+  let text = chunk
+  if (log.stderrDropping) {
+    const newline = text.indexOf('\n')
+    if (newline === -1) {
+      return
+    }
+    log.stderrDropping = false
+    text = text.slice(newline + 1)
+  }
+  const lines = (log.stderrLine + text).split('\n')
   log.stderrLine = lines.pop() ?? ''
   if (lines.length > 0) {
     log.stderr += `${maskCredentialLines(lines.join('\n'))}\n`
@@ -398,6 +413,7 @@ function appendStderr(log: HostLog, chunk: string): void {
   if (log.stderrLine.length > HOST_STDERR_KEEP_CHARS) {
     log.stderr += `${HOST_STDERR_DROPPED_LINE}\n`
     log.stderrLine = ''
+    log.stderrDropping = true
   }
   if (log.stderr.length > HOST_STDERR_KEEP_CHARS * 2) {
     log.stderr = log.stderr.slice(-HOST_STDERR_KEEP_CHARS)

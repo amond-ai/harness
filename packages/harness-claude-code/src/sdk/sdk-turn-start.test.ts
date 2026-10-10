@@ -9,14 +9,21 @@ import { BRIDGE_READY_TIMEOUT_MS, startTurnHost, TurnHostBootError } from './sdk
  */
 function exitedHost(stderr: string | readonly string[], code = 1): SandboxProcessHandle {
   const chunks = typeof stderr === 'string' ? [stderr] : stderr
-  const logs = async (): Promise<ReadableStream<ProcessLogEvent>> => new ReadableStream({
+  // Incremental, as the contract's cursor reads are: a read from `since` serves only the chunks
+  // after it, so the read that follows the exit sees nothing it has already seen.
+  const logs = async (options?: { since?: string }): Promise<ReadableStream<ProcessLogEvent>> => new ReadableStream({
     start(controller) {
-      chunks.forEach((chunk, index) => controller.enqueue({
-        type: 'stderr',
-        cursor: String(index + 1),
-        timestamp: '2026-10-09T00:00:00.000Z',
-        data: new TextEncoder().encode(chunk),
-      }))
+      const from = Number(options?.since ?? 0)
+      chunks.forEach((chunk, index) => {
+        if (index >= from) {
+          controller.enqueue({
+            type: 'stderr',
+            cursor: String(index + 1),
+            timestamp: '2026-10-09T00:00:00.000Z',
+            data: new TextEncoder().encode(chunk),
+          })
+        }
+      })
       controller.close()
     },
   })
@@ -129,6 +136,13 @@ describe('a turn host that exits before announcing a socket', () => {
 
     await expect(run).rejects.toThrow(/boom\n\[stderr line too long to keep\]$/)
     await expect(run).rejects.not.toThrow(/github_pat_|A{10}/)
+  })
+
+  it('drops the rest of a too-long line that a later chunk carries, up to its newline', async () => {
+    const run = startOn(exitedHost([`GITHUB_TOKEN=github_pat_${'A'.repeat(20_000)}`, 'ZZsecretsuffix\nboom\n']))
+
+    await expect(run).rejects.toThrow(/\[stderr line too long to keep\]\nboom$/)
+    await expect(run).rejects.not.toThrow(/github_pat_|A{10}|ZZsecretsuffix/)
   })
 
   it('reads the exit code off a terminal log event', async () => {
