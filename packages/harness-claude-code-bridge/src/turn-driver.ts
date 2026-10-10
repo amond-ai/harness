@@ -374,14 +374,19 @@ function createPermissionOptions(input: {
  * Whether a question call is one the host can be asked to answer. The tool
  * input is the model's JSON, so this checks the shape `toHarnessQuestionsInput`
  * reads — a non-empty list of objects with a string `question` and, when
- * present, `options` that are objects with a string `label`. Anything else is
- * left to the CLI's own input validation.
+ * present, `options` that are objects with a string `label` — and the type of
+ * every optional field it copies (`header`, `multiSelect`, an option's
+ * `description` and `preview`), so what goes to the host is what
+ * `harnessV1QuestionsToolInputSchema` accepts. Anything else is left to the
+ * CLI's own input validation.
  */
 function isForwardableQuestionInput(
   nativeInput: unknown,
 ): nativeInput is Parameters<typeof toHarnessQuestionsInput>[0] {
   const isObject = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null
+  const isOptionalString = (value: unknown): boolean =>
+    value === undefined || typeof value === 'string'
   const questions = isObject(nativeInput) ? nativeInput.questions : undefined
   return (
     Array.isArray(questions)
@@ -390,12 +395,17 @@ function isForwardableQuestionInput(
       question => isObject(question)
         && typeof question.question === 'string'
         && question.question !== ''
+        && isOptionalString(question.header)
+        && (question.multiSelect === undefined
+          || typeof question.multiSelect === 'boolean')
         && (question.options === undefined
           || (Array.isArray(question.options)
             && question.options.every(
               option => isObject(option)
                 && typeof option.label === 'string'
-                && option.label !== '',
+                && option.label !== ''
+                && isOptionalString(option.description)
+                && isOptionalString(option.preview),
             ))),
     )
   )

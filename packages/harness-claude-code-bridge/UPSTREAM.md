@@ -170,10 +170,12 @@ Each is a separate commit in this repository and is intended to go upstream.
 27. `feat(turn-host): meter steps from streamed usage and journal a
     message_stop raw` — upstream's per-step metering and its `message_stop`
     raw frame carrying the response's summed usage. Upstream sends it like any
-    frame; here it is the one stream_event-derived frame that is **not**
-    live-only (patch 5): a client's live mirror appends every `raw` it
-    receives, so the transcript rebuilt from the journal must carry the same
-    lines. The driver's live-only flag skips every `raw`.
+    frame; here, like a subagent's `stream_event` raws (patch 26), it is a
+    journaled raw built from a `stream_event`, where every other part derived
+    from one is live-only (patch 5): a client's live mirror appends every `raw`
+    it receives, so the transcript rebuilt from the journal must carry the
+    same lines. The driver's live-only flag applies only to derived non-raw
+    frames and never to a `raw`.
 
 28. `fix(turn-host): fail a turn whose success result the CLI flagged as an
     error` — upstream's `is_error` check, applied only when the ending would
@@ -224,14 +226,16 @@ Each is a separate commit in this repository and is intended to go upstream.
     requests are scoped to the turn: on turn teardown (finish, error, abort,
     interrupt) and on a new `start` the buffer is cleared and every pending
     request is settled as an `isError` result, which the question hook turns
-    into a deny — never an answer — so a parked hook unblocks. Cross-id
+    into a deny — never an answer — so a parked hook unblocks; a result that
+    arrives while no turn runs is not buffered. Cross-id
     `matches` replay therefore works only within one turn, which is its
     purpose: an answer that arrives before the hook asked. Where upstream casts
     the host's answer, the hook parses it with
     `harnessV1QuestionsToolOutputSchema` and denies one the schema refuses, and
     it leaves a call without a usable `questions` list (non-empty objects with
-    a string `question`, `options` objects with a string `label`) to the CLI's
-    own validation, still emitting the runtime's tool-call so the result has a
+    a string `question`, `options` objects with a string `label`, and every
+    optional field it copies of the type the questions-tool schema takes) to
+    the CLI's own validation, still emitting the runtime's tool-call so the result has a
     call. An answer is the selected labels then the trimmed free text, joined
     by `, `; one with neither is left out of `answers`. Late or retransmitted
     answers are dropped by tool call id, kept for the turn after the one that

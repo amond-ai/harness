@@ -1225,8 +1225,12 @@ export async function runBridge<TStart extends { type: 'start' }>(
           consumedToolCallIds.add(msg.toolCallId)
           pending.resolve(result)
         }
+        // Buffered only while a turn runs: the buffer is the turn's, and one
+        // that arrives between turns would be dropped by the next `start`
+        // anyway, after sitting in memory for as long as the bridge idles.
         else if (
-          !bufferedToolResults.some(
+          activeTurn != null
+          && !bufferedToolResults.some(
             buffered => buffered.toolCallId === msg.toolCallId,
           )
         ) {

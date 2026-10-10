@@ -143,7 +143,8 @@ are where it departs.
     asked for yet and keeps its buffer and pending requests for the whole
     process. Here both are scoped to the turn: on teardown (finish, error,
     abort, interrupt) and on a new `start` the buffer is dropped and every
-    pending request settles as an `isError` result, never an answer. One result
+    pending request settles as an `isError` result, never an answer; a result
+    that arrives while no turn runs is not buffered at all. One result
     is buffered per `toolCallId` (first wins, and consuming one drops its
     duplicates), and every id a request took a result under or was settled for
     is remembered through the turn after its own, so a retransmitted answer is

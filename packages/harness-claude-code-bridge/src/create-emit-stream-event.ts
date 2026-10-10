@@ -351,7 +351,10 @@ export function createEmitStreamEvent({
       // message carrying several leaves no way to tell whose it is.
       const toolUseResult
         = toolResultBlocks.length === 1
-          ? withoutOriginalFile(msg.tool_use_result)
+          ? withoutOriginalFile(
+              msg.tool_use_result,
+              state.nativeToolCallNames.get(String(toolResultBlocks[0]!.tool_use_id)),
+            )
           : undefined
 
       for (const block of messageContent) {
@@ -683,10 +686,16 @@ function stringifyContent(content: unknown): string {
  * `originalFile`. The `raw` `user` frame already journals it, and a client
  * may read that journal through a bounded tail, so a second copy on the
  * tool-result would spend the bound on bytes the transcript already holds.
+ * Only theirs: another tool's `originalFile`, an MCP server's included, is
+ * that tool's own result and is reported as it came.
  */
-function withoutOriginalFile(result: unknown): unknown {
+const ORIGINAL_FILE_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write'])
+
+function withoutOriginalFile(result: unknown, nativeName: string | undefined): unknown {
   if (
-    result === null
+    nativeName === undefined
+    || !ORIGINAL_FILE_TOOLS.has(nativeName)
+    || result === null
     || typeof result !== 'object'
     || Array.isArray(result)
     || !('originalFile' in result)

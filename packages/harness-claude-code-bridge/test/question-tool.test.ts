@@ -108,6 +108,12 @@ it('leaves a malformed question to the CLI, with one tool-call so its result has
     { questions: [{ question: 'Which fruit?', options: 'apple' }] },
     { questions: [{ question: '' }] },
     { questions: [{ question: 'Which fruit?', options: [{ label: '' }] }] },
+    // Optional fields of a type the questions-tool schema refuses: forwarded, the host would
+    // be handed a tool input it cannot parse.
+    { questions: [{ question: 'Which fruit?', header: 5 }] },
+    { questions: [{ question: 'Which fruit?', multiSelect: 'yes' }] },
+    { questions: [{ question: 'Which fruit?', options: [{ label: 'Apple', description: 5 }] }] },
+    { questions: [{ question: 'Which fruit?', options: [{ label: 'Apple', preview: {} }] }] },
   ]
   for (const [index, toolInput] of malformed.entries()) {
     const toolUseId = `toolu_m${index}`

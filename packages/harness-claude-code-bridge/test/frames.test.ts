@@ -374,6 +374,28 @@ it('reports the CLI\'s structured tool result, without the pre-edit file', async
   client.close()
 })
 
+it('keeps originalFile on a structured result that is not Edit\'s or Write\'s', async () => {
+  const own = { originalFile: 'the server\'s own field', status: 'ok' }
+  const query = createFakeQuery([
+    initMessage(),
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_m', name: 'mcp__files__restore', input: {} }] } },
+    {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_m', content: 'restored' }] },
+      tool_use_result: own,
+    },
+    resultMessage(),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  expect(client.frames.find(frame => frame.type === 'tool-result')?.result).toEqual(own)
+  client.close()
+})
+
 it('reports the session transcript and journal paths on finish', async () => {
   const query = createFakeQuery([initMessage(), resultMessage()])
   host = await startHost({ query: query.fn })
