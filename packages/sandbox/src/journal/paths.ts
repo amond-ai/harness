@@ -35,13 +35,25 @@ export function journalPaths(root: string, processId: string): JournalPaths {
   if (!isProcessId(processId)) {
     throw new Error(`invalid process id '${processId}': expected [A-Za-z0-9_-]+`)
   }
-  const base = root.replace(/\/+$/, '')
+  const base = trimTrailingSlashes(root)
   return {
     stdout: `${base}/${processId}${STDOUT_SUFFIX}`,
     stderr: `${base}/${processId}.err`,
     exit: `${base}/${processId}.exit`,
     meta: `${base}/${processId}.meta.json`,
   }
+}
+
+/**
+ * `root` without its trailing slashes. A scan rather than `/\/+$/`, whose backtracking is
+ * quadratic on a long run of slashes followed by anything else.
+ */
+function trimTrailingSlashes(root: string): string {
+  let end = root.length
+  while (end > 0 && root[end - 1] === '/') {
+    end--
+  }
+  return root.slice(0, end)
 }
 
 /**

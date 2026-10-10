@@ -8,6 +8,11 @@ describe('@amond-ai/sandbox/journal', () => {
     expect(() => journalPaths('/tmp/j', '../x')).toThrow('invalid process id')
   })
 
+  it('trims every trailing slash from the root and keeps an interior one', () => {
+    expect(journalPaths('/tmp/j///', 'p1').stderr).toBe('/tmp/j/p1.err')
+    expect(journalPaths('/tmp//j', 'p1').exit).toBe('/tmp//j/p1.exit')
+  })
+
   it('round-trips a cursor and reads a malformed one as the start', () => {
     expect(decodeCursor(encodeCursor(3, 7))).toEqual({ stdout: 3, stderr: 7 })
     expect(decodeCursor('nope')).toEqual({ stdout: 0, stderr: 0 })
