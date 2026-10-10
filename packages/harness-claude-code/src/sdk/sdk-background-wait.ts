@@ -12,7 +12,7 @@
  *
  * Import-free for the reason `sdk-round-state.ts` gives: it decides whether a turn is alive, and
  * has to be readable from `bun test`. Its semantics mirror the host's
- * (`harness-claude-code-host/src/turn-driver.ts`, `countActiveBackgroundTasks` and the `result`
+ * (`packages/harness-claude-code-bridge/src/turn-driver.ts`, `countActiveBackgroundTasks` and the `result`
  * arm), and an unreadable line changes nothing — a reading the round cannot make is not evidence
  * either way.
  *
@@ -37,6 +37,7 @@ interface TranscriptMessage {
   tasks?: unknown
   parent_tool_use_id?: unknown
   terminal_reason?: unknown
+  is_error?: unknown
   origin?: { kind?: unknown }
   num_turns?: unknown
 }
@@ -71,7 +72,11 @@ const UNCOMPLETED_REASONS: ReadonlySet<unknown> = new Set(['aborted_streaming', 
  * wake (`num_turns: 0`, `task-notification` origin) while the wait is already on.
  */
 function waitsAfter(message: TranscriptMessage, tasks: number, waiting: boolean): boolean {
-  const completed = message.subtype === 'success' && !UNCOMPLETED_REASONS.has(message.terminal_reason)
+  // A `success` the CLI flagged `is_error` is a failed turn: the host ends it on a run error
+  // before its background-wait rule is reached, so it holds nothing open.
+  const completed = message.subtype === 'success'
+    && message.is_error !== true
+    && !UNCOMPLETED_REASONS.has(message.terminal_reason)
   if (!completed) {
     return false
   }

@@ -43,6 +43,9 @@ describe('foldBackgroundWait', () => {
       .toEqual({ ...state, backgroundTasks: 1 })
     expect(foldBackgroundWait(running, line({ ...RESULT, terminal_reason: 'tool_deferred' })))
       .toEqual({ ...state, backgroundTasks: 1 })
+    // The host fails a `success` the CLI flagged `is_error` before its background-wait rule.
+    expect(foldBackgroundWait(running, line({ ...RESULT, is_error: true })))
+      .toEqual({ ...state, backgroundTasks: 1 })
   })
 
   it('reads a completed turn the way the host does: every terminal reason but the aborted and deferred ones', () => {
@@ -92,6 +95,10 @@ describe('timeoutCauseOf over a background wait', () => {
 
   it('exempts silence while nothing has asked the turn to stop', () => {
     expect(timeoutCauseOf(context(waiting), 5_000)).toBeUndefined()
+  })
+
+  it('still lets the wall-clock budget end the wait, which is what bounds a background task that never settles', () => {
+    expect(timeoutCauseOf(context(waiting), 10_000_000)).toBe('budget')
   })
 
   it('judges silence again once a stop is outstanding, on the round or in the carried state', () => {
