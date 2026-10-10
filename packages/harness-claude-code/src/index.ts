@@ -86,7 +86,7 @@ export {
 export type { SdkTurnDriverInput } from './sdk/sdk-turn-driver'
 export { sdkTurnDriver } from './sdk/sdk-turn-driver'
 export type { SdkHandOffInput, SdkStartInput } from './sdk/sdk-turn-start'
-export { BRIDGE_READY_TIMEOUT_MS, handTurnToHost, startTurnHost } from './sdk/sdk-turn-start'
+export { BRIDGE_READY_TIMEOUT_MS, handTurnToHost, startTurnHost, TurnHostBootError } from './sdk/sdk-turn-start'
 export type {
   AttemptResult,
   ClaudeArgv,

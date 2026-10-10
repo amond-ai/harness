@@ -16,11 +16,12 @@ import type { PermissionMode } from '../permission-mode'
 import type { TurnHandle } from '../turn-driver'
 import type { TurnChannel } from './sdk-channel'
 import { describeCause as describe, maskCredentialLines } from '@amond-ai/redact'
-import { INTERRUPT_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
+import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
 import { iterateStream } from '../process-ndjson'
 import { readBridgeAnnouncement } from './sdk-bridge-config'
 import { createTurnChannel } from './sdk-channel'
 import { classifyFrame } from './sdk-frames'
+import { withTimeout } from './sdk-round-dial'
 
 /**
  * How long the host has to bind its socket and announce it.
@@ -108,9 +109,30 @@ export interface SdkStartInput {
  * `start-turn-N`, where the attempt loop can still start another turn.
  */
 export async function startTurnHost(input: SdkStartInput): Promise<TurnHandle> {
-  await awaitBridgeReady(input.process)
+  await awaitBridgeReady(input.process, { processId: input.process.id, bridgeStateDir: input.stateDir })
   return await handTurnToHost({ ...input, processId: input.process.id })
 }
+
+/**
+ * A turn host that never announced `bridge-ready`: it timed out, exited, or refused to start.
+ *
+ * Typed apart because it is the one start failure that left nothing behind — no `query()` ran, no
+ * token was spent, the checkout is untouched — so a caller may start another attempt. Anything past
+ * readiness stays a plain `Error`. It names the host, so the attempt it ends is still recorded.
+ */
+export class TurnHostBootError extends Error {
+  readonly processId?: string
+  readonly bridgeStateDir?: string
+  constructor(message: string, host: BootingHost = {}) {
+    super(message)
+    this.name = 'TurnHostBootError'
+    this.processId = host.processId
+    this.bridgeStateDir = host.bridgeStateDir
+  }
+}
+
+/** The host a {@link TurnHostBootError} names, as far as the code raising it knows it. */
+type BootingHost = Pick<TurnHostBootError, 'processId' | 'bridgeStateDir'>
 
 /** {@link SdkStartInput} for a host that is already listening — an adopted one has no handle. */
 export type SdkHandOffInput = Omit<SdkStartInput, 'process'> & { processId: string }
@@ -311,7 +333,7 @@ interface HostLog {
  * late output still counts, a `ready` or `fatal` in it is honored first — and the failure carries
  * the exit code and the masked tail of stderr.
  */
-async function awaitBridgeReady(process: SandboxProcessHandle): Promise<void> {
+async function awaitBridgeReady(process: SandboxProcessHandle, host: BootingHost): Promise<void> {
   const deadline = Date.now() + BRIDGE_READY_TIMEOUT_MS
   const log: HostLog = { stdout: '', stderr: '', stderrLine: '', since: undefined }
   // One decoder per stream for the whole wait, not one per poll: the announcement is ASCII, but
@@ -320,32 +342,41 @@ async function awaitBridgeReady(process: SandboxProcessHandle): Promise<void> {
   const decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() }
   for (;;) {
     await readHostLog(process, log, decoders)
-    if (isAnnounced(log.stdout)) {
+    if (isAnnounced(log.stdout, host)) {
       return
     }
     log.exit ??= await hostExit(process)
     if (log.exit) {
       // The exit may have outrun the last read: one more, so late output is not missed.
       await readHostLog(process, log, decoders)
-      if (isAnnounced(log.stdout)) {
+      if (isAnnounced(log.stdout, host)) {
         return
       }
-      throw new Error(exitedBeforeReady(log))
+      throw new TurnHostBootError(exitedBeforeReady(log), host)
     }
     if (Date.now() >= deadline) {
-      throw new Error(`turn host did not announce a listening socket within ${String(BRIDGE_READY_TIMEOUT_MS)}ms`)
+      // The one ending whose host may still be alive: stopped, so it cannot linger into the next.
+      await stopHungHost(process)
+      throw new TurnHostBootError(`turn host did not announce a listening socket within ${String(BRIDGE_READY_TIMEOUT_MS)}ms`, host)
     }
     await new Promise(resolve => setTimeout(resolve, READY_POLL_INTERVAL_MS))
   }
 }
 
 /** Whether stdout holds `bridge-ready`; a `bridge-fatal` is raised as the failure it is. */
-function isAnnounced(stdout: string): boolean {
+function isAnnounced(stdout: string, host: BootingHost): boolean {
   const announcement = readBridgeAnnouncement(stdout)
   if (announcement?.status === 'fatal') {
-    throw new Error(`turn host refused to start: ${announcement.message}`)
+    throw new TurnHostBootError(`turn host refused to start: ${announcement.message}`, host)
   }
   return announcement?.status === 'ready'
+}
+
+/** Best effort and bounded — `kill()` is an RPC a stuck backend can hold — so the timeout is still raised. */
+async function stopHungHost(process: SandboxProcessHandle): Promise<void> {
+  await withTimeout(process.kill(), KILL_SETTLE_TIMEOUT_MS).catch((cause: unknown) => {
+    console.warn(`turn host kill after readiness timeout failed process_id=${process.id} error="${describe(cause)}"`)
+  })
 }
 
 /**

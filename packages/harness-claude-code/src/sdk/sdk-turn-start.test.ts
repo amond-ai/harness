@@ -1,6 +1,7 @@
 import type { ProcessLogEvent, SandboxProcessHandle } from '@amond-ai/sandbox'
-import { describe, expect, it } from 'vitest'
-import { BRIDGE_READY_TIMEOUT_MS, startTurnHost } from './sdk-turn-start'
+import { describe, expect, it, vi } from 'vitest'
+import { KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
+import { BRIDGE_READY_TIMEOUT_MS, startTurnHost, TurnHostBootError } from './sdk-turn-start'
 
 /**
  * A host process that has already ended, with the stderr it left and nothing on stdout — what a
@@ -175,5 +176,90 @@ describe('a turn host that exits before announcing a socket', () => {
 
     await expect(run).rejects.toThrow(/boom$/)
     await expect(run).rejects.not.toThrow(/github_pat_|ious_fake/)
+  })
+})
+
+/** What a start rejected with, for the assertions a `rejects` matcher cannot make. */
+async function failureOf(run: Promise<unknown>): Promise<unknown> {
+  return await run.then(() => undefined, (cause: unknown) => cause)
+}
+
+/**
+ * The three ways a host fails before `bridge-ready` are typed apart, so the attempt loop can start
+ * another attempt; their messages are the ones above, unchanged, and each names the host.
+ */
+describe('a turn host that never announced readiness', () => {
+  it.each([
+    ['exited', () => exitedHost('boom\n'), /^turn host exited with code 1 /],
+    ['refused', () => scriptedHost({
+      reads: [[stdoutLine('{"type":"bridge-fatal","message":"port taken"}')]],
+      statuses: ['running'],
+    }), /^turn host refused to start: port taken$/],
+  ])('is a boot error when it %s, naming its process and state directory', async (_, host, message) => {
+    const failure = await failureOf(startOn(host()))
+
+    expect(failure).toBeInstanceOf(TurnHostBootError)
+    expect((failure as Error).message).toMatch(message)
+    expect(failure).toMatchObject({ processId: 'host-1', bridgeStateDir: '/workspace/.turn-host/run-1/1' })
+  })
+
+  it('is a boot error when it times out, and the host it gave up on is stopped', async () => {
+    const kill = vi.fn(async () => {})
+    const host = { ...scriptedHost({ reads: [[]], statuses: ['running'] }), kill } as unknown as SandboxProcessHandle
+    vi.useFakeTimers()
+    try {
+      const failure = failureOf(startOn(host))
+      await vi.advanceTimersByTimeAsync(BRIDGE_READY_TIMEOUT_MS + 1_000)
+
+      const raised = await failure
+      expect(raised).toBeInstanceOf(TurnHostBootError)
+      expect((raised as Error).message).toBe(`turn host did not announce a listening socket within ${String(BRIDGE_READY_TIMEOUT_MS)}ms`)
+      expect(kill).toHaveBeenCalledOnce()
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still raises the timeout when stopping the host fails', async () => {
+    const kill = vi.fn(async () => {
+      throw new Error('kill refused')
+    })
+    const host = { ...scriptedHost({ reads: [[]], statuses: ['running'] }), kill } as unknown as SandboxProcessHandle
+    vi.useFakeTimers()
+    try {
+      const failure = failureOf(startOn(host))
+      await vi.advanceTimersByTimeAsync(BRIDGE_READY_TIMEOUT_MS + 1_000)
+
+      expect(await failure).toBeInstanceOf(TurnHostBootError)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still raises the timeout when stopping the host never settles', async () => {
+    const kill = vi.fn(async () => new Promise<void>(() => {}))
+    const host = { ...scriptedHost({ reads: [[]], statuses: ['running'] }), kill } as unknown as SandboxProcessHandle
+    vi.useFakeTimers()
+    try {
+      const failure = failureOf(startOn(host))
+      await vi.advanceTimersByTimeAsync(BRIDGE_READY_TIMEOUT_MS + KILL_SETTLE_TIMEOUT_MS + 1_000)
+
+      expect(await failure).toBeInstanceOf(TurnHostBootError)
+      expect(kill).toHaveBeenCalledOnce()
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('is not what a failure past readiness is', async () => {
+    const host = scriptedHost({ reads: [[stdoutLine('{"type":"bridge-ready","port":39100}')]], statuses: ['running'] })
+
+    const failure = await failureOf(startOn(host))
+
+    expect((failure as Error).message).toBe('never reached')
+    expect(failure).not.toBeInstanceOf(TurnHostBootError)
   })
 })

@@ -140,7 +140,7 @@ function mirrorCursor(mirror: LiveMirror | undefined): number {
 }
 
 /** A promise with a deadline; the loser is abandoned rather than cancelled — there is no cancel. */
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => reject(new Error(`timed out after ${String(timeoutMs)}ms`)), timeoutMs)
