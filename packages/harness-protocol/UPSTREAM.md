@@ -42,12 +42,13 @@ changed two of them only by addition — the outbound union gained the
 | `src/claude-code.ts` | — (new; the `./claude-code` entry point) |
 | `src/codex.ts` | — (new; the `./codex` entry point) |
 
-The vendored files are byte-identical copies, under the repository lint config
-(patch 1). That closure imports only `zod/v4`, each other, and **types** from
+The vendored files start as byte-identical copies, under the repository lint
+config (patch 1), and the patches below are the only edits made to them since.
+That closure imports only `zod/v4`, each other, and **types** from
 `@ai-sdk/provider` and `@ai-sdk/provider-utils` (`harness-v1-questions-tool.ts`
-types its tool as a `FunctionTool`); nothing reaches `ai@7`. The single edit is
-each adapter file's `@ai-sdk/harness` import (`claude-code-bridge-protocol.ts`
-and `codex-bridge-protocol.ts`), repointed at
+types its tool as a `FunctionTool`); nothing reaches `ai@7`. The one edit made
+on vendoring is each adapter file's `@ai-sdk/harness` import
+(`claude-code-bridge-protocol.ts` and `codex-bridge-protocol.ts`), repointed at
 `./harness-v1/harness-v1-bridge-protocol`.
 
 `codex-bridge-protocol.ts` is deliberately not re-exported either, for the same
@@ -137,9 +138,12 @@ export it.
    `harness-v1-bridge-protocol.ts` adds `capabilities.resumeAck` to
    `bridge-hello` and a `bridge-resumed { upTo }` control frame to the outbound
    union. A bridge that advertises the capability sends `bridge-resumed` after
-   the replay a `resume` asked for: every journaled frame at or below `upTo` the
-   client had not seen is ahead of it, and every later frame follows it. It is
-   not journaled and carries no `seq`. Without it a client has no replay
+   the replay a `resume` asked for: every journaled event at or below `upTo` the
+   client had not seen is ahead of it, and every event emitted later follows
+   it. The boundary is the event stream's alone: a control reply the bridge
+   sends outside the journal chain is not ordered against it, and a live-only
+   event emitted before the resume is not replayed at all. It is not journaled
+   and carries no `seq`. Without it a client has no replay
    boundary and has to approximate one from the greeting's `lastSeq`, which
    also counts live-only frames a replay never sends. This is the one edit to a
    vendored `harness-v1/` file; it lives there because the frame is part of

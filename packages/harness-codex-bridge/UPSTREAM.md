@@ -14,7 +14,9 @@ rather than from a commit. The sibling packages record the same split for the sa
 reason: the Codex half of upstream moves on its own. The shared halves both
 adapters compose on — the copy under `harness-protocol/src/harness-v1/` and
 `harness-bridge-runtime` — have since been re-vendored at `@ai-sdk/harness@1.0.138`
-(see their own `UPSTREAM.md`); the change reached this host only by addition.
+(see their own `UPSTREAM.md`); the protocol schema changes are additive, while
+the runtime also changes turn-lifecycle behavior (a `start` during an aborted
+turn's teardown waits for it, and is refused if the teardown outlasts the grace).
 `harness-protocol` pins `codex-bridge-protocol.ts` at `1.0.111`; that file is
 byte-identical in `1.0.113`, so the `start` this host parses is the one it
 vendored.

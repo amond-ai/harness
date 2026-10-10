@@ -164,9 +164,10 @@ it('leaves an SDK-side abort no one asked for without a reason to name', async (
 })
 
 it('reports a host abort as a run-phase error, never as a completed finish', async () => {
-  // `abort` tears the query down and leaves no `result`: there is no `terminal_reason` for the
-  // ending to map, and mapping its absence would call the turn `completed` — which the caller
-  // counts as success.
+  // `abort` is a teardown, not an ending: even when the graceful `interrupt()` answers with an
+  // `aborted_streaming` result, as this default fake does, the turn must not finish as
+  // `interrupted` (or, with no result, as `completed`) — the caller counts either as success.
+  // The no-result case is `resultOnInterrupt: false`, the hard-abort fallback test below.
   const query = createFakeQuery([initMessage()])
   host = await startHost({ query: query.fn })
   const client = await connect(host)

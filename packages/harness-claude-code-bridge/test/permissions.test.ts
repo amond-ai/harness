@@ -1,8 +1,7 @@
 import { sdkPermissionModeSchema } from '@amond-ai/harness-protocol/claude-code'
 import { afterEach, expect, it } from 'vitest'
 import { DENIED_BY_REVIEWER_MESSAGE, DENY_BY_RUN_POLICY_MESSAGE } from '../src/permission-policy'
-import { connect, createFakeQuery, initMessage, startHost } from './harness'
-import { callPreToolUse, hostRef, startAndCaptureOptions } from './pre-tool-use'
+import { callPreToolUse, hostRef, startAndCaptureOptions, startAndConnect } from './pre-tool-use'
 
 afterEach(async () => {
   await hostRef.current?.close()
@@ -28,17 +27,10 @@ it('denies through canUseTool without forwarding under approvalPolicy deny', asy
 })
 
 it('marks an approval-gated external MCP call dynamic, as the stream does', async () => {
-  const query = createFakeQuery([initMessage()])
-  hostRef.current = await startHost({ query: query.fn })
-  const client = await connect(hostRef.current)
-  client.send({ type: 'start', prompt: 'do the thing', permissionMode: 'default', approvalPolicy: 'forward' })
-  await client.waitFor(
-    frame => frame.type === 'raw'
-      && (frame.rawValue as { type: string }).type === 'system',
-  )
+  const { options, client } = await startAndConnect({ permissionMode: 'default', approvalPolicy: 'forward' })
 
   // Pends on the human's answer, which never comes: only the frames it emitted first matter.
-  void query.options?.canUseTool?.(
+  void options.canUseTool?.(
     'mcp__github__create_issue',
     { title: 'x' },
     { signal: new AbortController().signal, toolUseID: 'call-7' } as never,
