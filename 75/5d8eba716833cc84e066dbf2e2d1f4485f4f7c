@@ -1,0 +1,18 @@
+packages/harness-claude-code-bridge/src/turn-driver.ts
+  h_a6c74771a358b0 647-648,666-668,848,851,853-854,866,881-895
+packages/harness-claude-code-bridge/test/harness.ts
+  h_a6c74771a358b0 77-90,93-98
+packages/harness-claude-code-bridge/test/turn-control.test.ts
+  h_a6c74771a358b0 103-124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "755d8eba716833cc84e066dbf2e2d1f4485f4f7c",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
