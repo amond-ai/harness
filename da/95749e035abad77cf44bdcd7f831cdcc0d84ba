@@ -1,0 +1,16 @@
+packages/harness-claude-code/src/sdk/sdk-turn-start.test.ts
+  h_a6c74771a358b0 12-14,16-26,141-147
+packages/harness-claude-code/src/sdk/sdk-turn-start.ts
+  h_a6c74771a358b0 318-322,343,395-396,399-408,416
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "da95749e035abad77cf44bdcd7f831cdcc0d84ba",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
