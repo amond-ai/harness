@@ -1,0 +1,16 @@
+packages/harness-claude-code/src/harness-v1/lifecycle-state.test.ts
+  h_a6c74771a358b0 59-71
+packages/harness-claude-code/src/harness-v1/lifecycle-state.ts
+  h_a6c74771a358b0 47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e38dd73d1311e42b6e78ef598c3072f4723959ee",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
