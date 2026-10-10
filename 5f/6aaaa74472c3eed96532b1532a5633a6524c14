@@ -1,0 +1,38 @@
+packages/sandbox-e2b/src/journal-io.ts
+  h_a6c74771a358b0 1
+packages/sandbox-e2b/src/journal.test.ts
+  h_a6c74771a358b0 200-206
+packages/sandbox-e2b/src/journal.ts
+  h_a6c74771a358b0 15,18-21
+packages/sandbox-e2b/src/log-follow.ts
+  h_a6c74771a358b0 1-3
+packages/sandbox-e2b/src/log-reads.ts
+  h_a6c74771a358b0 1-3
+packages/sandbox-e2b/src/log-replay.ts
+  h_a6c74771a358b0 1-3
+packages/sandbox/package.json
+  h_a6c74771a358b0 32-35,48
+packages/sandbox/src/journal/follow.ts
+  h_a6c74771a358b0 1-218
+packages/sandbox/src/journal/index.test.ts
+  h_a6c74771a358b0 1-15
+packages/sandbox/src/journal/index.ts
+  h_a6c74771a358b0 1-20
+packages/sandbox/src/journal/paths.ts
+  h_a6c74771a358b0 1-103
+packages/sandbox/src/journal/reads.ts
+  h_a6c74771a358b0 1-210
+packages/sandbox/src/journal/replay.ts
+  h_a6c74771a358b0 1-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5f6aaaa74472c3eed96532b1532a5633a6524c14",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
