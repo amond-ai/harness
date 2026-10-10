@@ -1,0 +1,16 @@
+packages/sandbox/src/journal/index.test.ts
+  h_a6c74771a358b0 11-15
+packages/sandbox/src/journal/paths.ts
+  h_a6c74771a358b0 38,47-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a0d1eebfa52f82f19c3f06a79eafa34c888d3734",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
