@@ -132,6 +132,29 @@ it('leaves a malformed question to the CLI, with one tool-call so its result has
   }
 })
 
+it('emits one tool-call for a malformed question that then reaches canUseTool for approval', async () => {
+  const { options, client } = await startAndConnect({ permissionMode: 'default', approvalPolicy: 'forward' })
+  const toolInput = { questions: [{ question: 'Which fruit?', header: 5 }] }
+
+  const outcome = await callPreToolUse(options, {
+    hook_event_name: 'PreToolUse',
+    tool_name: 'AskUserQuestion',
+    tool_input: toolInput,
+    tool_use_id: 'toolu_mq',
+  } as never)
+  expect(outcome.hookSpecificOutput).toBeUndefined()
+  // No decision from the hook, so a non-bypass flow asks `canUseTool`, which forwards it for approval.
+  void options.canUseTool?.(
+    'AskUserQuestion',
+    toolInput,
+    { signal: new AbortController().signal, toolUseID: 'toolu_mq' } as never,
+  )
+  await client.waitFor(frame => frame.type === 'tool-approval-request' && frame.toolCallId === 'toolu_mq')
+
+  const calls = client.frames.filter(frame => frame.type === 'tool-call' && frame.toolCallId === 'toolu_mq')
+  expect(calls).toHaveLength(1)
+})
+
 it('takes an answer the host sent before it was asked, matched on the question', async () => {
   // Under another id — the one a host saw on an earlier attempt of the same call.
   const { options, client } = await startAndConnect({ approvalPolicy: 'forward' })

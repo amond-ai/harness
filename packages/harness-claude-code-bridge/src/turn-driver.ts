@@ -231,6 +231,8 @@ function createApprovalResolver(input: {
   finishApprovalStep: (approvalId: string) => void
   nativeToolCallNames: Map<string, string>
   approvalRequestedToolUseIds: Set<string>
+  /** Calls the `PreToolUse` hook already reported; their approval reuses that `tool-call`. */
+  reportedToolCallIds: ReadonlySet<string>
 }): (
   toolName: string,
   toolInput: Record<string, unknown>,
@@ -247,15 +249,19 @@ function createApprovalResolver(input: {
 
     input.approvalRequestedToolUseIds.add(approvalId)
     input.nativeToolCallNames.set(approvalId, toolName)
-    input.emit({
-      type: 'tool-call',
-      toolCallId: approvalId,
-      toolName: toCommonName(toolName),
-      nativeName: toolName,
-      input: JSON.stringify(toolInput ?? {}),
-      providerExecuted: true,
-      ...(isExternalMcpTool(toolName) ? { dynamic: true } : {}),
-    })
+    // A question the hook could not forward was reported there, and then left
+    // to the pipeline that brought it here: one native call, one `tool-call`.
+    if (!input.reportedToolCallIds.has(approvalId)) {
+      input.emit({
+        type: 'tool-call',
+        toolCallId: approvalId,
+        toolName: toCommonName(toolName),
+        nativeName: toolName,
+        input: JSON.stringify(toolInput ?? {}),
+        providerExecuted: true,
+        ...(isExternalMcpTool(toolName) ? { dynamic: true } : {}),
+      })
+    }
     input.emit({
       type: 'tool-approval-request',
       approvalId,
@@ -292,6 +298,7 @@ function createPermissionOptions(input: {
   finishApprovalStep: (approvalId: string) => void
   nativeToolCallNames: Map<string, string>
   approvalRequestedToolUseIds: Set<string>
+  reportedToolCallIds: ReadonlySet<string>
 }): Record<string, unknown> {
   const requestedMode = input.start.permissionMode ?? 'allow-all'
   const resolveApproval = createApprovalResolver({
@@ -301,6 +308,7 @@ function createPermissionOptions(input: {
     finishApprovalStep: input.finishApprovalStep,
     nativeToolCallNames: input.nativeToolCallNames,
     approvalRequestedToolUseIds: input.approvalRequestedToolUseIds,
+    reportedToolCallIds: input.reportedToolCallIds,
   })
 
   /*
@@ -755,6 +763,7 @@ async function runTurn({
    * deferred, answered by a replayed approval, refused — would otherwise
    * reach the client as a result with no call.
    */
+  const runtimeQuestionCallIds = new Set<string>()
   const emitRuntimeQuestionCall = (call: {
     toolName: string
     toolInput: unknown
@@ -763,6 +772,7 @@ async function runTurn({
     if (call.toolName !== 'AskUserQuestion' || call.toolCallId === undefined) {
       return
     }
+    runtimeQuestionCallIds.add(call.toolCallId)
     emit({
       type: 'tool-call',
       toolCallId: call.toolCallId,
@@ -782,6 +792,7 @@ async function runTurn({
     },
     nativeToolCallNames: streamEventState.nativeToolCallNames,
     approvalRequestedToolUseIds: streamEventState.approvalRequestedToolUseIds,
+    reportedToolCallIds: runtimeQuestionCallIds,
   })
 
   /*

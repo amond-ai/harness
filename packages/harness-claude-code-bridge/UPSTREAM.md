@@ -236,7 +236,9 @@ Each is a separate commit in this repository and is intended to go upstream.
     a string `question`, `options` objects with a string `label`, and every
     optional field it copies of the type the questions-tool schema takes) to
     the CLI's own validation, still emitting the runtime's tool-call so the result has a
-    call. An answer is the selected labels then the trimmed free text, joined
+    call — and only that one: if the call then reaches `canUseTool` for approval,
+    the approval request reuses it rather than emitting a second. An answer is
+    the selected labels then the trimmed free text, joined
     by `, `; one with neither is left out of `answers`. Late or retransmitted
     answers are dropped by tool call id, kept for the turn after the one that
     consumed the id. The buffer, its turn scoping and the consumed-id memory
