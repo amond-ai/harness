@@ -1,0 +1,28 @@
+bun.lock
+  h_a6c74771a358b0 69
+packages/harness-claude-code-bridge/package.json
+  h_a6c74771a358b0 54
+packages/harness-claude-code-bridge/test/turn-control.test.ts
+  h_a6c74771a358b0 3,264-266,291-292
+packages/harness-claude-code/src/index.ts
+  h_a6c74771a358b0 59-65
+packages/harness-claude-code/src/sdk/sdk-frames.test.ts
+  h_a6c74771a358b0 2,71-79
+packages/harness-claude-code/src/sdk/sdk-frames.ts
+  h_a6c74771a358b0 218-236,241
+packages/harness-claude-code/src/sdk/sdk-round-noturn.ts
+  h_a6c74771a358b0 4-6,8-10,58-78
+packages/harness-claude-code/src/sdk/sdk-round.ts
+  h_a6c74771a358b0 34,36,299-301
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a9754c0a89ff7aaa453d2c38d6cc673ebb3eda46",
+  "prompts": {},
+  "humans": {
+    "h_a6c74771a358b0": {
+      "author": "Minsu Lee <1964421+amondnet@users.noreply.github.com>"
+    }
+  }
+}
