@@ -4,8 +4,11 @@
  * Its clock is injected and its timers are fake, so the window, the settle bounds and the
  * watchdog's thresholds are decided by the test rather than waited for.
  */
+import type { WsLike } from '@amond-ai/harness-transport'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { INTERRUPT_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
 import { runAttachRound } from './sdk-round'
+import { RESUME_ACK_TIMEOUT_MS } from './sdk-round-settle'
 import {
   createFakeSession,
   createFakeTurnHost,
@@ -13,6 +16,7 @@ import {
   fakeMirror,
   finishFrame,
   HANDLE,
+  interruptsSent,
   runningClock,
 } from './sdk-round.fixtures'
 
@@ -113,5 +117,55 @@ describe('a round that cannot reach its host', () => {
     expect(controller.signal.aborted).toBe(true)
     expect(state.outcome).toBeUndefined()
     expect(kill).not.toHaveBeenCalled()
+  })
+})
+
+describe('a round entered with the turn\'s budget already spent', () => {
+  it('kills after the no-turn grace even when a slow redial arms a fresh resume settle', async () => {
+    // The stop finds no turn and the socket drops; the redial that finally lands is past the
+    // grace, on a host that promises a `bridge-resumed` it never sends.
+    const host = createFakeTurnHost({
+      helloState: 'running',
+      helloLastSeq: 4,
+      helloCapabilities: { resumeAck: true },
+      onSend: (message, connection) => {
+        if (message.type === 'interrupt') {
+          connection.emit({ type: 'error', phase: 'run', error: 'no running turn to interrupt' })
+          connection.drop()
+        }
+      },
+    })
+    const enteredAt = Date.now()
+    const replyAt = RESUME_ACK_TIMEOUT_MS
+    const connect = async (): Promise<WsLike> => {
+      const elapsed = Date.now() - enteredAt
+      if (host.connections.length === 0) {
+        return await host.connect()
+      }
+      if (elapsed < replyAt + INTERRUPT_SETTLE_TIMEOUT_MS - 4_000) {
+        throw new Error('connection refused')
+      }
+      await new Promise(resolve => setTimeout(resolve, 4_500))
+      return await host.connect()
+    }
+    const { session, kill } = createFakeSession()
+
+    const round = runAttachRound({
+      session,
+      handle: HANDLE,
+      connect,
+      config: fakeConfig(),
+      mirror: undefined,
+      budgetMs: 1,
+      previous: { since: 4, lastActivityAt: HANDLE.startedAtMs! },
+      now: runningClock(10),
+    })
+    await vi.advanceTimersByTimeAsync(replyAt + INTERRUPT_SETTLE_TIMEOUT_MS + 15_000)
+    const state = await round
+
+    expect(host.connections).toHaveLength(2)
+    expect(state.outcome).toMatchObject({ outcome: 'timed-out', timedOutBy: 'budget' })
+    expect(kill).toHaveBeenCalled()
+    expect(interruptsSent(host)).toHaveLength(1)
   })
 })
