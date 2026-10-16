@@ -63,6 +63,18 @@ export function foldBackgroundWait<S extends BackgroundWait>(state: S, line: str
   return state
 }
 
+/**
+ * Fold one main-thread stream part — a `text-start`, a delta — into the wait the round carries.
+ *
+ * The host clears its wait on the main thread's `stream_event`s as well as on complete messages,
+ * but forwards those only as stream parts, never as `raw` lines {@link foldBackgroundWait} reads.
+ * Without this, a woken turn that stalls before its first complete message would keep the
+ * watchdog off until the wall-clock budget.
+ */
+export function foldStreamPart<S extends BackgroundWait>(state: S): S {
+  return state.awaitingBackground === true ? withWait(state, state.backgroundTasks ?? 0, false) : state
+}
+
 /** The terminal reasons the host does not count as a completed turn; every other one is. */
 const UNCOMPLETED_REASONS: ReadonlySet<unknown> = new Set(['aborted_streaming', 'aborted_tools', 'tool_deferred'])
 

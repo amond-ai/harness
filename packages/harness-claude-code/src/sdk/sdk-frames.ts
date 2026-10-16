@@ -69,6 +69,39 @@ export type FrameEffect
 const IGNORED_TYPES = new Set(['bridge-stop', 'bridge-thread', 'user-message-response', 'debug-event'])
 
 /**
+ * The parts the host derives from a `stream_event` — and only from the main thread's, since a
+ * subagent's stream events go out as `raw` alone. They are live-only and never `raw`, so the
+ * transcript fold never sees the main thread start speaking until its first complete message.
+ */
+const STREAM_PART_TYPES = new Set([
+  'text-start',
+  'text-delta',
+  'text-end',
+  'reasoning-start',
+  'reasoning-delta',
+  'reasoning-end',
+  'tool-input-start',
+  'tool-input-delta',
+  'tool-input-end',
+])
+
+/**
+ * Whether a frame's text is one of those parts.
+ *
+ * A second parse rather than a field on {@link FrameEffect}: only a round holding a background
+ * wait asks, which is rare and quiet, while every delta of every turn is classified.
+ */
+export function isStreamPart(text: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    return isRecord(parsed) && typeof parsed.type === 'string' && STREAM_PART_TYPES.has(parsed.type)
+  }
+  catch {
+    return false
+  }
+}
+
+/**
  * Classify one frame's text.
  *
  * A frame that will not parse is `unreadable` rather than thrown: the socket carries the turn's

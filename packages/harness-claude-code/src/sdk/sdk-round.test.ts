@@ -337,3 +337,37 @@ describe('a round retried from a cursor behind what its mirror published', () =>
     expect(state).toMatchObject({ since: 5, outcome: { outcome: 'succeeded' } })
   })
 })
+
+describe('a round over a turn waiting on background work', () => {
+  it('judges silence again once a woken turn starts streaming, though it stalls before a complete block', async () => {
+    const host = createFakeTurnHost({
+      onSend: (message, connection) => {
+        if (message.type === 'resume') {
+          // A main-thread stream part: the CLI woke a turn, which then stalls mid-stream.
+          connection.emit({ type: 'text-start', id: 'text-1', seq: 5 })
+        }
+        if (message.type === 'interrupt') {
+          connection.emit(finishFrame({ seq: 6, stopped: 'interrupted' }))
+        }
+      },
+    })
+    const { session } = createFakeSession()
+
+    const round = runAttachRound({
+      session,
+      handle: HANDLE,
+      connect: host.connect,
+      config: fakeConfig({ watchdogTimeoutMs: 10_000 }),
+      mirror: undefined,
+      budgetMs: BUDGET_MS,
+      previous: { since: 4, lastActivityAt: HANDLE.startedAtMs!, awaitingBackground: true },
+      now: runningClock(0),
+    })
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(interruptsSent(host)).toEqual([{ type: 'interrupt', reason: 'watchdog' }])
+    const state = await round
+    expect(state.awaitingBackground).toBeUndefined()
+    expect(state.outcome).toMatchObject({ outcome: 'timed-out', timedOutBy: 'watchdog' })
+  })
+})

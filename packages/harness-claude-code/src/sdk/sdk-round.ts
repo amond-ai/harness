@@ -31,8 +31,8 @@ import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from '.
 import { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS } from '../mirror'
 import { flushOnInterval } from '../turn-mirror-flush'
 import { withVerdict } from '../turn-result-scan'
-import { foldBackgroundWait } from './sdk-background-wait'
-import { classifyFrame, isNoRunningTurnReply, isRefusedInterruptReply } from './sdk-frames'
+import { foldBackgroundWait, foldStreamPart } from './sdk-background-wait'
+import { classifyFrame, isNoRunningTurnReply, isRefusedInterruptReply, isStreamPart } from './sdk-frames'
 import { enterRound, openChannel } from './sdk-round-dial'
 import { confirmedHostLoss } from './sdk-round-gone'
 import { judgeAfterNoTurn, stopFoundNoTurn, stopRefused, unreachableEnded } from './sdk-round-noturn'
@@ -338,6 +338,9 @@ async function consume(frame: string, context: PumpContext): Promise<boolean> {
     // One `raw` frame is one line by construction, so neither read needs reassembly here.
     context.scanner.text(effect.line)
     context.state = foldBackgroundWait(context.state, effect.line)
+  }
+  if (effect.kind === 'liveness' && context.state.awaitingBackground === true && isStreamPart(frame)) {
+    context.state = foldStreamPart(context.state)
   }
   context.state = scanned(applyFrame(context.state, effect, now), context.scanner)
   context.lastFlushAt = await flushOnInterval(
