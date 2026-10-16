@@ -50,10 +50,12 @@ Daytona exposes no pid, no signal API, and no way to read a command's argv back 
 command string is therefore a wrapper:
 
 ```
-setsid --wait sh -c 'printf '\''%s'\'' "$$" > <stateRoot>/<id>.pid ; cd <cwd> && exec env K=V ... <argv>'
+setsid --wait sh -c 'printf "%s %s %s" "$$" <boot id> <start time> > <stateRoot>/<id>.pid ; cd <cwd> && exec env K=V ... <argv>'
 ```
 
 - `printf … "$$"` records the pid, because `kill(1)` run beside the turn is the only signal path.
+  The kernel boot id and the process's start time go with it: a kill re-checks both and signals
+  nothing when the pid now belongs to a different process (a restarted sandbox), treating it as gone.
 - `exec` makes that pid the *command's*, not a shell that will fork one.
 - `setsid` makes it the process-group id too, which is what the default kill (`kill -KILL -- -<pid>`)
   signals — so a turn's children go with it. A named signal goes to the process alone, because

@@ -27,7 +27,7 @@ export function isProcessId(value: string): boolean {
 }
 
 export interface ProcessPaths {
-  /** Where the wrapper records `$$`, so a cold provider can still aim a kill. */
+  /** Where the wrapper records `$$` and its identity, so a cold provider can still aim a kill. */
   pid: string
   meta: string
 }
@@ -38,6 +38,45 @@ export function processPaths(root: string, processId: string): ProcessPaths {
   }
   const base = root.replace(/\/+$/, '')
   return { pid: `${base}/${processId}.pid`, meta: `${base}/${processId}.meta.json` }
+}
+
+/**
+ * Who a recorded pid was when the wrapper wrote it: the kernel boot and the process's start time.
+ *
+ * A pid alone is only a number, and after a sandbox restart that number can belong to anything.
+ * The boot id catches a VM reboot; the start time (clock ticks since boot, `/proc/<pid>/stat`
+ * field 22) catches a container restart, where the boot id is the host's and does not change but
+ * a reused pid starts at a different tick. `exec` keeps the process, so the start time the
+ * wrapper reads is the command's.
+ */
+export interface PidIdentity {
+  bootId: string
+  startTime: string
+}
+
+/** A pid file back into its parts; `identity` is absent for a bare pid or a host without `/proc`. */
+export function parsePidRecord(text: string): { pid: number, identity?: PidIdentity } {
+  const [pid, bootId, startTime, ...rest] = text.trim().split(/\s+/)
+  const identity = bootId !== undefined && startTime !== undefined && rest.length === 0 && /^\w[\w-]*$/.test(bootId) && /^\d+$/.test(startTime)
+    ? { bootId, startTime }
+    : undefined
+  return { pid: Number(pid), identity }
+}
+
+/** `/proc/<pid>/stat` past the parenthesised name, whose own spaces would shift the fields. */
+const START_TIME_OF = (pid: string): string => `sed "s/^.*) //" /proc/${pid}/stat 2>/dev/null | cut -d" " -f20`
+
+/**
+ * A shell test that exits 0 only if `pid` may still be the process the wrapper recorded.
+ *
+ * A missing `/proc/<pid>` passes: the leader is gone, and either its group still has members to
+ * sweep or the signal finds nothing — a pid that has a live group cannot be handed to a stranger.
+ * A live `/proc/<pid>` with another start time is a stranger, and fails.
+ */
+export function identityCheck(pid: number, identity: PidIdentity): string {
+  const at = String(pid)
+  return `[ "$(cat /proc/sys/kernel/random/boot_id)" = ${quoteArg(identity.bootId)} ] `
+    + `&& { [ ! -e /proc/${at}/stat ] || [ "$(${START_TIME_OF(at)})" = ${quoteArg(identity.startTime)} ]; }`
 }
 
 /** What the backend records about a process that Daytona's own session cannot answer. */
@@ -54,9 +93,11 @@ export interface ProcessMeta {
  *
  * Three jobs, none of which Daytona does for us:
  *
- * 1. **`printf '%s' "$$"`** records the pid. There is no pid in the API and no signal API
+ * 1. **`printf … "$$" …`** records the pid. There is no pid in the API and no signal API
  *    either, so a kill is an ordinary `kill(1)` and this file is the only thing that says what
- *    to aim it at. Written first, so it exists before the command can be worth killing.
+ *    to aim it at. Written first, so it exists before the command can be worth killing. The boot
+ *    id and start time ride along ({@link PidIdentity}) so a kill can tell the process from a
+ *    stranger that inherited the number after a restart.
  * 2. **`exec`** makes that pid the *command's* pid rather than a shell that will fork one.
  *    Without it the recorded pid names a parent, and a kill aimed at it leaves the turn running.
  * 3. **`setsid --wait`** puts the whole thing in a new session, so that pid is also the
@@ -83,7 +124,8 @@ export function wrappedCommand(input: {
   }
   launch.push(quoteArgv(input.command))
   const run = input.cwd === undefined ? launch.join(' ') : `cd ${quoteArg(input.cwd)} && ${launch.join(' ')}`
-  const script = `printf '%s' "$$" > ${quoteArg(input.pidPath)} ; ${run}`
+  const record = `printf "%s %s %s" "$$" "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" "$(${START_TIME_OF('$$')})"`
+  const script = `${record} > ${quoteArg(input.pidPath)} ; ${run}`
   return `setsid --wait sh -c ${quoteArg(script)}`
 }
 

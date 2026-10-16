@@ -124,4 +124,30 @@ describe('kill', () => {
     expect(fake.ran).toEqual([])
     warn.mockRestore()
   })
+
+  /**
+   * After a sandbox restart the pid file outlives the process, and the number can name a stranger.
+   * The wrapper records the boot id and start time beside the pid; a kill whose live process no
+   * longer matches signals nothing, and says so rather than failing the sweep that asked.
+   */
+  it('does not signal a pid whose recorded identity no longer matches', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = fakeSandbox()
+    const handle = await session(fake).exec(['claude'])
+    recordPid(fake, 'run-1', '4242 boot-a 987654')
+    fake.exitCodes.set('[ "$(cat /proc/sys/kernel/random/boot_id)"', 1)
+
+    await handle.kill()
+    expect(fake.ran).toHaveLength(1)
+    expect(fake.ran[0]).toContain(`= 'boot-a'`)
+    expect(fake.ran[0]).toContain(`= '987654'`)
+    expect(fake.sessions.has('run-1')).toBe(true)
+    expect(warn.mock.calls.map(([message]) => String(message)).join('\n')).toMatch(/no longer the process it started/)
+
+    fake.ran.length = 0
+    fake.exitCodes.clear()
+    await handle.kill()
+    expect(fake.ran.at(-1)).toBe('kill -KILL -- -4242')
+    warn.mockRestore()
+  })
 })

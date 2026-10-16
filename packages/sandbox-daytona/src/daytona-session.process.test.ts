@@ -30,7 +30,7 @@ describe('exec', () => {
     await session(fake).exec(['claude', '-p', `it's here`])
 
     expect(commandOf(fake, 'run-1')?.command).toBe(
-      `setsid --wait sh -c 'printf '\\''%s'\\'' "$$" > '\\''${ROOT}/run-1.pid'\\'' ; `
+      `setsid --wait sh -c 'printf "%s %s %s" "$$" "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" "$(sed "s/^.*) //" /proc/$$/stat 2>/dev/null | cut -d" " -f20)" > '\\''${ROOT}/run-1.pid'\\'' ; `
       + `exec '\\''claude'\\'' '\\''-p'\\'' '\\''it'\\''\\'\\'''\\''s here'\\'''`,
     )
   })
