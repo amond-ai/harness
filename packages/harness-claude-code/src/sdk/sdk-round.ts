@@ -127,7 +127,7 @@ export interface PumpContext {
 }
 
 export async function runAttachRound(input: AttachRoundInput): Promise<TurnRoundState> {
-  const { context, spentAtEntry, dialTimeoutMs } = await enterRound(input)
+  const { context, spentAtEntry, dialBound } = await enterRound(input)
   const sleep = input.sleep ?? (async (ms: number) => {
     await new Promise(resolve => setTimeout(resolve, ms))
   })
@@ -139,7 +139,7 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
         // while the bridge is unreachable is not left to wait out the whole window.
         return context.state
       }
-      const dialed = await openChannel(input, dialTimeoutMs)
+      const dialed = await openChannel(input, dialBound)
       // How this pass lost its channel, for the reading a gone host is abandoned on.
       let socket: HostLossSocket = 'dial-failed'
       if (dialed !== undefined) {

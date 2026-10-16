@@ -189,6 +189,7 @@ describe('a round that inherits an outstanding interrupt', () => {
     expect(state.outcome).toMatchObject({ outcome: 'timed-out', timedOutBy: 'watchdog' })
     expect(kill).toHaveBeenCalled()
   })
+
   it('dials a host whose stop is already due with no more than the short bound, not a full connect', async () => {
     const enteredAt = HANDLE.startedAtMs! + 60_000
     const { session, kill } = createFakeSession()
@@ -198,7 +199,8 @@ describe('a round that inherits an outstanding interrupt', () => {
       session,
       handle: HANDLE,
       connect: async () => await new Promise<WsLike>(() => {}),
-      config: fakeConfig(),
+      // A production-sized sample interval: the round's deadline is floored by it, the stop's is not.
+      config: fakeConfig({ livenessSampleIntervalMs: 30_000 }),
       mirror: undefined,
       budgetMs: BUDGET_MS,
       previous: {
@@ -215,6 +217,40 @@ describe('a round that inherits an outstanding interrupt', () => {
     expect(settled).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
 
+    expect(settled).toBe(true)
+    expect((await round).outcome).toMatchObject({ outcome: 'timed-out', timedOutBy: 'watchdog' })
+    expect(kill).toHaveBeenCalled()
+  })
+  it('gives a connect and its greeting one handshake bound between them, not one each', async () => {
+    // The socket arrives just inside the bound, and the bridge behind it never greets.
+    const host = createFakeTurnHost({ greet: false })
+    const enteredAt = HANDLE.startedAtMs! + 60_000
+    const { session, kill } = createFakeSession()
+    let settled = false
+
+    const round = runAttachRound({
+      session,
+      handle: HANDLE,
+      connect: async () => {
+        await new Promise(resolve => setTimeout(resolve, SPENT_BUDGET_CONNECT_TIMEOUT_MS - 100))
+        return await host.connect()
+      },
+      config: fakeConfig({ livenessSampleIntervalMs: 30_000 }),
+      mirror: undefined,
+      budgetMs: BUDGET_MS,
+      previous: {
+        since: 4,
+        lastActivityAt: enteredAt,
+        interruptedBy: 'watchdog',
+        interruptedAt: enteredAt - INTERRUPT_SETTLE_TIMEOUT_MS - KILL_SETTLE_TIMEOUT_MS,
+      },
+      now: runningClock(60_000),
+    }).finally(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(SPENT_BUDGET_CONNECT_TIMEOUT_MS)
+
+    expect(host.connections).toHaveLength(1)
     expect(settled).toBe(true)
     expect((await round).outcome).toMatchObject({ outcome: 'timed-out', timedOutBy: 'watchdog' })
     expect(kill).toHaveBeenCalled()

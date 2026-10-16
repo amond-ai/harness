@@ -36,7 +36,7 @@ export const SPENT_BUDGET_CONNECT_TIMEOUT_MS = 5_000
  */
 export async function enterRound(
   input: AttachRoundInput,
-): Promise<{ context: PumpContext, spentAtEntry: boolean, dialTimeoutMs: number }> {
+): Promise<{ context: PumpContext, spentAtEntry: boolean, dialBound: DialBound }> {
   // Read after the process lookup, not before: it is a sandbox round trip, and a budget that ran
   // out during it would otherwise be judged on a clock from before it and dialled with the full bound.
   const hostProcess = await input.session.getProcess(input.handle.processId)
@@ -79,7 +79,21 @@ export async function enterRound(
   const spentAtEntry = carried.interruptedBy === undefined
     && input.handle.startedAtMs !== undefined
     && turnBudgetExhausted({ startedAt: input.handle.startedAtMs, now, budgetMs: input.budgetMs })
-  return { context, spentAtEntry, dialTimeoutMs: dialBound(spentAtEntry, carried.interruptedBy !== undefined, context.deadline - now) }
+  // The stop's own settle deadline, not the round's: that one is floored a sample interval out so
+  // the round still samples once, and reading it here would hand an overdue stop the full bound.
+  const settleLeftMs = carried.interruptedAt === undefined
+    ? context.deadline - now
+    : carried.interruptedAt + INTERRUPT_SETTLE_TIMEOUT_MS + KILL_SETTLE_TIMEOUT_MS - now
+  return { context, spentAtEntry, dialBound: dialBound(spentAtEntry, carried.interruptedBy !== undefined, settleLeftMs) }
+}
+
+/**
+ * How long one dial may take: `timeoutMs`, either for the connect and the greeting each, or —
+ * when `shared` — for the two together, as one handshake deadline.
+ */
+export interface DialBound {
+  timeoutMs: number
+  shared: boolean
 }
 
 /**
@@ -87,30 +101,39 @@ export async function enterRound(
  * inherits an outstanding interrupt, what is left of that stop's settle deadline — never less
  * than the short bound, so a healthy bridge can still answer, nor more than the full one. A full
  * connect and greeting would otherwise postpone a kill that is already due by up to a minute.
+ *
+ * Both of those rounds owe a stop, so their bound is one deadline for the whole handshake: given
+ * per phase, a socket that arrives just inside it and then never greets would hold the stop for
+ * a second bound. The full bound stays per phase — nothing is owed yet, and a runtime slow to
+ * complete the upgrade should still get the whole greeting wait.
  */
-function dialBound(spentAtEntry: boolean, stopOutstanding: boolean, settleLeftMs: number): number {
+function dialBound(spentAtEntry: boolean, stopOutstanding: boolean, settleLeftMs: number): DialBound {
   if (spentAtEntry) {
-    return SPENT_BUDGET_CONNECT_TIMEOUT_MS
+    return { timeoutMs: SPENT_BUDGET_CONNECT_TIMEOUT_MS, shared: true }
   }
   return stopOutstanding
-    ? Math.min(BRIDGE_CONNECT_TIMEOUT_MS, Math.max(settleLeftMs, SPENT_BUDGET_CONNECT_TIMEOUT_MS))
-    : BRIDGE_CONNECT_TIMEOUT_MS
+    ? { timeoutMs: Math.min(BRIDGE_CONNECT_TIMEOUT_MS, Math.max(settleLeftMs, SPENT_BUDGET_CONNECT_TIMEOUT_MS)), shared: true }
+    : { timeoutMs: BRIDGE_CONNECT_TIMEOUT_MS, shared: false }
 }
 
 /**
  * Dial and shake hands, answering `undefined` for a dial the round should simply retry.
  *
- * `timeoutMs` bounds the connect and the greeting each: {@link BRIDGE_CONNECT_TIMEOUT_MS}, or the
- * short {@link SPENT_BUDGET_CONNECT_TIMEOUT_MS} for a round that was entered over budget, or the
- * settle-bounded one for a round inheriting a stop ({@link dialBound}). The
+ * `bound` is {@link dialBound}'s: {@link BRIDGE_CONNECT_TIMEOUT_MS} for the connect and the
+ * greeting each, or — for a round entered over budget or inheriting a stop — one shorter deadline
+ * the two share, the greeting getting only what the connect left of it. The
  * greeting's `state`, `lastSeq` and whether it acknowledges a `resume` (`resumeAck`) come
  * back with the channel, for the early interrupt that acts on them.
  */
 export async function openChannel(
   input: AttachRoundInput,
-  timeoutMs: number,
+  bound: DialBound,
 ): Promise<{ channel: TurnChannel, hostState: string | undefined, lastSeq: number | undefined, resumeAck: boolean } | undefined> {
   let channel: TurnChannel
+  const { timeoutMs } = bound
+  // Elapsed on `Date.now()` rather than `input.now()`: the round's clock is scripted read by read
+  // in tests, and this is a timer's measure, which fake timers drive as they drive the deadline.
+  const dialedAt = Date.now()
   const dial = input.connect()
   try {
     // Raced against a suspend as well as the deadline, as the greeting below is: a connect that
@@ -133,7 +156,8 @@ export async function openChannel(
   // Waited through `nextFrame` rather than `channel.next` so the wait is raced against a suspend:
   // a bridge that completes the upgrade and then never greets would otherwise hold a
   // `doSuspendTurn` for the full connect timeout with nothing to show for it.
-  const hello = await nextFrame(channel, timeoutMs, input.signal)
+  const greetingMs = bound.shared ? timeoutMs - (Date.now() - dialedAt) : timeoutMs
+  const hello = greetingMs > 0 ? await nextFrame(channel, greetingMs, input.signal) : { end: 'deadline' as const }
   if (hello === 'aborted') {
     channel.close()
     return undefined

@@ -48,6 +48,8 @@ export interface FakeConnection {
 }
 
 export interface FakeTurnHostScript {
+  /** Skip the handshake, so the round sees a bridge that never greets it. */
+  greet?: false
   /** Called for every command the round sends, so a test can answer it. */
   onSend?: (message: Record<string, unknown>, connection: FakeConnection, index: number) => void
   /** What the greeting reports the bridge is doing; `waiting` unless a test says otherwise. */
@@ -70,12 +72,14 @@ export function createFakeTurnHost(script: FakeTurnHostScript = {}): FakeTurnHos
     connect: async () => {
       const { connection, socket } = createConnection(script, connections.length)
       connections.push(connection)
-      connection.emit({
-        type: 'bridge-hello',
-        state: script.helloState ?? 'waiting',
-        lastSeq: script.helloLastSeq ?? 0,
-        ...(script.helloCapabilities === undefined ? {} : { capabilities: script.helloCapabilities }),
-      })
+      if (script.greet !== false) {
+        connection.emit({
+          type: 'bridge-hello',
+          state: script.helloState ?? 'waiting',
+          lastSeq: script.helloLastSeq ?? 0,
+          ...(script.helloCapabilities === undefined ? {} : { capabilities: script.helloCapabilities }),
+        })
+      }
       return socket
     },
   }
