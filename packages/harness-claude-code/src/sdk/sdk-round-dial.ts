@@ -1,6 +1,7 @@
 import type { LiveMirror } from '../mirror'
 import type { TurnChannel } from './sdk-channel'
 import type { AttachRoundInput, PumpContext } from './sdk-round'
+import type { TurnRoundState } from './sdk-round-state'
 /**
  * The entry and the dial of one attach round, moved out of `sdk-round.ts` (the file had
  * grown past the 500-line limit and `runAttachRound` carried its own entry logic).
@@ -36,12 +37,12 @@ export const SPENT_BUDGET_CONNECT_TIMEOUT_MS = 5_000
  */
 export async function enterRound(
   input: AttachRoundInput,
-): Promise<{ context: PumpContext, spentAtEntry: boolean, dialBound: DialBound }> {
+): Promise<{ context: PumpContext, spentAtEntry: boolean }> {
   // Read after the process lookup, not before: it is a sandbox round trip, and a budget that ran
   // out during it would otherwise be judged on a clock from before it and dialled with the full bound.
   const hostProcess = await input.session.getProcess(input.handle.processId)
   const now = input.now()
-  const carried = input.previous ?? { since: 0, lastActivityAt: now }
+  const carried = stampedStop(input.previous ?? { since: 0, lastActivityAt: now }, now)
   const context: PumpContext = {
     input,
     process: hostProcess,
@@ -79,12 +80,21 @@ export async function enterRound(
   const spentAtEntry = carried.interruptedBy === undefined
     && input.handle.startedAtMs !== undefined
     && turnBudgetExhausted({ startedAt: input.handle.startedAtMs, now, budgetMs: input.budgetMs })
-  // The stop's own settle deadline, not the round's: that one is floored a sample interval out so
-  // the round still samples once, and reading it here would hand an overdue stop the full bound.
-  const settleLeftMs = carried.interruptedAt === undefined
-    ? context.deadline - now
-    : carried.interruptedAt + INTERRUPT_SETTLE_TIMEOUT_MS + KILL_SETTLE_TIMEOUT_MS - now
-  return { context, spentAtEntry, dialBound: dialBound(spentAtEntry, carried.interruptedBy !== undefined, settleLeftMs) }
+  return { context, spentAtEntry }
+}
+
+/**
+ * The carried state, with a stop that names no time stamped as sent at the round's entry.
+ *
+ * A state from before `interruptedAt` was carried, or a partial one, holds the cause alone.
+ * `judge` would then measure the grace from whatever moment it reads the clock — never ending it
+ * — while the unreachable verdict had no grace to measure and killed at once. Stamped here, both
+ * measure the one grace from the entry.
+ */
+function stampedStop(carried: TurnRoundState, now: number): TurnRoundState {
+  return carried.interruptedBy !== undefined && carried.interruptedAt === undefined
+    ? { ...carried, interruptedAt: now }
+    : carried
 }
 
 /**
@@ -97,29 +107,37 @@ export interface DialBound {
 }
 
 /**
- * The bound one dial gets: the short one for a round entered over budget, and for a round that
- * inherits an outstanding interrupt, what is left of that stop's settle deadline — never less
- * than the short bound, so a healthy bridge can still answer, nor more than the full one. A full
- * connect and greeting would otherwise postpone a kill that is already due by up to a minute.
+ * The bound the round's next dial gets, read off the context as it stands at that dial.
  *
- * Both of those rounds owe a stop, so their bound is one deadline for the whole handshake: given
- * per phase, a socket that arrives just inside it and then never greets would hold the stop for
- * a second bound. The full bound stays per phase — nothing is owed yet, and a runtime slow to
- * complete the upgrade should still get the whole greeting wait.
+ * While a stop is outstanding — carried in, or sent by `judge` earlier in this round — it is what
+ * is left of that stop's own settle deadline, never less than the short bound so a healthy bridge
+ * can still answer, nor more than the full one: a full connect and greeting would otherwise
+ * postpone a kill that is already due by up to a minute. Read per dial rather than once at entry,
+ * so a redial late in the settle gets only the remainder. A round entered over budget with no stop
+ * sent yet gets the short bound. Neither reads the stop's deadline off `context.deadline`: that
+ * one is floored a sample interval out, so the round still samples once.
+ *
+ * Both owe a stop, so their bound is one deadline for the whole handshake: given per phase, a
+ * socket that arrives just inside it and then never greets would hold the stop for a second
+ * bound. The full bound stays per phase — nothing is owed yet, and a runtime slow to complete
+ * the upgrade should still get the whole greeting wait.
  */
-function dialBound(spentAtEntry: boolean, stopOutstanding: boolean, settleLeftMs: number): DialBound {
-  if (spentAtEntry) {
-    return { timeoutMs: SPENT_BUDGET_CONNECT_TIMEOUT_MS, shared: true }
+export function dialBoundOf(context: PumpContext, spentAtEntry: boolean): DialBound {
+  const askedAt = context.interruptedBy === undefined ? undefined : context.state.interruptedAt
+  if (askedAt !== undefined) {
+    // The clock is read only here: a round's tests script `now()` call by call.
+    const settleLeftMs = askedAt + INTERRUPT_SETTLE_TIMEOUT_MS + KILL_SETTLE_TIMEOUT_MS - context.input.now()
+    return { timeoutMs: Math.min(BRIDGE_CONNECT_TIMEOUT_MS, Math.max(settleLeftMs, SPENT_BUDGET_CONNECT_TIMEOUT_MS)), shared: true }
   }
-  return stopOutstanding
-    ? { timeoutMs: Math.min(BRIDGE_CONNECT_TIMEOUT_MS, Math.max(settleLeftMs, SPENT_BUDGET_CONNECT_TIMEOUT_MS)), shared: true }
+  return spentAtEntry
+    ? { timeoutMs: SPENT_BUDGET_CONNECT_TIMEOUT_MS, shared: true }
     : { timeoutMs: BRIDGE_CONNECT_TIMEOUT_MS, shared: false }
 }
 
 /**
  * Dial and shake hands, answering `undefined` for a dial the round should simply retry.
  *
- * `bound` is {@link dialBound}'s: {@link BRIDGE_CONNECT_TIMEOUT_MS} for the connect and the
+ * `bound` is {@link dialBoundOf}'s: {@link BRIDGE_CONNECT_TIMEOUT_MS} for the connect and the
  * greeting each, or — for a round entered over budget or inheriting a stop — one shorter deadline
  * the two share, the greeting getting only what the connect left of it. The
  * greeting's `state`, `lastSeq` and whether it acknowledges a `resume` (`resumeAck`) come

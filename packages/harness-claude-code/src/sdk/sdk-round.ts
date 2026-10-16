@@ -33,7 +33,7 @@ import { flushOnInterval } from '../turn-mirror-flush'
 import { withVerdict } from '../turn-result-scan'
 import { foldBackgroundWait, foldStreamPart } from './sdk-background-wait'
 import { classifyFrame, isNoRunningTurnReply, isRefusedInterruptReply, streamPartOf } from './sdk-frames'
-import { enterRound, openChannel } from './sdk-round-dial'
+import { dialBoundOf, enterRound, openChannel } from './sdk-round-dial'
 import { confirmedHostLoss } from './sdk-round-gone'
 import { judgeAfterNoTurn, stopFoundNoTurn, stopRefused, unreachableEnded } from './sdk-round-noturn'
 import { nextFrame, publishFrame } from './sdk-round-observe'
@@ -127,7 +127,7 @@ export interface PumpContext {
 }
 
 export async function runAttachRound(input: AttachRoundInput): Promise<TurnRoundState> {
-  const { context, spentAtEntry, dialBound } = await enterRound(input)
+  const { context, spentAtEntry } = await enterRound(input)
   const sleep = input.sleep ?? (async (ms: number) => {
     await new Promise(resolve => setTimeout(resolve, ms))
   })
@@ -139,7 +139,7 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
         // while the bridge is unreachable is not left to wait out the whole window.
         return context.state
       }
-      const dialed = await openChannel(input, dialBound)
+      const dialed = await openChannel(input, dialBoundOf(context, spentAtEntry))
       // How this pass lost its channel, for the reading a gone host is abandoned on.
       let socket: HostLossSocket = 'dial-failed'
       if (dialed !== undefined) {
@@ -274,8 +274,9 @@ async function quietSample(channel: TurnChannel, context: PumpContext): Promise<
   }
   // Not while a "no running turn" reply is outstanding: the wait is for a terminal frame the
   // socket will deliver, bounded by `judge`'s grace, and a probe that stalls would hold both the
-  // frame and that bound behind an unbounded round trip.
-  if (context.noTurn === undefined) {
+  // frame and that bound behind an unbounded round trip. Nor while the resume settles: a probe
+  // started inside that hold and returning past it would judge ahead of frames queued meanwhile.
+  if (context.noTurn === undefined && !settling(context)) {
     await context.process?.status().catch(() => undefined)
   }
   return await judgeIfDue(channel, context) ? 'terminal' : undefined

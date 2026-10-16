@@ -163,7 +163,7 @@ export interface FakeHostProcess {
   state?: 'running' | 'exited'
   exitCode?: number
   /** Called on every `status()` read, before it answers — where a test lands a suspend. */
-  onStatus?: () => void
+  onStatus?: () => void | Promise<void>
 }
 
 /** A sandbox session holding the given processes; `kill` is a spy over every signal sent. */
@@ -178,7 +178,7 @@ export function createFakeSession(processes: FakeHostProcess[] = [{ id: HANDLE.p
       pid: 1,
       command,
       status: async (): Promise<ProcessStatus> => {
-        process.onStatus?.()
+        await process.onStatus?.()
         const base = { id: process.id, pid: 1, command, startedAt: new Date().toISOString() }
         return process.state === 'exited'
           ? { ...base, state: 'exited', exit: { code: process.exitCode ?? 0, timedOut: false }, endedAt: new Date().toISOString() }
@@ -221,15 +221,22 @@ export function runningClock(offsetMs: number): () => number {
   return () => HANDLE.startedAtMs! + offsetMs + (Date.now() - startedAt)
 }
 
-/** Only the members the round calls; `appended` collects every line it published. */
+/**
+ * Only the members the round calls; `appended` collects every line it published. The cursor is
+ * the last appended event's, as `LiveMirror.cursor` says, so a later round reads it as its floor.
+ */
 export function fakeMirror(appended: string[], cursor?: string): LiveMirror {
+  let latest = cursor
   return {
-    append: (bytes: Uint8Array) => {
+    append: (bytes: Uint8Array, eventCursor: string) => {
       appended.push(new TextDecoder().decode(bytes))
+      latest = eventCursor
     },
     noteGap: () => {},
     flush: async () => {},
     bytes: 0,
-    cursor,
+    get cursor() {
+      return latest
+    },
   }
 }

@@ -68,15 +68,15 @@ export interface Greeting {
  * `lastSeq` target is still armed, settle counted as elapsed, for an acknowledgement that does not
  * come inside {@link RESUME_ACK_TIMEOUT_MS}.
  *
- * Nothing is armed on a redial while a "no running turn" reply is outstanding: the stop was
- * already sent and forgotten, and `judge` owes that reply's grace and then the kill. A fresh
- * settle would hold that judge back, and a redial that lands late in the grace would let the
- * window end on a live state with the timed-out turn neither recorded nor killed.
+ * Nothing is armed on a redial once a stop has gone out — still outstanding, or forgotten on a
+ * "no running turn" reply: `judge` owes that stop's grace and then the kill. A fresh settle
+ * would hold that judge back, and a redial that lands late in the grace would let the window
+ * end on a live state with the timed-out turn neither recorded nor killed.
  */
 export function armEarlyJudge(context: PumpContext, spentAtEntry: boolean, greeting: Greeting): void {
   context.resumeAckBy = undefined
   context.earlyJudgeNotBefore = undefined
-  if (!spentAtEntry || greeting.hostState !== 'running' || context.noTurn !== undefined) {
+  if (!spentAtEntry || greeting.hostState !== 'running' || context.noTurn !== undefined || context.interruptedBy !== undefined) {
     context.earlyJudgeAt = undefined
     return
   }
