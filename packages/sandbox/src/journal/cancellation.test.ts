@@ -77,6 +77,42 @@ describe('journal read cancellation', () => {
     await expect(finished).resolves.toEqual([])
   })
 
+  it('does not sit out the interval when the abort lands after the poll\'s reads', async () => {
+    // The window the reads' own signals cannot cover: every read of the poll has already
+    // settled, so nothing rejects, and the tail reaches `sleep` with a signal that has fired. An
+    // `abort` listener registered then is never called (gemini review, PR #280). The clock is the
+    // last thing the poll asks before sleeping, so aborting from it lands exactly there (cubic
+    // review, PR #30).
+    const controller = new AbortController()
+    let polled = false
+    const tail = {
+      ...sources(),
+      paths: { stdout: '/j/p.out', stderr: '/j/p.err' },
+      readExitCode: async () => {
+        polled = true
+        return undefined
+      },
+      elapsedMs: () => {
+        if (polled) {
+          controller.abort()
+        }
+        return 0
+      },
+      isGone: async () => false,
+      intervalMs: 3_000,
+    }
+
+    const ended = (async () => {
+      for await (const _ of followJournal(tail, { from: { stdout: 0, stderr: 0 }, terminal: true, signal: controller.signal })) {
+        // Nothing is written, so there is nothing to see.
+      }
+      return 'ended'
+    })()
+    const stalled = new Promise<'stalled'>(resolve => setTimeout(resolve, 50, 'stalled'))
+
+    expect(await Promise.race([ended, stalled])).toBe('ended')
+  })
+
   it('surfaces a failed final drain instead of emitting a terminal', async () => {
     const tail = {
       ...sources(),

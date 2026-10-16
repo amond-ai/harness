@@ -152,20 +152,22 @@ describe('createE2bSession', () => {
     })
 
     it('ends without waiting out the interval when the abort lands mid-poll', async () => {
-      // The window the loop's own `aborted` check cannot cover: the caller aborts *while* a
-      // poll is in flight, so the tail reaches `sleep` with a signal that has already fired.
-      // An `abort` listener registered then is never called, and the follow sits out a whole
+      // The caller aborts *while* a poll is in flight, and the follow must not sit out a whole
       // interval — a second by default — after its reader has gone (gemini review, PR #280).
+      // The reads now honour the signal, so an abort here ends the poll at the read it lands
+      // in, before the tail ever reaches `sleep`. The narrower window — every read settled,
+      // `sleep` entered with a signal that already fired — is pinned against `followJournal`
+      // directly in `cancellation.test.ts`, where the clock it aborts from is injectable
+      // (cubic review, PR #30).
       const fake = fakeSandbox()
       const handle = await session(fake, ['run-1'], { followIntervalMs: 3_000 }).exec(['claude'])
       fake.files.set(`${ROOT}/run-1.out`, encode('first\n'))
       const control = new AbortController()
 
-      // Aborting from inside the read is the only way to land in that window deliberately:
-      // the stream pulls again the moment a chunk is taken, so a test that aborts between
-      // reads finds the tail already asleep, where the listener does fire. It is the exit
-      // read that is aborted, not the slice reads: those now honour the signal, so aborting
-      // one would cancel the poll before it served the chunk this test goes on to expect.
+      // Aborted from inside a read because the stream pulls again the moment a chunk is
+      // taken, so a test that aborts between reads finds the tail already asleep. It is the
+      // exit read that is aborted, not the slice reads: aborting one would cancel the poll
+      // before it served the chunk this test goes on to expect.
       const inner = fake.sandbox.files.read.bind(fake.sandbox.files)
       fake.sandbox.files.read = ((path: string, opts: { format: 'stream' }) => {
         if (path.endsWith('.exit')) {
