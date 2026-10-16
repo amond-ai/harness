@@ -86,18 +86,20 @@ const STREAM_PART_TYPES = new Set([
 ])
 
 /**
- * Whether a frame's text is one of those parts.
+ * The frame's type when its text is one of those parts, `undefined` otherwise.
  *
  * A second parse rather than a field on {@link FrameEffect}: only a round holding a background
  * wait asks, which is rare and quiet, while every delta of every turn is classified.
  */
-export function isStreamPart(text: string): boolean {
+export function streamPartOf(text: string): string | undefined {
   try {
     const parsed: unknown = JSON.parse(text)
     return isRecord(parsed) && typeof parsed.type === 'string' && STREAM_PART_TYPES.has(parsed.type)
+      ? parsed.type
+      : undefined
   }
   catch {
-    return false
+    return undefined
   }
 }
 

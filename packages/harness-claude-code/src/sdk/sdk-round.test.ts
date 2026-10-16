@@ -432,4 +432,50 @@ describe('a round over a turn waiting on background work', () => {
     expect(state.awaitingBackground).toBeUndefined()
     expect(state.outcome).toMatchObject({ outcome: 'timed-out', timedOutBy: 'watchdog' })
   })
+
+  it('keeps the wait over the structured output a JSON-format result is rendered as', async () => {
+    const controller = new AbortController()
+    const host = createFakeTurnHost({
+      onSend: (message, connection) => {
+        if (message.type === 'resume') {
+          // What the host emits for a `result` under `responseFormat: json` that leaves work
+          // running: the result, its structured output as one text block, the step's end.
+          connection.emit({
+            type: 'raw',
+            seq: 5,
+            rawValue: { type: 'result', subtype: 'success', terminal_reason: 'completed', structured_output: { ok: true } },
+          })
+          connection.emit({ type: 'text-start', id: 'json-1', seq: 6 })
+          connection.emit({ type: 'text-delta', id: 'json-1', delta: '{"ok":true}', seq: 7 })
+          connection.emit({ type: 'text-end', id: 'json-1', seq: 8 })
+          connection.emit({
+            type: 'finish-step',
+            seq: 9,
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: { inputTokens: {}, outputTokens: {} },
+          })
+        }
+      },
+    })
+    const { session } = createFakeSession()
+
+    const round = runAttachRound({
+      session,
+      handle: HANDLE,
+      connect: host.connect,
+      config: fakeConfig({ watchdogTimeoutMs: 10_000 }),
+      mirror: undefined,
+      budgetMs: BUDGET_MS,
+      previous: { since: 4, lastActivityAt: HANDLE.startedAtMs!, backgroundTasks: 1 },
+      signal: controller.signal,
+      now: runningClock(0),
+    })
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(interruptsSent(host)).toEqual([])
+    controller.abort()
+    const state = await round
+    expect(state).toMatchObject({ since: 9, awaitingBackground: true })
+    expect(state.outcome).toBeUndefined()
+  })
 })

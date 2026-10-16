@@ -29,6 +29,11 @@ export interface BackgroundWait {
   backgroundTasks?: number
   /** Set from a `result` that left work running until the main thread speaks again. */
   awaitingBackground?: true
+  /**
+   * Set from a `result` that carries `structured_output`, until the text block the host renders
+   * it as has gone past (`foldStreamPart`): those parts are the result's, not a woken turn's.
+   */
+  structuredOutputPending?: true
 }
 
 interface TranscriptMessage {
@@ -40,6 +45,7 @@ interface TranscriptMessage {
   is_error?: unknown
   origin?: { kind?: unknown }
   num_turns?: unknown
+  structured_output?: unknown
 }
 
 /** Fold one transcript line — one SDK message as JSON — into the wait the round carries. */
@@ -55,24 +61,35 @@ export function foldBackgroundWait<S extends BackgroundWait>(state: S, line: str
   }
   if (isMainThread(message)) {
     // The CLI woke a turn: frames flow again, and silence means what it always meant.
-    return withWait(state, tasks, false)
+    return withPending(withWait(state, tasks, false), false)
   }
   if (message.type === 'result') {
-    return withWait(state, tasks, waitsAfter(message, tasks, state.awaitingBackground === true))
+    const waiting = waitsAfter(message, tasks, state.awaitingBackground === true)
+    return withPending(withWait(state, tasks, waiting), message.structured_output !== undefined)
   }
   return state
 }
 
 /**
- * Fold one main-thread stream part — a `text-start`, a delta — into the wait the round carries.
+ * Fold one main-thread stream part — its frame `type`, a `text-start`, a delta — into the wait
+ * the round carries.
  *
  * The host clears its wait on the main thread's `stream_event`s as well as on complete messages,
  * but forwards those only as stream parts, never as `raw` lines {@link foldBackgroundWait} reads.
  * Without this, a woken turn that stalls before its first complete message would keep the
  * watchdog off until the wall-clock budget.
+ *
+ * Except the one text block a `result` with `structured_output` is followed by: under a JSON
+ * response format the host renders that output as `text-start`/`-delta`/`-end` right after the
+ * result, and then keeps waiting on the background work like any other result. Those parts are
+ * the result's, so they leave the wait alone, and the block's `text-end` closes the exception.
  */
-export function foldStreamPart<S extends BackgroundWait>(state: S): S {
-  return state.awaitingBackground === true ? withWait(state, state.backgroundTasks ?? 0, false) : state
+export function foldStreamPart<S extends BackgroundWait>(state: S, type: string): S {
+  if (state.structuredOutputPending === true && type.startsWith('text-')) {
+    return type === 'text-end' ? withPending(state, false) : state
+  }
+  const settled = withPending(state, false)
+  return settled.awaitingBackground === true ? withWait(settled, settled.backgroundTasks ?? 0, false) : settled
 }
 
 /** The terminal reasons the host does not count as a completed turn; every other one is. */
@@ -119,6 +136,16 @@ function withWait<S extends BackgroundWait>(state: S, tasks: number, waiting: bo
     ...(tasks > 0 ? { backgroundTasks: tasks } : {}),
     ...(waiting ? { awaitingBackground: true } : {}),
   }
+}
+
+/** The state with the structured-output exception set or cleared, absent rather than false. */
+function withPending<S extends BackgroundWait>(state: S, pending: boolean): S {
+  if (pending === (state.structuredOutputPending === true)) {
+    return state
+  }
+  const next: S = { ...state }
+  delete next.structuredOutputPending
+  return pending ? { ...next, structuredOutputPending: true } : next
 }
 
 function parsed(line: string): TranscriptMessage | undefined {
