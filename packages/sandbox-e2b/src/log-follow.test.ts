@@ -163,10 +163,12 @@ describe('createE2bSession', () => {
 
       // Aborting from inside the read is the only way to land in that window deliberately:
       // the stream pulls again the moment a chunk is taken, so a test that aborts between
-      // reads finds the tail already asleep, where the listener does fire.
+      // reads finds the tail already asleep, where the listener does fire. It is the exit
+      // read that is aborted, not the slice reads: those now honour the signal, so aborting
+      // one would cancel the poll before it served the chunk this test goes on to expect.
       const inner = fake.sandbox.files.read.bind(fake.sandbox.files)
       fake.sandbox.files.read = ((path: string, opts: { format: 'stream' }) => {
-        if (path.endsWith('.out')) {
+        if (path.endsWith('.exit')) {
           control.abort()
         }
         return inner(path, opts)

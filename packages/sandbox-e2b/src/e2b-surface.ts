@@ -15,8 +15,8 @@
  * isolate is to drop them as they arrive rather than after.
  */
 export interface E2bFileRead {
-  (path: string, opts: { format: 'bytes' }): Promise<Uint8Array>
-  (path: string, opts: { format: 'stream' }): Promise<ReadableStream<Uint8Array>>
+  (path: string, opts: { format: 'bytes', signal?: AbortSignal }): Promise<Uint8Array>
+  (path: string, opts: { format: 'stream', signal?: AbortSignal }): Promise<ReadableStream<Uint8Array>>
 }
 
 /**

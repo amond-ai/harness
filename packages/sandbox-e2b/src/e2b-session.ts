@@ -24,6 +24,7 @@ import type {
 import type { E2bSandboxLike } from './e2b-surface'
 import type { JournalMeta } from './journal'
 import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@amond-ai/sandbox'
+import { abortable } from '@amond-ai/sandbox/journal'
 import { createE2bFiles } from './e2b-files'
 import { createKillPath } from './e2b-kill'
 import { isProcessId, journalledCommand, journalPaths, serializeJournalMeta } from './journal'
@@ -253,7 +254,7 @@ export function createE2bSession(
       status: () => statusOf(meta),
       logs: createProcessLogs({
         paths,
-        readExitCode: () => readExitCode(paths),
+        readExitCode: options => readExitCode(paths, options),
         readSliceFrom,
         readEndOffset,
         streamFile,
@@ -261,8 +262,11 @@ export function createE2bSession(
         // from e2b's table *and* no survivor in the wrapper's own session. A follow read that
         // trusted the journal alone would end on an exit the turn can write for itself, and
         // never end at all when a killed wrapper writes none (code review, PR #280).
-        isGone: async () =>
-          await livenessOf(meta.id) === 'gone' && await sessionSurvivors(sessionPid(meta)) === 'none',
+        // The table reads take no signal, so the caller stops waiting on them instead.
+        isGone: signal => abortable(
+          (async () => await livenessOf(meta.id) === 'gone' && await sessionSurvivors(sessionPid(meta)) === 'none')(),
+          signal,
+        ),
         now,
         elapsedMs,
         followIntervalMs: followMs,
