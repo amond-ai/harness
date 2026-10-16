@@ -66,6 +66,11 @@ export interface TurnRoundState {
    * without it would interrupt a healthy host `watchdogTimeoutMs` into its first silent round.
    */
   awaitingBackground?: true
+  /**
+   * Set from a `result` carrying `structured_output` until the text block the host renders it as
+   * has gone past, so that block is not read as a woken turn (`sdk-background-wait.ts`).
+   */
+  structuredOutputPending?: true
 }
 
 /**

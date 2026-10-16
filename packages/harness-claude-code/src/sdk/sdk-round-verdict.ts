@@ -9,7 +9,7 @@ import type { HostLoss, HostLossSocket, HostReading, TurnTimeoutCause, TurnVerdi
 import type { AttemptResult } from '../turn-driver'
 import type { TerminalObservation } from './sdk-frames'
 import type { AttachRoundInput, PumpContext } from './sdk-round'
-import { killTurn } from '../cli-turn-kill'
+import { INTERRUPT_SETTLE_TIMEOUT_MS, killTurn } from '../cli-turn-kill'
 import { withVerdict } from '../turn-result-scan'
 import { turnBudgetExhausted, turnTimeoutCause } from '../watchdog'
 import { readJournalEnding } from './sdk-journal'
@@ -123,14 +123,29 @@ export function timeoutCauseOf(context: PumpContext, now: number): TurnTimeoutCa
  * For a round entered with the budget already spent this is also the ending of its one short dial:
  * the verdict is `budget` before the dial and still `budget` after it, so a bridge that
  * does not answer costs {@link SPENT_BUDGET_CONNECT_TIMEOUT_MS}, not a full window of dialling.
+ *
+ * A stop already sent is judged on its grace alone, as `judge` judges it: inside the grace the
+ * round redials for the host's answer, and past it the kill ladder follows under the stop's own
+ * cause. Read off the thresholds instead, a frame the host sent after the stop — or a round that
+ * entered with it outstanding — refreshes the silence clock, and the stop would lapse into a retry.
  */
 export async function unreachableTimeout(context: PumpContext): Promise<AttemptResult | undefined> {
-  const timedOutBy = timeoutCauseOf(context, context.input.now())
+  const now = context.input.now()
+  const asked = context.interruptedBy
+  const askedAt = context.state.interruptedAt
+  if (asked !== undefined && askedAt !== undefined && now < askedAt + INTERRUPT_SETTLE_TIMEOUT_MS) {
+    return undefined
+  }
+  const timedOutBy = asked ?? timeoutCauseOf(context, now)
   if (timedOutBy === undefined) {
     return undefined
   }
   console.warn(`unreachable turn host timed out process_id=${context.input.handle.processId} reason=${timedOutBy}`)
-  return interruptedResult(timedOutBy, await killTurn(context.input.session, context.input.handle.processId))
+  return budgetOutranks(
+    interruptedResult(timedOutBy, await killTurn(context.input.session, context.input.handle.processId)),
+    context.input,
+    now,
+  )
 }
 
 /**
