@@ -98,14 +98,18 @@ export async function openChannel(
   let channel: TurnChannel
   const dial = input.connect()
   try {
-    channel = createTurnChannel(await withTimeout(dial, timeoutMs))
+    // Raced against a suspend as well as the deadline, as the greeting below is: a connect that
+    // hangs would otherwise hold a `doSuspendTurn` for the whole bound.
+    channel = createTurnChannel(await withTimeout(dial, timeoutMs, input.signal))
   }
   catch (cause) {
     // The dial is not cancellable, so a socket that arrives after the deadline is closed on
     // arrival instead of being abandoned: the bridge keeps only one active socket, and a late
     // greeting would displace the one the *current* round is pumping and starve it.
     void dial.then(socket => socket.close(), () => undefined)
-    console.warn(`bridge connect failed process_id=${input.handle.processId} error="${describe(cause)}"`)
+    if (input.signal?.aborted !== true) {
+      console.warn(`bridge connect failed process_id=${input.handle.processId} error="${describe(cause)}"`)
+    }
     return undefined
   }
   // `bridge-hello` before anything else: some sandbox runtimes complete the upgrade before the
@@ -139,11 +143,25 @@ function mirrorCursor(mirror: LiveMirror | undefined): number {
   return Number.isFinite(cursor) ? cursor : 0
 }
 
-/** A promise with a deadline; the loser is abandoned rather than cancelled — there is no cancel. */
-export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+/**
+ * A promise with a deadline, and with an abort when a `signal` is given; the loser is abandoned
+ * rather than cancelled — there is no cancel.
+ */
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
+  let onAbort: (() => void) | undefined
   const deadline = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => reject(new Error(`timed out after ${String(timeoutMs)}ms`)), timeoutMs)
+    onAbort = () => reject(new Error('aborted'))
+    if (signal?.aborted === true) {
+      onAbort()
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
-  return await Promise.race([promise, deadline]).finally(() => clearTimeout(timer))
+  return await Promise.race([promise, deadline]).finally(() => {
+    clearTimeout(timer)
+    if (onAbort !== undefined) {
+      signal?.removeEventListener('abort', onAbort)
+    }
+  })
 }

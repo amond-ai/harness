@@ -120,6 +120,46 @@ describe('a round that cannot reach its host', () => {
   })
 })
 
+describe('a round whose dial does not complete', () => {
+  it('ends on a suspend that lands while the connect is still pending, and closes the late socket', async () => {
+    const controller = new AbortController()
+    const host = createFakeTurnHost()
+    let arrive: (() => void) | undefined
+    const connect = async (): Promise<WsLike> => {
+      await new Promise<void>((resolve) => {
+        arrive = resolve
+      })
+      return await host.connect()
+    }
+    const { session, kill } = createFakeSession()
+    let settled = false
+
+    const round = runAttachRound({
+      session,
+      handle: HANDLE,
+      connect,
+      config: fakeConfig(),
+      mirror: undefined,
+      budgetMs: BUDGET_MS,
+      previous: undefined,
+      signal: controller.signal,
+      now: runningClock(0),
+    }).finally(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(100)
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(settled).toBe(true)
+    expect((await round).outcome).toBeUndefined()
+    expect(kill).not.toHaveBeenCalled()
+    arrive?.()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(host.connections[0]?.closed).toBe(true)
+  })
+})
+
 describe('a round that inherits an outstanding interrupt', () => {
   it('kills an unreachable host once the stop\'s grace is over, whatever its silence clock says', async () => {
     // The stop went out a whole settle budget ago; entering refreshed the silence clock, and the
