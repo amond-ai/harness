@@ -231,3 +231,38 @@ describe('a round entered with the turn\'s budget already spent', () => {
     expect(kill).not.toHaveBeenCalled()
   })
 })
+
+describe('a round retried from a cursor behind what its mirror published', () => {
+  it('repeats no outward effect of a frame at or below the mirror\'s cursor, and folds it all the same', async () => {
+    const appended: string[] = []
+    const reported: (number | undefined)[] = []
+    const host = createFakeTurnHost({
+      onSend: (message, connection) => {
+        if (message.type === 'resume') {
+          connection.emit({ type: 'raw', seq: 2, rawValue: { type: 'assistant' } })
+          connection.emit({ type: 'sandbox-log', seq: 3, source: 'bridge', stream: 'stdout', line: 'replayed' })
+          connection.emit({ type: 'raw', seq: 4, rawValue: { type: 'user' } })
+          connection.emit(finishFrame({ seq: 5 }))
+        }
+      },
+    })
+    const { session } = createFakeSession()
+
+    const state = await runAttachRound({
+      session,
+      handle: HANDLE,
+      connect: host.connect,
+      config: fakeConfig(),
+      mirror: fakeMirror(appended, '3'),
+      budgetMs: BUDGET_MS,
+      previous: { since: 1, lastActivityAt: HANDLE.startedAtMs! },
+      onFrame: (_frame, seq) => reported.push(seq),
+      now: runningClock(0),
+    })
+
+    expect(reported).toEqual([4, 5])
+    expect(appended).toEqual([`${JSON.stringify({ type: 'user' })}\n`])
+    expect(vi.mocked(console.warn).mock.calls.flat()).not.toContainEqual(expect.stringContaining('replayed'))
+    expect(state).toMatchObject({ since: 5, outcome: { outcome: 'succeeded' } })
+  })
+})
