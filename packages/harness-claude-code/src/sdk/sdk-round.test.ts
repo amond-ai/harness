@@ -90,3 +90,28 @@ describe('the scripted attach round', () => {
     expect(kill).not.toHaveBeenCalled()
   })
 })
+
+describe('a round that cannot reach its host', () => {
+  it('returns the turn for the next round when a suspend lands while the host loss is being confirmed', async () => {
+    const controller = new AbortController()
+    // The budget is spent, so the unreachable verdict would kill; the probe is where the suspend lands.
+    const { session, kill } = createFakeSession([{ id: HANDLE.processId, onStatus: () => controller.abort() }])
+
+    const state = await runAttachRound({
+      session,
+      handle: HANDLE,
+      connect: async () => await Promise.reject(new Error('connection refused')),
+      config: fakeConfig(),
+      mirror: undefined,
+      budgetMs: 1,
+      previous: undefined,
+      signal: controller.signal,
+      now: runningClock(10),
+      sleep: async () => {},
+    })
+
+    expect(controller.signal.aborted).toBe(true)
+    expect(state.outcome).toBeUndefined()
+    expect(kill).not.toHaveBeenCalled()
+  })
+})

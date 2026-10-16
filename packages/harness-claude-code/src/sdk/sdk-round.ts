@@ -167,6 +167,11 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
       // again a `backoff` later, and only a second that agrees ends the turn — a probe that
       // misread a live host as gone would otherwise have the round kill it.
       const reading = await confirmedHostLoss(input.session, input.handle.processId, backoff)
+      // And again after it, before either verdict: a suspend that landed during the probe leaves
+      // the turn to the next round rather than to a kill decided while it was being taken back.
+      if (input.signal?.aborted) {
+        return context.state
+      }
       if (reading !== undefined) {
         // Gone, and nothing terminal came back with the replay: the same two readings
         // `abandonedWaitResult` makes on the cli path, decided the same way.
