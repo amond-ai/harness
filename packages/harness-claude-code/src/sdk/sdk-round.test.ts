@@ -190,6 +190,32 @@ describe('a round that inherits an outstanding interrupt', () => {
     expect(kill).toHaveBeenCalled()
   })
 
+  it('reports an inherited watchdog stop as the budget when the budget is spent and the host is unreachable', async () => {
+    const enteredAt = HANDLE.startedAtMs! + 60_000
+    const { session, kill } = createFakeSession()
+
+    const round = runAttachRound({
+      session,
+      handle: HANDLE,
+      connect: async () => await Promise.reject(new Error('connection refused')),
+      config: fakeConfig(),
+      mirror: undefined,
+      budgetMs: 1_000,
+      previous: {
+        since: 4,
+        lastActivityAt: enteredAt,
+        interruptedBy: 'watchdog',
+        interruptedAt: enteredAt - INTERRUPT_SETTLE_TIMEOUT_MS - 1_000,
+      },
+      now: runningClock(60_000),
+    })
+    await vi.advanceTimersByTimeAsync(5_000)
+    const state = await round
+
+    expect(state.outcome).toMatchObject({ outcome: 'timed-out', timedOutBy: 'budget' })
+    expect(kill).toHaveBeenCalled()
+  })
+
   it('dials a host whose stop is already due with no more than the short bound, not a full connect', async () => {
     const enteredAt = HANDLE.startedAtMs! + 60_000
     const { session, kill } = createFakeSession()

@@ -141,7 +141,11 @@ export async function unreachableTimeout(context: PumpContext): Promise<AttemptR
     return undefined
   }
   console.warn(`unreachable turn host timed out process_id=${context.input.handle.processId} reason=${timedOutBy}`)
-  return interruptedResult(timedOutBy, await killTurn(context.input.session, context.input.handle.processId))
+  return budgetOutranks(
+    interruptedResult(timedOutBy, await killTurn(context.input.session, context.input.handle.processId)),
+    context.input,
+    now,
+  )
 }
 
 /**
