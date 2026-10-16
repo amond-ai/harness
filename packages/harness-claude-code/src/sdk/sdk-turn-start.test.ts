@@ -235,6 +235,38 @@ describe('a turn host that never announced readiness', () => {
     }
   })
 
+  it('waits, bounded, for the stopped host to exit before raising the timeout', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const order: string[] = []
+    const kill = vi.fn(async () => {
+      order.push('kill')
+    })
+    const waitForExit = vi.fn(async (): Promise<never> => {
+      order.push('wait')
+      return await new Promise<never>(() => {})
+    })
+    const host = { ...scriptedHost({ reads: [[]], statuses: ['running'] }), kill, waitForExit } as unknown as SandboxProcessHandle
+    vi.useFakeTimers()
+    try {
+      let settled = false
+      const failure = failureOf(startOn(host)).finally(() => {
+        settled = true
+      })
+      await vi.advanceTimersByTimeAsync(BRIDGE_READY_TIMEOUT_MS + 1_000)
+      expect(order).toEqual(['kill', 'wait'])
+      expect(waitForExit).toHaveBeenCalledWith({ timeout: KILL_SETTLE_TIMEOUT_MS })
+      expect(settled).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(KILL_SETTLE_TIMEOUT_MS)
+      expect(await failure).toBeInstanceOf(TurnHostBootError)
+      expect(warn.mock.calls.map(([message]) => String(message)).join('\n')).toMatch(/exit after readiness timeout not confirmed/)
+    }
+    finally {
+      vi.useRealTimers()
+      warn.mockRestore()
+    }
+  })
+
   it('still raises the timeout when stopping the host fails', async () => {
     const kill = vi.fn(async () => {
       throw new Error('kill refused')
