@@ -202,12 +202,11 @@ describe('createE2bSession', () => {
       fake.files.set(`${ROOT}/run-1.err`, encode('warming up\n'))
 
       // From the tail, so the first read is the end-offset probe of an unwritten stdout.
-      const ended = (async () => {
-        const reader = (await handle.logs({ replay: false, follow: true, signal: control.signal })).getReader()
-        return await next(reader)
-      })().then(() => 'ended', () => 'ended')
+      const reader = (await handle.logs({ replay: false, follow: true, signal: control.signal })).getReader()
+      const ended = next(reader)
       const stalled = new Promise<'stalled'>(resolve => setTimeout(resolve, 50, 'stalled'))
-      expect(await Promise.race([ended, stalled])).toBe('ended')
+      // Closed, not rejected: an abort is the caller leaving, which ends the stream cleanly.
+      expect(await Promise.race([ended, stalled])).toBeUndefined()
     })
 
     it('reads the journal at most once per interval while output keeps arriving', async () => {
