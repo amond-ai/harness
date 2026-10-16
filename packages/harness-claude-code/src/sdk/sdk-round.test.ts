@@ -120,6 +120,36 @@ describe('a round that cannot reach its host', () => {
   })
 })
 
+describe('a round that inherits an outstanding interrupt', () => {
+  it('kills an unreachable host once the stop\'s grace is over, whatever its silence clock says', async () => {
+    // The stop went out a whole settle budget ago; entering refreshed the silence clock, and the
+    // budget still has room, so only the outstanding stop says the host is overdue.
+    const enteredAt = HANDLE.startedAtMs! + 60_000
+    const { session, kill } = createFakeSession()
+
+    const round = runAttachRound({
+      session,
+      handle: HANDLE,
+      connect: async () => await Promise.reject(new Error('connection refused')),
+      config: fakeConfig(),
+      mirror: undefined,
+      budgetMs: BUDGET_MS,
+      previous: {
+        since: 4,
+        lastActivityAt: enteredAt,
+        interruptedBy: 'watchdog',
+        interruptedAt: enteredAt - INTERRUPT_SETTLE_TIMEOUT_MS - 1_000,
+      },
+      now: runningClock(60_000),
+    })
+    await vi.advanceTimersByTimeAsync(5_000)
+    const state = await round
+
+    expect(state.outcome).toMatchObject({ outcome: 'timed-out', timedOutBy: 'watchdog' })
+    expect(kill).toHaveBeenCalled()
+  })
+})
+
 describe('a round entered with the turn\'s budget already spent', () => {
   it('kills after the no-turn grace even when a slow redial arms a fresh resume settle', async () => {
     // The stop finds no turn and the socket drops; the redial that finally lands is past the
