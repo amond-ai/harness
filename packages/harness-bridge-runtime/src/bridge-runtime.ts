@@ -710,6 +710,32 @@ export async function runBridge<TStart extends { type: 'start' }>(
     },
   }
   /*
+   * The `matches` of every request still outstanding when a turn ended, kept
+   * for the same two turns as the ids above. An id the bridge never saw cannot
+   * be fenced by id, so a late answer from an earlier attempt, arriving under a
+   * fresh id, would otherwise answer the next turn's identical question through
+   * `matches`. A result one of these accepts may resolve a request only under
+   * that request's own id, never through `matches` alone.
+   */
+  type ResultMatcher = NonNullable<
+    NonNullable<ReturnType<typeof pendingToolResults.get>>['matches']
+  >
+  const endedMatchers = {
+    current: new Set<ResultMatcher>(),
+    previous: new Set<ResultMatcher>(),
+    add(matches: ResultMatcher): void {
+      this.current.add(matches)
+    },
+    /** Whether a request from an ended turn would have taken this result. */
+    fences(result: Parameters<ResultMatcher>[0]): boolean {
+      return [...this.current, ...this.previous].some(matches => matches(result))
+    },
+    rotate(): void {
+      this.previous = this.current
+      this.current = new Set()
+    },
+  }
+  /*
    * Buffered results and pending requests belong to one turn. When the turn
    * ends — finish, error, abort, interrupt — or a new one starts, the buffer is
    * dropped and every pending request is settled as an error result (never an
@@ -722,6 +748,9 @@ export async function runBridge<TStart extends { type: 'start' }>(
     bufferedToolResults.length = 0
     for (const [toolCallId, pending] of pendingToolResults) {
       consumedToolCallIds.add(toolCallId)
+      if (pending.matches != null) {
+        endedMatchers.add(pending.matches)
+      }
       pending.resolve({ output: reason, isError: true })
     }
     pendingToolResults.clear()
@@ -1085,6 +1114,7 @@ export async function runBridge<TStart extends { type: 'start' }>(
         )
         endTurnToolResults('a new bridge turn started before the host answered')
         consumedToolCallIds.rotate()
+        endedMatchers.rotate()
         turnAbort = new AbortController()
         turnAbort.signal.addEventListener(
           'abort',
@@ -1122,7 +1152,8 @@ export async function runBridge<TStart extends { type: 'start' }>(
             const bufferedIndex = bufferedToolResults.findIndex(
               buffered =>
                 buffered.toolCallId === request.toolCallId
-                || request.matches?.(buffered.result) === true,
+                || (request.matches?.(buffered.result) === true
+                  && !endedMatchers.fences(buffered.result)),
             )
             if (bufferedIndex >= 0) {
               const buffered = bufferedToolResults.splice(bufferedIndex, 1)[0]!
@@ -1213,7 +1244,9 @@ export async function runBridge<TStart extends { type: 'start' }>(
         const matchingPending
           = exactPending == null
             ? Array.from(pendingToolResults.entries()).find(
-                ([, pending]) => pending.matches?.(result) === true,
+                ([, pending]) =>
+                  pending.matches?.(result) === true
+                  && !endedMatchers.fences(result),
               )
             : undefined
         const pending = exactPending ?? matchingPending?.[1]
