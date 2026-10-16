@@ -79,15 +79,30 @@ export async function enterRound(
   const spentAtEntry = carried.interruptedBy === undefined
     && input.handle.startedAtMs !== undefined
     && turnBudgetExhausted({ startedAt: input.handle.startedAtMs, now, budgetMs: input.budgetMs })
-  const dialTimeoutMs = spentAtEntry ? SPENT_BUDGET_CONNECT_TIMEOUT_MS : BRIDGE_CONNECT_TIMEOUT_MS
-  return { context, spentAtEntry, dialTimeoutMs }
+  return { context, spentAtEntry, dialTimeoutMs: dialBound(spentAtEntry, carried.interruptedBy !== undefined, context.deadline - now) }
+}
+
+/**
+ * The bound one dial gets: the short one for a round entered over budget, and for a round that
+ * inherits an outstanding interrupt, what is left of that stop's settle deadline — never less
+ * than the short bound, so a healthy bridge can still answer, nor more than the full one. A full
+ * connect and greeting would otherwise postpone a kill that is already due by up to a minute.
+ */
+function dialBound(spentAtEntry: boolean, stopOutstanding: boolean, settleLeftMs: number): number {
+  if (spentAtEntry) {
+    return SPENT_BUDGET_CONNECT_TIMEOUT_MS
+  }
+  return stopOutstanding
+    ? Math.min(BRIDGE_CONNECT_TIMEOUT_MS, Math.max(settleLeftMs, SPENT_BUDGET_CONNECT_TIMEOUT_MS))
+    : BRIDGE_CONNECT_TIMEOUT_MS
 }
 
 /**
  * Dial and shake hands, answering `undefined` for a dial the round should simply retry.
  *
  * `timeoutMs` bounds the connect and the greeting each: {@link BRIDGE_CONNECT_TIMEOUT_MS}, or the
- * short {@link SPENT_BUDGET_CONNECT_TIMEOUT_MS} for a round that was entered over budget. The
+ * short {@link SPENT_BUDGET_CONNECT_TIMEOUT_MS} for a round that was entered over budget, or the
+ * settle-bounded one for a round inheriting a stop ({@link dialBound}). The
  * greeting's `state`, `lastSeq` and whether it acknowledges a `resume` (`resumeAck`) come
  * back with the channel, for the early interrupt that acts on them.
  */
