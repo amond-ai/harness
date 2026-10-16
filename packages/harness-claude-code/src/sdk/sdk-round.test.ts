@@ -8,7 +8,7 @@ import type { WsLike } from '@amond-ai/harness-transport'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { INTERRUPT_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
 import { runAttachRound } from './sdk-round'
-import { RESUME_ACK_TIMEOUT_MS } from './sdk-round-settle'
+import { RESUME_ACK_TIMEOUT_MS, RESUME_SETTLE_MS } from './sdk-round-settle'
 import {
   createFakeSession,
   createFakeTurnHost,
@@ -197,5 +197,37 @@ describe('a round entered with the turn\'s budget already spent', () => {
     expect(state.outcome).toMatchObject({ outcome: 'timed-out', timedOutBy: 'budget' })
     expect(kill).toHaveBeenCalled()
     expect(interruptsSent(host)).toHaveLength(1)
+  })
+
+  it('sends no stop on a sample before the replay reaches the greeting\'s last seq', async () => {
+    // A replay later than the settle, whose tail is the turn's own run error; the interrupt
+    // goes unanswered, as it does on a host already unwinding its turn.
+    const host = createFakeTurnHost({
+      helloState: 'running',
+      helloLastSeq: 5,
+      onSend: (message, connection) => {
+        if (message.type === 'resume') {
+          setTimeout(() => connection.emit({ type: 'error', seq: 5, phase: 'run', error: 'boom' }), RESUME_SETTLE_MS + 500)
+        }
+      },
+    })
+    const { session, kill } = createFakeSession()
+
+    const round = runAttachRound({
+      session,
+      handle: HANDLE,
+      connect: host.connect,
+      config: fakeConfig(),
+      mirror: undefined,
+      budgetMs: 1,
+      previous: { since: 4, lastActivityAt: HANDLE.startedAtMs! },
+      now: runningClock(10),
+    })
+    await vi.advanceTimersByTimeAsync(RESUME_SETTLE_MS + 600)
+    const state = await round
+
+    expect(interruptsSent(host)).toHaveLength(0)
+    expect(state.outcome).toMatchObject({ outcome: 'failed' })
+    expect(kill).not.toHaveBeenCalled()
   })
 })

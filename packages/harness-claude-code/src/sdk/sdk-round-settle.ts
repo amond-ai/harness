@@ -110,12 +110,21 @@ export function resumeAcknowledged(context: PumpContext): false {
 /**
  * Whether the resume's settle window, or the wait for its acknowledgement, is still open, so no
  * judge may stop the turn yet.
+ *
+ * On a host that does not acknowledge `resume`, the settle is followed by the replay itself: the
+ * cadence and quiet-sample judges are held while the cursor is short of the greeting's `lastSeq`,
+ * as the early interrupt is, or a stop sent ahead of a late replay would be recorded as the cause
+ * of a terminal frame still in it. Held no longer than {@link RESUME_ACK_TIMEOUT_MS} after the
+ * `resume`, the bound an acknowledging host is given: `lastSeq` also counts live-only frames no
+ * replay sends, so a cursor waiting on it may never get there.
  */
 export function settling(context: PumpContext): boolean {
   // The clock is read only when a window is open: a round's tests script `now()` call by call.
-  const { earlyJudgeNotBefore, resumeAckBy } = context
+  const { earlyJudgeAt, earlyJudgeNotBefore, resumeAckBy } = context
   return (earlyJudgeNotBefore !== undefined && context.input.now() < earlyJudgeNotBefore)
     || (resumeAckBy !== undefined && context.input.now() < resumeAckBy)
+    || (earlyJudgeNotBefore !== undefined && earlyJudgeAt !== undefined && context.state.since < earlyJudgeAt
+      && context.input.now() < earlyJudgeNotBefore - RESUME_SETTLE_MS + RESUME_ACK_TIMEOUT_MS)
 }
 
 /**
