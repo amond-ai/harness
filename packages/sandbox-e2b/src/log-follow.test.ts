@@ -183,6 +183,31 @@ describe('createE2bSession', () => {
       expect(await Promise.race([ended, stalled])).toBeUndefined()
     })
 
+    it('ends on an abort that lands while an unopenable file is probed for existence', async () => {
+      // A file that will not open is asked about with `exists`, to tell "not written yet" from
+      // "failed to read". That probe takes no signal of its own, so a follow aborted during it
+      // sat on a degraded e2b request until it timed out (codex review, PR #30).
+      const fake = fakeSandbox()
+      const handle = await session(fake, ['run-1'], { followIntervalMs: 1 }).exec(['claude'])
+      const control = new AbortController()
+      fake.sandbox.files.exists = () => {
+        setTimeout(() => control.abort(), 10)
+        return new Promise<boolean>(() => {})
+      }
+      // stderr is there and read to its end before the abort, so only stdout's probe is still
+      // in flight: a sibling read still running would see the abort itself and end the
+      // subscription for it.
+      fake.files.set(`${ROOT}/run-1.err`, encode('warming up\n'))
+
+      // From the tail, so the first read is the end-offset probe of an unwritten stdout.
+      const ended = (async () => {
+        const reader = (await handle.logs({ replay: false, follow: true, signal: control.signal })).getReader()
+        return await next(reader)
+      })().then(() => 'ended', () => 'ended')
+      const stalled = new Promise<'stalled'>(resolve => setTimeout(resolve, 50, 'stalled'))
+      expect(await Promise.race([ended, stalled])).toBe('ended')
+    })
+
     it('reads the journal at most once per interval while output keeps arriving', async () => {
       // The tail used to skip the wait whenever a poll served bytes, for first-byte latency.
       // e2b has no byte-range read, so each poll re-transfers the whole file: a command that

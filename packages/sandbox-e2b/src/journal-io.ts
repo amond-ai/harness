@@ -194,7 +194,7 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
       if (signal?.aborted === true) {
         throw signal.reason
       }
-      if (await isMissing(path)) {
+      if (await isMissing(path, signal)) {
         return 0
       }
       throw cause
@@ -222,12 +222,19 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
     }
   }
 
-  /** Whether the path is definitively not there; a probe that fails answers `false`. */
-  async function isMissing(path: string): Promise<boolean> {
+  /**
+   * Whether the path is definitively not there; a probe that fails answers `false`.
+   *
+   * `exists` takes no signal, so the caller stops waiting on it instead: a read aborted while
+   * the probe is in flight rejects with the signal's reason rather than sitting on a degraded
+   * request until it times out (codex review, PR #30).
+   */
+  async function isMissing(path: string, signal: AbortSignal | undefined): Promise<boolean> {
     try {
-      return !await sandbox.files.exists(path)
+      return !await abortable(sandbox.files.exists(path), signal)
     }
     catch {
+      signal?.throwIfAborted()
       return false
     }
   }
@@ -261,7 +268,7 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
       if (signal?.aborted === true) {
         throw signal.reason
       }
-      if (options?.strictOpen === true && !await isMissing(path)) {
+      if (options?.strictOpen === true && !await isMissing(path, signal)) {
         throw cause
       }
       return
