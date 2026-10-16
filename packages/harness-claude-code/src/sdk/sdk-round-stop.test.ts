@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
 import { runAttachRound } from './sdk-round'
 import { RESUME_ACK_TIMEOUT_MS } from './sdk-round-settle'
-import { createFakeSession, createFakeTurnHost, fakeConfig, HANDLE, interruptsSent, runningClock } from './sdk-round.fixtures'
+import { createFakeSession, createFakeTurnHost, fakeConfig, finishFrame, HANDLE, interruptsSent, runningClock } from './sdk-round.fixtures'
 
 const BUDGET_MS = 6 * 60 * 60 * 1000
 
@@ -109,6 +109,38 @@ describe('a round entered with the turn\'s budget already spent', () => {
     expect(interruptsSent(host)).toHaveLength(0)
     expect(state.outcome).toMatchObject({ outcome: 'failed' })
     expect(kill).not.toHaveBeenCalled()
+  })
+  it('sends the stop as the replay hold ends on a host whose lastSeq no replay reaches', async () => {
+    // A host older than `resumeAck` whose greeting counts live-only frames: nothing replayed ever
+    // reaches its `lastSeq`, so only the hold's bound lets the budget's stop out.
+    const host = createFakeTurnHost({
+      helloState: 'running',
+      helloLastSeq: 9,
+      onSend: (message, connection) => {
+        if (message.type === 'interrupt') {
+          connection.emit(finishFrame({ seq: 10, stopped: 'interrupted' }))
+        }
+      },
+    })
+    const { session } = createFakeSession()
+
+    const round = runAttachRound({
+      session,
+      handle: HANDLE,
+      connect: host.connect,
+      // A production-sized sample interval: a slice of it would hold the stop for 30 s.
+      config: fakeConfig({ livenessSampleIntervalMs: 30_000 }),
+      mirror: undefined,
+      budgetMs: 1,
+      previous: { since: 4, lastActivityAt: HANDLE.startedAtMs! },
+      now: runningClock(10),
+    })
+    await vi.advanceTimersByTimeAsync(RESUME_ACK_TIMEOUT_MS - 1)
+    expect(interruptsSent(host)).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(2)
+
+    expect(interruptsSent(host)).toEqual([{ type: 'interrupt', reason: 'budget' }])
+    expect((await round).outcome).toMatchObject({ outcome: 'timed-out', timedOutBy: 'budget' })
   })
 })
 

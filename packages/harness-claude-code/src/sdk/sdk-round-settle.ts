@@ -120,11 +120,25 @@ export function resumeAcknowledged(context: PumpContext): false {
  */
 export function settling(context: PumpContext): boolean {
   // The clock is read only when a window is open: a round's tests script `now()` call by call.
-  const { earlyJudgeAt, earlyJudgeNotBefore, resumeAckBy } = context
+  const { earlyJudgeNotBefore, resumeAckBy } = context
+  const holdEnd = replayHoldEnd(context)
   return (earlyJudgeNotBefore !== undefined && context.input.now() < earlyJudgeNotBefore)
     || (resumeAckBy !== undefined && context.input.now() < resumeAckBy)
-    || (earlyJudgeNotBefore !== undefined && earlyJudgeAt !== undefined && context.state.since < earlyJudgeAt
-      && context.input.now() < earlyJudgeNotBefore - RESUME_SETTLE_MS + RESUME_ACK_TIMEOUT_MS)
+    || (holdEnd !== undefined && context.input.now() < holdEnd)
+}
+
+/**
+ * When the replay hold on a host that does not acknowledge `resume` ends —
+ * {@link RESUME_ACK_TIMEOUT_MS} after the `resume` — or `undefined` while no hold applies: no
+ * early interrupt armed, an acknowledging host, or a cursor already at the greeting's `lastSeq`.
+ * One answer for {@link settling}, which holds the judges until then, and {@link sliceOf}, which
+ * wakes the pump then, so the two cannot drift.
+ */
+function replayHoldEnd(context: PumpContext): number | undefined {
+  const { earlyJudgeAt, earlyJudgeNotBefore } = context
+  return earlyJudgeNotBefore !== undefined && earlyJudgeAt !== undefined && context.state.since < earlyJudgeAt
+    ? earlyJudgeNotBefore - RESUME_SETTLE_MS + RESUME_ACK_TIMEOUT_MS
+    : undefined
 }
 
 /**
@@ -134,6 +148,7 @@ export function settling(context: PumpContext): boolean {
  * Likewise while a "no running turn" reply is pending: the kill that follows its grace is due then,
  * not at the next sample. And while the acknowledgement of a `resume` is awaited, the fallback to
  * `lastSeq` is due at {@link RESUME_ACK_TIMEOUT_MS}, so a host that lost it is not left a sample.
+ * So is the end of the replay hold on a host that does not acknowledge, for the same reason.
  */
 export function sliceOf(context: PumpContext, remaining: number): number {
   const slice = Math.min(context.input.config.livenessSampleIntervalMs, remaining)
@@ -145,7 +160,12 @@ export function sliceOf(context: PumpContext, remaining: number): number {
   if (resumeAckBy !== undefined && context.input.now() < resumeAckBy) {
     return Math.min(slice, Math.max(resumeAckBy - context.input.now(), 1))
   }
-  if (earlyJudgeAt === undefined || earlyJudgeNotBefore === undefined || context.state.since < earlyJudgeAt) {
+  const holdEnd = replayHoldEnd(context)
+  if (holdEnd !== undefined) {
+    // Woken as the hold ends, so the judges it held are not left waiting for a whole sample.
+    return context.input.now() < holdEnd ? Math.min(slice, Math.max(holdEnd - context.input.now(), 1)) : slice
+  }
+  if (earlyJudgeAt === undefined || earlyJudgeNotBefore === undefined) {
     return slice
   }
   return Math.min(slice, Math.max(earlyJudgeNotBefore - context.input.now(), 1))
