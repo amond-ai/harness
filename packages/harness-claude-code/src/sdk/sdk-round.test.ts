@@ -418,7 +418,8 @@ describe('a round retried from a cursor behind what its mirror published', () =>
       },
     })
     const { session } = createFakeSession()
-    const attempt = async (stored: string): Promise<{ seq: number | undefined, frame: unknown }[]> => {
+    // Both steps start from the same committed state: a step that fails commits nothing.
+    const step = async (stored: string, failAt?: number): Promise<{ seq: number | undefined, frame: unknown }[]> => {
       const reported: { seq: number | undefined, frame: unknown }[] = []
       await runAttachRound({
         session,
@@ -428,19 +429,25 @@ describe('a round retried from a cursor behind what its mirror published', () =>
         mirror: fakeMirror([], stored),
         budgetMs: BUDGET_MS,
         previous: { since: 1, lastActivityAt: HANDLE.startedAtMs! },
-        onFrame: (frame, seq) => reported.push({ seq, frame }),
+        onFrame: (frame, seq) => {
+          reported.push({ seq, frame })
+          if (seq === failAt) {
+            throw new Error('step died')
+          }
+        },
         now: runningClock(0),
-      })
+      }).catch(() => undefined)
       return reported
     }
 
-    // The first step reports all four and fails before committing; its mirror's last put had
-    // reached seq 2, and that is all the retry has to go on.
-    const failed = await attempt('1')
-    const retried = await attempt('2')
+    // The first step dies once it has reported seq 4. Its mirror's last put had reached seq 2,
+    // and that is all the retry has to go on.
+    const failed = await step('1', 4)
+    const retried = await step('2')
 
-    expect(failed.map(report => report.seq)).toEqual([2, 3, 4, 5])
-    expect(retried).toEqual(failed.slice(1))
+    expect(failed.map(report => report.seq)).toEqual([2, 3, 4])
+    expect(retried.map(report => report.seq)).toEqual([3, 4, 5])
+    expect(retried.slice(0, 2)).toEqual(failed.slice(1))
   })
 })
 

@@ -357,8 +357,13 @@ export interface TurnRoundSpec {
    * still trail the reports, since a frame is reported when it arrives and a put lands on the
    * flush cadence, so a step that fails between the two re-reports it all the same. A consumer
    * whose effect must happen once keeps the highest `seq` it has taken, durably when the effect
-   * outlives the step, and drops a frame at or below it. A live-only frame — a token delta,
-   * which the runtime does not journal — is never replayed, so it is never repeated either.
+   * outlives the step, and drops a frame at or below it. That mark belongs to one host's
+   * journal: each run's attempt journals under its own state directory
+   * (`turnHostStateDir({ runId, attempt })`), where `seq` starts over, so a mark carried into
+   * another attempt or run would drop that host's frames. Key it by the run and attempt the turn
+   * was started with; neither reaches `onFrame`, so the consumer supplies them. A live-only
+   * frame — a token delta, which the runtime does not journal — is never replayed, so it is
+   * never repeated either.
    */
   onFrame?: (frame: TurnHostOutboundMessage, seq: number | undefined) => void
   /**
