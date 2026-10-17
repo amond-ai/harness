@@ -1,4 +1,5 @@
 import type { ProcessLogEvent, SandboxProcessHandle } from '@amond-ai/sandbox'
+import { SandboxNoExitRecordError } from '@amond-ai/sandbox'
 import { describe, expect, it, vi } from 'vitest'
 import { KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
 import { BRIDGE_READY_TIMEOUT_MS, startTurnHost, TurnHostBootError } from './sdk-turn-start'
@@ -233,6 +234,118 @@ describe('a turn host that never announced readiness', () => {
     finally {
       vi.useRealTimers()
     }
+  })
+
+  it('waits, bounded, for the stopped host to exit before raising the timeout', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const order: string[] = []
+    const kill = vi.fn(async () => {
+      order.push('kill')
+    })
+    const waitForExit = vi.fn(async (): Promise<never> => {
+      order.push('wait')
+      return await new Promise<never>(() => {})
+    })
+    const host = { ...scriptedHost({ reads: [[]], statuses: ['running'] }), kill, waitForExit } as unknown as SandboxProcessHandle
+    vi.useFakeTimers()
+    try {
+      let settled = false
+      const failure = failureOf(startOn(host)).finally(() => {
+        settled = true
+      })
+      await vi.advanceTimersByTimeAsync(BRIDGE_READY_TIMEOUT_MS + 1_000)
+      expect(order).toEqual(['kill', 'wait'])
+      expect(waitForExit).toHaveBeenCalledWith({ timeout: KILL_SETTLE_TIMEOUT_MS })
+      expect(settled).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(KILL_SETTLE_TIMEOUT_MS)
+      expect(await failure).toBeInstanceOf(TurnHostBootError)
+      expect(warn.mock.calls.map(([message]) => String(message)).join('\n')).toMatch(/exit after readiness timeout not confirmed/)
+    }
+    finally {
+      vi.useRealTimers()
+      warn.mockRestore()
+    }
+  })
+
+  describe('how the stopped host\'s exit is judged', () => {
+    /**
+     * Boots a host that never announces, with `waitForExit` and the status read after it scripted,
+     * and returns whether the stop reported the exit as unconfirmed. `status()` answers `running`
+     * until the wait is asked for, so the boot loop itself is unaffected.
+     */
+    async function unconfirmed(options: {
+      kill?: () => Promise<void>
+      waitForExit: () => Promise<never>
+      after?: 'running' | 'exited'
+    }): Promise<{ reported: boolean, waited: boolean }> {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      let waited = false
+      const base = scriptedHost({ reads: [[]], statuses: ['running'] })
+      const host = {
+        ...base,
+        kill: vi.fn(options.kill ?? (async () => {})),
+        waitForExit: vi.fn(async () => {
+          waited = true
+          return await options.waitForExit()
+        }),
+        status: async () => {
+          const running = await base.status()
+          return waited && options.after === 'exited'
+            ? { ...running, state: 'exited' as const, exit: { code: 137, timedOut: false }, endedAt: AT }
+            : running
+        },
+      } as unknown as SandboxProcessHandle
+      vi.useFakeTimers()
+      try {
+        const failure = failureOf(startOn(host))
+        await vi.advanceTimersByTimeAsync(BRIDGE_READY_TIMEOUT_MS + 3 * KILL_SETTLE_TIMEOUT_MS)
+        expect(await failure).toBeInstanceOf(TurnHostBootError)
+        const reported = warn.mock.calls.some(([message]) => /exit after readiness timeout not confirmed/.test(String(message)))
+        return { reported, waited }
+      }
+      finally {
+        vi.useRealTimers()
+        warn.mockRestore()
+      }
+    }
+
+    it('takes a missing exit record as the exit once the status agrees', async () => {
+      const result = await unconfirmed({
+        waitForExit: async () => { throw new SandboxNoExitRecordError('host-1') },
+        after: 'exited',
+      })
+      expect(result.reported).toBe(false)
+    })
+
+    it('reports a missing exit record while the status still says running', async () => {
+      // A backend that could not aim the kill ends the session instead, and the wait rejects the
+      // same way while the host runs on.
+      const result = await unconfirmed({
+        waitForExit: async () => { throw new SandboxNoExitRecordError('host-1') },
+        after: 'running',
+      })
+      expect(result.reported).toBe(true)
+    })
+
+    it('reports any other rejection of the wait', async () => {
+      const result = await unconfirmed({
+        waitForExit: async () => { throw new Error('wait refused') },
+        after: 'exited',
+      })
+      expect(result.reported).toBe(true)
+    })
+
+    it('still waits for the exit when the kill itself failed', async () => {
+      // A kill RPC that failed or timed out may still have delivered its signal.
+      const result = await unconfirmed({
+        kill: async () => { throw new Error('kill refused') },
+        waitForExit: async () => { throw new SandboxNoExitRecordError('host-1') },
+        after: 'exited',
+      })
+      expect(result.waited).toBe(true)
+      expect(result.reported).toBe(false)
+    })
   })
 
   it('still raises the timeout when stopping the host fails', async () => {

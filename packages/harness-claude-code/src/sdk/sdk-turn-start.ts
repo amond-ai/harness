@@ -16,7 +16,8 @@ import type { PermissionMode } from '../permission-mode'
 import type { TurnHandle } from '../turn-driver'
 import type { TurnChannel } from './sdk-channel'
 import { describeCause as describe, maskCredentialLines } from '@amond-ai/redact'
-import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
+import { SandboxNoExitRecordError } from '@amond-ai/sandbox'
+import { INTERRUPT_SETTLE_TIMEOUT_MS, isLive, KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
 import { iterateStream } from '../process-ndjson'
 import { readBridgeAnnouncement } from './sdk-bridge-config'
 import { createTurnChannel } from './sdk-channel'
@@ -377,11 +378,45 @@ function isAnnounced(stdout: string, host: BootingHost): boolean {
   return announcement?.status === 'ready'
 }
 
-/** Best effort and bounded — `kill()` is an RPC a stuck backend can hold — so the timeout is still raised. */
+/**
+ * Best effort and bounded — `kill()` is an RPC a stuck backend can hold — so the timeout is still raised.
+ *
+ * The kill is followed by a wait for the exit, because a settled kill RPC only says the signal
+ * left: a caller that retries on the boot error would otherwise start a host beside one still
+ * shutting down. The wait runs after a failed kill too — one that timed out may still land — and
+ * has the same {@link KILL_SETTLE_TIMEOUT_MS} bound the `cli` ladder gives its own post-kill wait;
+ * a host that outlasts it is reported rather than waited on.
+ *
+ * `SandboxNoExitRecordError` says the wrapper left no `$?`, which is usually a stopped host but
+ * not always one: a backend that could not aim the kill (Daytona, with no readable pid record)
+ * ends the session instead, and the wait rejects the same way. So it is believed only once the
+ * status agrees, the re-read the `cli` ladder makes in `confirmDead`.
+ */
 async function stopHungHost(process: SandboxProcessHandle): Promise<void> {
-  await withTimeout(process.kill(), KILL_SETTLE_TIMEOUT_MS).catch((cause: unknown) => {
+  try {
+    await withTimeout(process.kill(), KILL_SETTLE_TIMEOUT_MS)
+  }
+  catch (cause) {
     console.warn(`turn host kill after readiness timeout failed process_id=${process.id} error="${describe(cause)}"`)
-  })
+  }
+  try {
+    await withTimeout(process.waitForExit({ timeout: KILL_SETTLE_TIMEOUT_MS }), KILL_SETTLE_TIMEOUT_MS)
+  }
+  catch (cause) {
+    if (!(cause instanceof SandboxNoExitRecordError) || await mayStillRun(process)) {
+      console.warn(`turn host exit after readiness timeout not confirmed process_id=${process.id} error="${describe(cause)}"`)
+    }
+  }
+}
+
+/** Anything short of a status read that says the host is no longer running. */
+async function mayStillRun(process: SandboxProcessHandle): Promise<boolean> {
+  try {
+    return isLive(await withTimeout(process.status(), KILL_SETTLE_TIMEOUT_MS))
+  }
+  catch {
+    return true
+  }
 }
 
 /**
