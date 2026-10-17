@@ -15,6 +15,7 @@
 import type { ProcessExit } from '@amond-ai/sandbox'
 import type { JournalPaths } from './journal'
 import type { LocalHost, LocalSlice } from './local-surface'
+import { abortable } from '@amond-ai/sandbox/journal'
 
 /** Bytes per chunk when the whole transcript is streamed rather than sliced. */
 const CHUNK_BYTES = 64 * 1024
@@ -35,8 +36,13 @@ export interface JournalIo {
   readExit: (paths: JournalPaths) => Promise<ProcessExit | undefined>
   /** The wrapped command's own pid, or `undefined` before the wrapper has written it. */
   readCommandPid: (paths: JournalPaths) => Promise<number | undefined>
-  /** Bytes at or after `offset`, plus the file's length — `{ data: empty, total: 0 }` when absent. */
-  readSliceFrom: (path: string, offset: number) => Promise<LocalSlice>
+  /**
+   * Bytes at or after `offset`, plus the file's length — `{ data: empty, total: 0 }` when absent.
+   *
+   * Rejects with `signal`'s reason once it aborts. A file read takes no signal, so the caller
+   * stops waiting on it rather than the read stopping.
+   */
+  readSliceFrom: (path: string, offset: number, signal?: AbortSignal) => Promise<LocalSlice>
   /** Where a file ends, for a follower that starts at the live tail rather than the beginning. */
   readEndOffset: (path: string) => Promise<number>
   /** The file from `offset` to its end, in chunks, so a long transcript never lands in memory whole. */
@@ -92,7 +98,8 @@ export function createJournalIo(host: LocalHost): JournalIo {
       // treated as "not written yet" rather than guessed at.
       return Number.isInteger(pid) && pid > 0 ? pid : undefined
     },
-    readSliceFrom: async (path: string, offset: number) => host.readSlice(path, offset),
+    readSliceFrom: async (path: string, offset: number, signal?: AbortSignal) =>
+      abortable(host.readSlice(path, offset), signal),
     readEndOffset: async (path: string) => await host.size(path) ?? 0,
     async* streamFile(path: string, offset = 0) {
       let at = offset

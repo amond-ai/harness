@@ -45,7 +45,8 @@ export interface LogReadSources {
   paths: JournalPaths
   /** How the process ended, or `undefined` while it is still running. */
   readExit: () => Promise<ProcessExit | undefined>
-  readSliceFrom: (path: string, offset: number) => Promise<JournalSlice>
+  /** Rejects with `signal`'s reason once it aborts. */
+  readSliceFrom: (path: string, offset: number, signal?: AbortSignal) => Promise<JournalSlice>
   /** A whole journal file, or `undefined` when it is not there. */
   readWhole: (path: string) => Promise<Uint8Array | undefined>
   /** One liveness-plus-lengths reading. See {@link JournalTail.probe}. Follow reads only. */
@@ -135,11 +136,13 @@ export function createProcessLogs(
   }
 
   /** The watchdog's read: what arrived since last time, and nothing before it. */
-  async function incrementSince(since: string): Promise<readonly ProcessLogEvent[]> {
+  async function incrementSince(since: string, signal: AbortSignal | undefined): Promise<readonly ProcessLogEvent[]> {
     const from = decodeCursor(since)
+    // The signal reaches both reads: a watchdog that times out must not return while either is
+    // still pending against the sandbox.
     const [stdout, stderr] = await Promise.all([
-      readSliceFrom(paths.out, from.stdout),
-      readSliceFrom(paths.err, from.stderr),
+      readSliceFrom(paths.out, from.stdout, signal),
+      readSliceFrom(paths.err, from.stderr, signal),
     ])
     return replayPositioned({ stdout, stderr }, now())
   }
@@ -200,7 +203,7 @@ export function createProcessLogs(
       return followingStream(logOptions)
     }
     if (logOptions?.since !== undefined) {
-      const events = await incrementSince(logOptions.since)
+      const events = await incrementSince(logOptions.since, logOptions.signal)
       return new ReadableStream({
         start(controller) {
           for (const event of events) {

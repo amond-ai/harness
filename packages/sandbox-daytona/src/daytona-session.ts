@@ -32,6 +32,7 @@ import type { ProcessMeta } from './daytona-process'
 import type { DaytonaSandboxLike } from './daytona-surface'
 import type { ProcessEnding } from './log-reads'
 import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@amond-ai/sandbox'
+import { abortable } from '@amond-ai/sandbox/journal'
 import { createDaytonaFiles } from './daytona-files'
 import { createKillPath } from './daytona-kill'
 import { isProcessId, parseProcessMeta, processPaths, serializeProcessMeta, wrappedCommand } from './daytona-process'
@@ -192,7 +193,8 @@ export function createDaytonaSession(
       id: meta.id,
       status: () => statusOf(meta),
       logs: createProcessLogs({
-        readLogs: () => reader.logs(meta.id),
+        // `getSessionCommandLogs` takes no signal, so the caller stops waiting on it instead.
+        readLogs: signal => abortable(reader.logs(meta.id), signal),
         ending: () => endingOf(meta.id),
         now,
         followIntervalMs: followMs,

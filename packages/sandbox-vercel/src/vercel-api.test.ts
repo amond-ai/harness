@@ -75,6 +75,23 @@ describe('surfaceOf', () => {
     expect(surface.expiresAt).toEqual(new Date('2026-09-14T14:00:00.000Z'))
   })
 
+  it('hands a read\'s signal through to the SDK, which is what cancels the request', async () => {
+    const stub = sandboxStub()
+    const reads: [{ path: string }, AbortSignal | undefined][] = []
+    Object.assign(stub.sandbox, {
+      readFileToBuffer: async (file: { path: string }, opts?: { signal?: AbortSignal }) => {
+        reads.push([file, opts?.signal])
+        return null
+      },
+    })
+    const surface = surfaceOf(stub.sandbox)
+    const controller = new AbortController()
+
+    await surface.readFileToBuffer({ path: '/j/p.out' }, { signal: controller.signal })
+
+    expect(reads).toEqual([[{ path: '/j/p.out' }, controller.signal]])
+  })
+
   it('is a property no snapshot implementation has', () => {
     const stub = sandboxStub()
     const snapshot = snapshotOf(stub.sandbox)

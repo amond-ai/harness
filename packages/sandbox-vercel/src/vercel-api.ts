@@ -222,7 +222,7 @@ export function surfaceOf(sandbox: Sandbox): VercelSandboxLike {
     },
     runCommand,
     getCommand: async cmdId => commandLike(await sandbox.getCommand(cmdId)),
-    readFileToBuffer: async file => await sandbox.readFileToBuffer(file),
+    readFileToBuffer: async (file, opts) => await sandbox.readFileToBuffer(file, opts),
     writeFiles: async files => sandbox.writeFiles(files),
     update: async params => sandbox.update(params),
     extendTimeout: async ms => sandbox.extendTimeout(ms),

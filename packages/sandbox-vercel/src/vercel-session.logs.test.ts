@@ -98,6 +98,27 @@ describe('the positioned read', () => {
 
     expect(await streamOf(await handle.logs({ since: '0:0' }))).toEqual([])
   })
+
+  it('hands the caller\'s signal to both reads and stops waiting on them when it aborts', async () => {
+    // Never settling, even on the signal: the SDK is given it to cancel the request, and the
+    // read is raced against it as well, so a watchdog that timed out is not held by either.
+    const fake = fakeSandbox()
+    const handle = await started(fake)
+    const seen: { path: string, signal: AbortSignal | undefined }[] = []
+    fake.sandbox.readFileToBuffer = async (file, opts) => {
+      seen.push({ path: file.path, signal: opts?.signal })
+      return new Promise(() => {})
+    }
+    const controller = new AbortController()
+
+    const pending = handle.logs({ since: '0:0', signal: controller.signal })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    controller.abort(new Error('watchdog'))
+
+    await expect(pending).rejects.toThrow('watchdog')
+    expect(seen).toHaveLength(2)
+    expect(seen.every(read => read.signal === controller.signal)).toBe(true)
+  })
 })
 
 describe('the following read', () => {

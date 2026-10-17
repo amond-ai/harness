@@ -94,6 +94,27 @@ describe('logs', () => {
     ])
   })
 
+  it('stops waiting on both reads of a positioned read when the caller aborts', async () => {
+    // A file read takes no signal, so these never settle: a watchdog that timed out must still
+    // get its answer back rather than wait on a filesystem that has stopped answering.
+    const fake = fakeHost()
+    recorded(fake)
+    const handle = await sessionOver(fake).getProcess('p1')
+    const reads: string[] = []
+    fake.host.readSlice = async (path) => {
+      reads.push(path)
+      return new Promise(() => {})
+    }
+    const controller = new AbortController()
+
+    const pending = handle!.logs({ since: '0:0', signal: controller.signal })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    controller.abort(new Error('watchdog'))
+
+    await expect(pending).rejects.toThrow('watchdog')
+    expect(reads.sort()).toEqual([PATHS.stderr, PATHS.stdout].sort())
+  })
+
   it('reads an unusable cursor as the beginning rather than as the end', async () => {
     const fake = fakeHost()
     recorded(fake)

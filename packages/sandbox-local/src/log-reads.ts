@@ -118,11 +118,12 @@ export function createProcessLogs(
   }
 
   /** The watchdog's read: what arrived since last time, and nothing before it. */
-  async function incrementSince(since: string): Promise<readonly ProcessLogEvent[]> {
+  async function incrementSince(since: string, signal: AbortSignal | undefined): Promise<readonly ProcessLogEvent[]> {
     const from = decodeCursor(since)
+    // The signal reaches both reads: a watchdog that times out must not be held by either.
     const [stdout, stderr] = await Promise.all([
-      io.readSliceFrom(paths.stdout, from.stdout),
-      io.readSliceFrom(paths.stderr, from.stderr),
+      io.readSliceFrom(paths.stdout, from.stdout, signal),
+      io.readSliceFrom(paths.stderr, from.stderr, signal),
     ])
     return replayPositioned({ stdout, stderr }, now())
   }
@@ -244,7 +245,7 @@ export function createProcessLogs(
       return followingStream(logOptions)
     }
     if (logOptions?.since !== undefined) {
-      const events = await incrementSince(logOptions.since)
+      const events = await incrementSince(logOptions.since, logOptions.signal)
       return new ReadableStream({
         start(controller) {
           for (const event of events) {

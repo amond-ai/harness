@@ -118,7 +118,7 @@ export interface VercelSandboxLike {
   runCommand: VercelRunCommand
   getCommand: (cmdId: string) => Promise<VercelCommandLike>
   /** `null` for a file that is not there, rather than a rejection. */
-  readFileToBuffer: (file: { path: string }) => Promise<Uint8Array | null>
+  readFileToBuffer: (file: { path: string }, opts?: { signal?: AbortSignal }) => Promise<Uint8Array | null>
   writeFiles: (files: { path: string, content: string | Uint8Array, mode?: number }[]) => Promise<void>
   /** `ports` is the *full* desired list: a port left out of it is deregistered. */
   update: (params: { ports?: number[], timeout?: number }) => Promise<void>
