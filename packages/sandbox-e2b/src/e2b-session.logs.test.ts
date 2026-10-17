@@ -162,6 +162,37 @@ describe('createE2bSession', () => {
       expect((await drain(fake)).map(event => event.type)).toEqual(['stdout'])
     })
 
+    it('fails rather than serving a short transcript when a journal file will not open', async () => {
+      // The file is there and only the read failed. Read as absent, the replay would come back
+      // without stdout — the result line with it — and `replayTurn` would judge the turn on that.
+      const fake = fakeSandbox()
+      fake.files.set(`${ROOT}/run-1.out`, encode('{"type":"result"}\n'))
+      fake.files.set(`${ROOT}/run-1.err`, encode('warn\n'))
+      const inner = fake.sandbox.files.read
+      fake.sandbox.files.read = ((path: string, opts: { format: 'bytes' | 'stream' }) =>
+        path === `${ROOT}/run-1.out` && opts.format === 'stream'
+          ? Promise.reject(new Error('e2b unavailable'))
+          : inner(path, opts as { format: 'bytes' })) as E2bSandboxLike['files']['read']
+
+      await expect(drain(fake)).rejects.toThrow('e2b unavailable')
+    })
+
+    it('reads a journal file as empty once e2b confirms it is not there', async () => {
+      // A turn that wrote no stderr leaves no `.err`, and that must not fail its replay. The
+      // probe is what tells this apart from the failed open above.
+      const fake = fakeSandbox()
+      fake.files.set(`${ROOT}/run-1.out`, encode('x'))
+      const probed: string[] = []
+      const exists = fake.sandbox.files.exists
+      fake.sandbox.files.exists = async (path) => {
+        probed.push(path)
+        return exists(path)
+      }
+
+      expect((await drain(fake)).map(event => event.type)).toEqual(['stdout'])
+      expect(probed).toContain(`${ROOT}/run-1.err`)
+    })
+
     it('closes with a terminal event once the exit code has been journalled', async () => {
       const fake = fakeSandbox()
       fake.files.set(`${ROOT}/run-1.out`, encode('x'))

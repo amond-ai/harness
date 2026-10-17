@@ -27,8 +27,10 @@ import { decodeCursor, encodeCursor, replayPositioned } from './replay'
  *
  * `'silence'` is the watchdog's reading — a sample that ends early simply reports less.
  * `'fail'` is `replayTurn`'s: it judges the turn from the transcript, so one truncated
- * without saying so is a verdict reached on evidence that was never all there. Only a read
- * that dies *after* the file opened is affected.
+ * without saying so is a verdict reached on evidence that was never all there. That covers a
+ * file that will not open as well as a read that dies partway: under `'fail'`, only a file the
+ * backend confirms is absent reads as empty, because a stream never written is a turn that
+ * produced none.
  */
 export type PartialRead = 'silence' | 'fail'
 
@@ -38,6 +40,7 @@ export interface LogReadSources {
   readSliceFrom: (path: string, offset: number, options?: JournalReadOptions) => Promise<JournalSlice>
   /** Where a file ends, for a follower starting at the live tail. See {@link JournalTail.readEndOffset}. */
   readEndOffset: (path: string, options?: JournalReadOptions) => Promise<number>
+  /** A whole file in chunks; see {@link PartialRead} for what a failed read means. */
   streamFile: (path: string, partial?: PartialRead) => AsyncGenerator<Uint8Array>
   /** The session's liveness verdict — see {@link JournalTail.isGone}. Follow reads only. */
   isGone: (signal?: AbortSignal) => Promise<boolean>
