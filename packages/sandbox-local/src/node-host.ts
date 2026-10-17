@@ -197,6 +197,20 @@ export function nodeLocalHost(): LocalHost {
     exists: async (path: string) => await sizeOf(path) !== undefined,
     readSlice,
     writeFile: async (path: string, data: Uint8Array) => writeFile(path, data),
+    createFile: async (path: string, data: Uint8Array) => {
+      try {
+        // `wx` is the exclusive create: the existence check and the write are one `open(2)`,
+        // so there is no window between them for a second orchestrator to win.
+        await writeFile(path, data, { flag: 'wx' })
+        return true
+      }
+      catch (error) {
+        if ((error as { code?: string }).code === 'EEXIST') {
+          return false
+        }
+        throw error
+      }
+    },
     mkdir: async (path: string) => {
       await mkdir(path, { recursive: true })
     },

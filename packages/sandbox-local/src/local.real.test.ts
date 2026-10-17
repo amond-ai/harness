@@ -137,6 +137,39 @@ describe.skipIf(!posix)('against a real machine', () => {
     await expect(relaunched.listProcesses()).resolves.toMatchObject([{ id: 'p-reattach', state: 'exited' }])
   })
 
+  it('recovers a live process from the real process table, nonce and all', async () => {
+    // Recovery proper: the record is gone, so the only thing naming this process is the
+    // wrapper's command line as the machine's own `ps` renders it — the sandbox's nonce
+    // included. A fake host can model that string; only a real one shows that `ps` hands the
+    // whole two-word marker back unchanged, which is what every claim below rests on.
+    const session = providerFor('p-recover').session('run-recover')
+    const handle = await session.exec(['sh', '-c', 'sleep 0.6 ; echo done'])
+    await rm(join(root, '.state', 'run-recover', 'p-recover.meta.json'))
+
+    const relaunched = providerFor('p-recover').session('run-recover')
+    await expect(relaunched.listProcesses()).resolves.toMatchObject([{
+      id: 'p-recover',
+      state: 'running',
+      command: ['sh', '-c', 'sleep 0.6 ; echo done'],
+    }])
+    await expect(handle.waitForExit({ timeout: 10_000 })).resolves.toEqual({ code: 0, timedOut: false })
+  })
+
+  it('claims nothing once the nonce is gone, wrapper still in the table or not', async () => {
+    // The answer settled for a state directory somebody has taken a file out of. Without the
+    // nonce there is nothing left that tells one of our wrappers from a command line shaped
+    // like one, and `destroy()` signals the group of everything the listing names — so the
+    // listing names nothing. An orphan that could once have been ended is the price.
+    const session = providerFor('p-nonce').session('run-nonce')
+    const handle = await session.exec(['sh', '-c', 'sleep 0.6'])
+    await rm(join(root, '.state', 'run-nonce', 'p-nonce.meta.json'))
+    await rm(join(root, '.state', 'run-nonce', '.nonce'))
+
+    const relaunched = providerFor('p-nonce').session('run-nonce')
+    await expect(relaunched.listProcesses()).resolves.toEqual([])
+    await expect(handle.waitForExit({ timeout: 10_000 })).resolves.toEqual({ code: 0, timedOut: false })
+  })
+
   it('resolves a caller\'s absolute path inside the sandbox', async () => {
     const session = providerFor('p-files').session('run-files')
     await session.writeFile('/home/user/notes.txt', 'inside')

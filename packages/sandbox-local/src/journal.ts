@@ -23,17 +23,33 @@ import { isProcessId, withoutTrailingSlashes } from './paths'
 import { quoteArg, quoteArgv, unquoteArgv } from './shell-quote'
 
 /**
- * What every journal script opens with: the shell's no-op builtin, given the process id as its
- * one argument.
+ * What every journal script opens with: the shell's no-op builtin, given this wrapper's
+ * identity as its one argument.
  *
- * It runs nothing and costs nothing, and it puts the id in the wrapper's command line where
- * the host's process table will show it. That is what makes a live process identifiable when
- * its record is missing — see {@link parseJournalScript}. A comment would not do: `ps` renders
- * the script verbatim either way, but a `#` would also have to survive being the first thing
- * the shell reads, and `:` is a real command whose behaviour is specified.
+ * It runs nothing and costs nothing, and it puts that identity in the wrapper's command line
+ * where the host's process table will show it. That is what makes a live process identifiable
+ * when its record is missing — see {@link parseJournalScript}. A comment would not do: `ps`
+ * renders the script verbatim either way, but a `#` would also have to survive being the first
+ * thing the shell reads, and `:` is a real command whose behaviour is specified.
+ *
+ * The identity is two words, `<process id> <nonce>`, and the second one is the whole of the
+ * difference between a marker and a claim. A process id and a state directory are both public:
+ * anything that can read this package can build a command line carrying them, and recovery
+ * hands what it matches to `destroy()`, which signals the process group. The nonce is minted
+ * once per sandbox and kept in that sandbox's state directory, so a row counts as ours only
+ * when it carries a value this sandbox actually chose.
  */
 export const SCRIPT_OPEN = `: '`
 const SCRIPT_OPEN_CLOSE = `' ; `
+
+/**
+ * What separates the two words of the opener's one argument.
+ *
+ * A space, which is why {@link isWrapperNonce} refuses one: the boundary between the id and
+ * the nonce is found by scanning for the first of these, and a nonce containing another would
+ * move it.
+ */
+const IDENTITY_SEPARATOR = ' '
 
 /**
  * The shell every wrapper runs under.
@@ -47,6 +63,36 @@ export const WRAPPER_SHELL = '/bin/sh'
 
 /** What a wrapper's process-table row begins with, and nothing else on the machine does. */
 const WRAPPER_PREFIX = `${WRAPPER_SHELL} -c ${SCRIPT_OPEN}`
+
+/**
+ * The name a sandbox's wrapper nonce is kept under, inside its state directory.
+ *
+ * A leading dot, so it can never be read as a journal: every journal file is named after a
+ * process id, and an id may not contain one (`./paths.ts`). `registry.list()` filters on the
+ * `.meta.json` suffix and passes over this either way — the dot is for the human reading a
+ * state directory, and for whoever next adds a scan to it.
+ */
+const NONCE_FILE = '.nonce'
+
+/** Where a sandbox's wrapper nonce lives. Minted by the registry, required by recovery. */
+export function noncePath(stateDir: string): string {
+  return `${withoutTrailingSlashes(stateDir)}/${NONCE_FILE}`
+}
+
+/**
+ * What a nonce may be made of.
+ *
+ * Narrow, because the value is interpolated into a single-quoted shell word and then split
+ * back out of one: a `'` would close the quoting and hand the rest of the nonce to the shell as
+ * code, and an {@link IDENTITY_SEPARATOR} would move the boundary the parser scans for.
+ * Validated at both ends rather than escaped, exactly as an id is — the value is minted by this
+ * package, so anything outside this set means it arrived from somewhere it should not have.
+ */
+const NONCE_PATTERN = /^[\w-]+$/
+
+export function isWrapperNonce(value: string): boolean {
+  return NONCE_PATTERN.test(value)
+}
 
 /**
  * How long a timed-out command is given to end on its own before it is killed outright.
@@ -120,6 +166,11 @@ export function journalPaths(stateDir: string, processId: string): JournalPaths 
  * reader would have to strip, and the exit status is handed over by {@link publish} rather
  * than redirected straight at its journal.
  *
+ * `nonce` is the sandbox's, not this process's, and it goes in the opener — see
+ * {@link SCRIPT_OPEN} for what it is defending and {@link parseJournalScript} for what reads it
+ * back. It costs the command line the length of one token: a v4 UUID is 36 bytes against the
+ * 256KB `ARG_MAX` that a prompt in the same argv is already the real claimant on.
+ *
  * Note what is *not* here: no `setsid`. The e2b backend has to ask for a session of its own
  * because its commands are all started by one daemon inside one session; here the host spawns
  * the shell detached, which is the same syscall without the binary — and `setsid` is not
@@ -129,11 +180,18 @@ export function journalPaths(stateDir: string, processId: string): JournalPaths 
 export function journalledScript(
   argv: readonly string[],
   paths: JournalPaths,
+  nonce: string,
   timeoutMs?: number,
 ): string {
+  // Refused rather than escaped, and refused *here* rather than at the spawn: a nonce carrying
+  // a quote would close the opener and run its own tail as shell code, in a script this package
+  // composes and hands to `/bin/sh -c` with the orchestrator's whole environment.
+  if (!isWrapperNonce(nonce)) {
+    throw new Error(`invalid wrapper nonce: expected [A-Za-z0-9_-]+`)
+  }
   const id = journalIdOf(paths)
   return [
-    `${SCRIPT_OPEN}${id}${SCRIPT_OPEN_CLOSE}${quoteArgv(argv)}${redirection(paths)} & __c=$!`,
+    `${SCRIPT_OPEN}${id}${IDENTITY_SEPARATOR}${nonce}${SCRIPT_OPEN_CLOSE}${quoteArgv(argv)}${redirection(paths)} & __c=$!`,
     `printf '%s' "$__c" > ${quoteArg(paths.pid, 'the pid journal path')}`,
     ...watchdog(paths, timeoutMs),
     `wait $__c`,
@@ -269,6 +327,21 @@ export interface RecoveredScript {
  * that survives that is "the redirection targets the files this state directory would give
  * that id" — a string the wrapper cannot be talked into containing unless it really is ours.
  *
+ * Deriving is not the same as authenticating, which is what `nonce` is here for. Everything
+ * derived above is *public*: the shell, the opener, the id and the state directory are all
+ * readable from this package or from a `ps`, so any process on the machine can run a command
+ * line that reproduces them exactly — and the row that matches is handed to `destroy()`, which
+ * signals its process group. Requiring a value minted per sandbox and kept in that sandbox's
+ * own state directory is what turns the match from a shape into a claim.
+ *
+ * It is a claim against *coincidence and accident*, and deliberately not more than that. The
+ * nonce is in the wrapper's command line, so it is legible to anything on the machine that can
+ * run `ps` — a local attacker reads it and reproduces it. That is the same bar the rest of this
+ * package holds: a command here runs unconfined with the orchestrator's environment, and the
+ * README says the name says sandbox and the backend is not one. What this closes is the case
+ * where something that is *not* trying reproduces the marker anyway, which is the case that was
+ * actually reachable.
+ *
  * **The argv it hands back is the process table's rendering, not the bytes that were passed.**
  * Measured on macOS 2026-09-13: `ps` escapes a newline in an argument as the four characters
  * `\012` and a tab as `\011`, and Linux sanitises too, so a recovered multi-line prompt is not
@@ -280,7 +353,21 @@ export interface RecoveredScript {
  * was never written or was deleted. The escaping does mean a wrapper's row never spans two
  * lines, which is what makes the table parseable line by line at all.
  */
-export function parseJournalScript(line: string, stateDir: string): RecoveredScript | undefined {
+export function parseJournalScript(
+  line: string,
+  stateDir: string,
+  nonce: string | undefined,
+): RecoveredScript | undefined {
+  // A sandbox with no readable nonce claims nothing at all. The file is written before this
+  // sandbox's first wrapper is spawned and removed only along with the state directory, so its
+  // absence means either that nothing was ever started here — in which case there is nothing to
+  // find — or that the bookkeeping has been interfered with, in which case there is no longer
+  // anything that tells one of our wrappers from a reproduction of one. Recovering nothing
+  // costs an orphan that could once have been killed; recovering on the public part of the
+  // marker alone kills whatever reproduces it.
+  if (nonce === undefined) {
+    return undefined
+  }
   // Anchored at the start of the row, not searched for anywhere in it. A marker *found* in a
   // command line says only that some process has this text among its arguments — an editor
   // holding the file open, a `grep` for it, or the turn's own `claude` carrying it inside a
@@ -294,8 +381,17 @@ export function parseJournalScript(line: string, stateDir: string): RecoveredScr
   if (idEnd < 0) {
     return undefined
   }
-  const id = line.slice(from, idEnd)
-  if (!isProcessId(id)) {
+  // The opener's one argument is `<id> <nonce>`, split at the first separator rather than the
+  // last: an id cannot contain one, so the first is the boundary, and everything after it has
+  // to equal the nonce whole — a row carrying a longer value that merely starts with ours is
+  // not ours.
+  const identity = line.slice(from, idEnd)
+  const split = identity.indexOf(IDENTITY_SEPARATOR)
+  if (split < 0) {
+    return undefined
+  }
+  const id = identity.slice(0, split)
+  if (!isProcessId(id) || identity.slice(split + IDENTITY_SEPARATOR.length) !== nonce) {
     return undefined
   }
   const argvFrom = idEnd + SCRIPT_OPEN_CLOSE.length

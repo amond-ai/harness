@@ -81,6 +81,19 @@ export interface LocalHost {
    */
   readSlice: (path: string, offset: number, length?: number) => Promise<LocalSlice>
   writeFile: (path: string, data: Uint8Array) => Promise<void>
+  /**
+   * Write a file only if nothing is there yet. `false` when something already was.
+   *
+   * Apart from {@link LocalHost.writeFile} because the answer is the point rather than the
+   * write: the sandbox's wrapper nonce has to be minted once and then *agreed on*, and two
+   * orchestrators opening the same sandbox at the same moment both reach this call. A
+   * read-then-write would have the second one overwrite a value the first has already spawned
+   * wrappers carrying, which recovery would afterwards refuse to claim as its own — every
+   * process of the first orchestrator's, silently unrecoverable. Exclusive creation makes the
+   * loser of that race read the winner's value instead, which is the only outcome where both
+   * of them are still talking about the same sandbox.
+   */
+  createFile: (path: string, data: Uint8Array) => Promise<boolean>
   /** Create the directory and every parent. Succeeds when it is already there. */
   mkdir: (path: string) => Promise<void>
   /** Entry names, or `[]` when the directory does not exist. */

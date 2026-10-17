@@ -24,10 +24,20 @@
  */
 import type { ProcessRecord } from './journal'
 import type { LocalHost, LocalProcessRow } from './local-surface'
-import { journalPaths, parseJournalScript, parseProcessRecord, serializeProcessRecord } from './journal'
+import { isWrapperNonce, journalPaths, noncePath, parseJournalScript, parseProcessRecord, serializeProcessRecord } from './journal'
 import { isProcessId } from './paths'
 
 const RECORD_SUFFIX = '.meta.json'
+
+/**
+ * The most a wrapper nonce may be, in bytes.
+ *
+ * Headroom over the 36 a v4 UUID takes, and a cap rather than a fit for the reason the exit
+ * record has one (`journal-io.ts`): the file lives in a directory the sandbox's own commands can
+ * write to, so an unbounded read is one a command can make arbitrarily large. Anything longer
+ * than this is not a nonce this package minted, and is treated as none.
+ */
+const NONCE_BYTES = 64
 
 /**
  * Whether a recorded pid names something a signal may be aimed at.
@@ -51,8 +61,14 @@ export type Liveness
     | 'unknown'
 
 export interface ProcessRegistry {
-  /** Create the state directory, verified rather than assumed. */
-  ensure: () => Promise<void>
+  /**
+   * Create the state directory and settle this sandbox's wrapper nonce, verified rather than
+   * assumed, and hand the nonce back for {@link import('./journal').journalledScript}.
+   *
+   * The only call that creates anything. Discovery must not — a state directory that is not
+   * there is an answer — so everything else reads the nonce and accepts its absence.
+   */
+  ensure: () => Promise<string>
   remember: (record: ProcessRecord) => Promise<void>
   read: (id: string) => Promise<ProcessRecord | undefined>
   /** Every process this sandbox has a record for, plus every live one it has lost the record of. */
@@ -83,6 +99,13 @@ export interface ProcessRegistryOptions {
   elapsedMs?: () => number
   /** How long an identity check is reused before the host is asked again. */
   identityTtlMs?: number
+  /**
+   * Mints the value that authenticates this sandbox's wrappers. Defaults to a v4 UUID.
+   *
+   * Injected for the same reason `newProcessId` is: a suite that could not fix the nonce could
+   * not write a wrapper's command line by hand, and every recovery test does exactly that.
+   */
+  newNonce?: () => string
 }
 
 /**
@@ -103,6 +126,7 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
   const { host, now, stateDir } = options
   const elapsedMs = options.elapsedMs ?? (() => Date.now())
   const identityTtlMs = options.identityTtlMs ?? DEFAULT_IDENTITY_TTL_MS
+  const newNonce = options.newNonce ?? (() => crypto.randomUUID())
   /**
    * Per process id: that the pid was *not* ours when last asked, and when that was.
    *
@@ -118,6 +142,67 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
    * premise of `ownsPid` above it.
    */
   const notOurs = new Map<string, number>()
+
+  /**
+   * This sandbox's wrapper nonce, or `undefined` when the state directory holds no usable one.
+   *
+   * Read from disk on every call rather than held, and the cost is why that is affordable: the
+   * two callers below have each just forked a `ps`, against which a sixty-byte read is noise.
+   * What it buys is that there is no cached answer to invalidate — a nonce is minted once and
+   * never rotated, so the only way the file can change under a running orchestrator is by being
+   * removed, and a cache would go on claiming wrappers by a value the sandbox no longer has any
+   * record of choosing.
+   *
+   * Absence is not an error here. It is the ordinary state of a sandbox nothing has been
+   * started in, and {@link import('./journal').parseJournalScript} is where the decision that
+   * follows from it is written down.
+   */
+  async function readNonce(): Promise<string | undefined> {
+    const { data, total } = await host.readSlice(noncePath(stateDir), 0, NONCE_BYTES)
+    if (data.length === 0 || total > NONCE_BYTES) {
+      return undefined
+    }
+    const value = new TextDecoder().decode(data)
+    return isWrapperNonce(value) ? value : undefined
+  }
+
+  /**
+   * The nonce this sandbox's wrappers will carry, minted if it has none yet.
+   *
+   * Adopting whatever is already on disk is the whole point of the exclusive create: a second
+   * orchestrator opening a sandbox the first one is running in has to end up with the *first*
+   * one's value, or it would spawn wrappers the first cannot recover and refuse to recover the
+   * ones the first already has.
+   *
+   * It throws rather than proceeding without one, which is the same judgement `ensure` already
+   * makes about the directory: a command spawned now would carry a nonce nobody can read back,
+   * so a restart would find a live process in the table and decline to claim it — the orphan
+   * this whole file exists to prevent, created by the call that was supposed to prevent it.
+   */
+  async function settleNonce(): Promise<string> {
+    const existing = await readNonce()
+    if (existing !== undefined) {
+      return existing
+    }
+    const minted = newNonce()
+    if (!isWrapperNonce(minted)) {
+      throw new Error(
+        `the wrapper nonce minted for sandbox state directory '${stateDir}' is not usable:`
+        + ` expected [A-Za-z0-9_-]+`,
+      )
+    }
+    if (await host.createFile(noncePath(stateDir), new TextEncoder().encode(minted))) {
+      return minted
+    }
+    const adopted = await readNonce()
+    if (adopted !== undefined) {
+      return adopted
+    }
+    throw new Error(
+      `sandbox state directory '${stateDir}' holds a wrapper nonce that could not be read;`
+      + ` a command started now could not be recovered after a restart`,
+    )
+  }
 
   /**
    * Is the process now holding this pid the one the record was written for?
@@ -136,9 +221,16 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
    * An unreadable command line falls back to the time rather than to a verdict. A row whose
    * argv the host truncated is not evidence of a stranger, and answering `'gone'` for one would
    * declare a live turn dead — the asymmetric mistake this whole file is built to avoid.
+   *
+   * "Wherever it can be read" now includes having the sandbox's nonce to read it against.
+   * Without one the marker proves nothing, so a row that looks like a wrapper falls through to
+   * whatever a stranger's row falls through to: the start time, or — for a record that never
+   * got one — the `false` branch below. That combination is doubly degenerate, the nonce file
+   * removed *and* the host unable to answer at spawn time, and it is the answer this already
+   * gave for any row it could not parse rather than one the nonce introduced.
    */
-  function ownsPid(record: ProcessRecord, row: LocalProcessRow): boolean | undefined {
-    const wrapper = parseJournalScript(row.command, stateDir)
+  function ownsPid(record: ProcessRecord, row: LocalProcessRow, nonce: string | undefined): boolean | undefined {
+    const wrapper = parseJournalScript(row.command, stateDir, nonce)
     if (wrapper !== undefined) {
       return wrapper.id === record.id
     }
@@ -171,7 +263,7 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
       // dead becomes a second `claude` in the same checkout.
       return 'unknown'
     }
-    const ours = ownsPid(record, row)
+    const ours = ownsPid(record, row, await readNonce())
     if (ours === undefined) {
       return 'unknown'
     }
@@ -193,6 +285,7 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
       if (!await host.exists(stateDir)) {
         throw new Error(`sandbox state directory '${stateDir}' does not exist and could not be created`)
       }
+      return settleNonce()
     },
 
     remember: async (record: ProcessRecord) => {
@@ -216,7 +309,7 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
       return record?.id === id ? record : undefined
     },
 
-    recovered: async () => recoveredIn(host, stateDir, now),
+    recovered: async () => recoveredIn(host, stateDir, await readNonce(), now),
 
     list: async () => {
       const names = await host.readdir(stateDir)
@@ -240,7 +333,7 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
       // because neither is complete on its own: an exited process is only in the records, and
       // one whose record was never written — or was deleted — is only in the table, and that
       // second gap is the one a duplicate-turn guard would meet as "nothing is running here".
-      const byId = await recoveredIn(host, stateDir, now)
+      const byId = await recoveredIn(host, stateDir, await readNonce(), now)
       for (const record of stored) {
         if (record) {
           byId.set(record.id, record)
@@ -295,15 +388,21 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
  * kernel's clock in the kernel's format, and the contract asks for an ISO timestamp. The
  * kernel's own answer is kept as {@link ProcessRecord.kernelStartedAt}, where it is compared
  * rather than displayed.
+ *
+ * A `nonce` of `undefined` recovers nothing, by construction rather than by a branch here: this
+ * is the path with no record to check a row against, so the sandbox's own nonce is the only
+ * thing left that distinguishes a wrapper of ours from a command line shaped like one — and
+ * `destroy()` signals the group of everything this returns.
  */
 async function recoveredIn(
   host: LocalHost,
   stateDir: string,
+  nonce: string | undefined,
   now: () => string,
 ): Promise<Map<string, ProcessRecord>> {
   const found = new Map<string, ProcessRecord>()
   for (const row of await host.processes()) {
-    const script = parseJournalScript(row.command, stateDir)
+    const script = parseJournalScript(row.command, stateDir, nonce)
     if (script) {
       found.set(script.id, {
         id: script.id,
