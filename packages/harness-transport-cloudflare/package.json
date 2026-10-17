@@ -1,7 +1,7 @@
 {
   "name": "@amond-ai/harness-transport-cloudflare",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Opens the harness bridge socket from workerd — through a Cloudflare Sandbox binding or straight over `fetch` — so the adapter never reaches for `ws`",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",

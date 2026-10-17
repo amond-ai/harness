@@ -1,7 +1,7 @@
 {
   "name": "@amond-ai/harness-sandbox",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The AI SDK harness's HarnessV1SandboxProvider, written once over @amond-ai/sandbox so every backend behind that contract gets one",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
