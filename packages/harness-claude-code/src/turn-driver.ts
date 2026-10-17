@@ -346,6 +346,25 @@ export interface TurnRoundSpec {
    * settles the round — a `finish` reaches the hook like any other.
    *
    * `seq` is the frame's own, as the runtime journaled it; absent on a frame that carries none.
+   *
+   * **At least once, keyed by `seq`.** Rounds that returned hand each frame over once: the next
+   * one attaches past the `since` the last one committed. A step that *failed* is different. Its
+   * retry resumes from the committed `since`, which can be behind what the failed attempt
+   * already handed over, and the replay reports those frames again — a `finish` or an `error`
+   * included — under the `seq` they carried the first time. Only frames at or below the live
+   * mirror's cursor are held back, because that cursor is the one record a failed step leaves.
+   * The round cannot do better (#26): a publication cursor stored with the mirror's puts would
+   * still trail the reports, since a frame is reported when it arrives and a put lands on the
+   * flush cadence, so a step that fails between the two re-reports it all the same. A consumer
+   * whose effect must happen once keeps the highest `seq` it has taken, durably when the effect
+   * outlives the step, and drops a frame at or below it. That mark belongs to one host process:
+   * the runtime's `seq` is monotonic across a process and starts over with each host this driver
+   * starts (it never sets `BRIDGE_REPLAY_FROM_DISK`, the one mode in which a respawned host
+   * continues its journal's `seq`), so a mark carried to another host would drop its frames. Key it by the {@link TurnHandle}'s
+   * `processId` the round attaches to. The run and attempt are not enough — a `HarnessV1`
+   * session's next prompt starts a new host under the same ones. A live-only frame — a token
+   * delta, which the runtime does not journal — is never replayed, so it is never repeated
+   * either.
    */
   onFrame?: (frame: TurnHostOutboundMessage, seq: number | undefined) => void
   /**

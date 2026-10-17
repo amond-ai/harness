@@ -398,6 +398,57 @@ describe('a round retried from a cursor behind what its mirror published', () =>
     expect(vi.mocked(console.warn).mock.calls.flat()).not.toContainEqual(expect.stringContaining('replayed'))
     expect(state).toMatchObject({ since: 5, outcome: { outcome: 'succeeded' } })
   })
+
+  /**
+   * What a consumer's dedupe rests on (#26): a failed step's reports above the mirror's cursor
+   * come round again, but each under the `seq` it carried the first time.
+   */
+  it('reports again what a failed step reported past the mirror\'s cursor, under the same seq', async () => {
+    const journal = [
+      { type: 'raw', seq: 2, rawValue: { type: 'assistant' } },
+      { type: 'sandbox-log', seq: 3, source: 'bridge', stream: 'stdout', line: 'logged' },
+      { type: 'raw', seq: 4, rawValue: { type: 'user' } },
+      finishFrame({ seq: 5 }),
+    ]
+    const host = createFakeTurnHost({
+      onSend: (message, connection) => {
+        if (message.type === 'resume') {
+          journal.filter(frame => Number(frame.seq) > Number(message.lastSeenEventId)).forEach(connection.emit)
+        }
+      },
+    })
+    const { session } = createFakeSession()
+    // Both steps start from the same committed state: a step that fails commits nothing.
+    const step = async (stored: string, failAt?: number): Promise<{ seq: number | undefined, frame: unknown }[]> => {
+      const reported: { seq: number | undefined, frame: unknown }[] = []
+      await runAttachRound({
+        session,
+        handle: HANDLE,
+        connect: host.connect,
+        config: fakeConfig(),
+        mirror: fakeMirror([], stored),
+        budgetMs: BUDGET_MS,
+        previous: { since: 1, lastActivityAt: HANDLE.startedAtMs! },
+        onFrame: (frame, seq) => {
+          reported.push({ seq, frame })
+          if (seq === failAt) {
+            throw new Error('step died')
+          }
+        },
+        now: runningClock(0),
+      }).catch(() => undefined)
+      return reported
+    }
+
+    // The first step dies once it has reported seq 4. Its mirror's last put had reached seq 2,
+    // and that is all the retry has to go on.
+    const failed = await step('1', 4)
+    const retried = await step('2')
+
+    expect(failed.map(report => report.seq)).toEqual([2, 3, 4])
+    expect(retried.map(report => report.seq)).toEqual([3, 4, 5])
+    expect(retried.slice(0, 2)).toEqual(failed.slice(1))
+  })
 })
 
 describe('a round over a turn waiting on background work', () => {
