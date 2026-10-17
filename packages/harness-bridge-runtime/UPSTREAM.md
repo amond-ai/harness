@@ -149,8 +149,13 @@ are where it departs.
     duplicates), and every id a request took a result under or was settled for
     is remembered through the turn after its own, so a retransmitted answer is
     dropped rather than answering a later, identical question through
-    `matches`. What the adapter does with the answer stayed with the Claude
-    bridge under the same number.
+    `matches`. The same two turns also remember the `matches` of every request
+    still outstanding when a turn ended, and a result one of them accepts may
+    resolve a request only under that request's own `toolCallId`: a late answer
+    from an earlier attempt that arrives under an id the bridge never saw
+    cannot answer the next turn's identical question through `matches`. What
+    the adapter does with the answer stayed with the Claude bridge under the
+    same number.
 
 36. `feat(turn-host): acknowledge the end of a resume replay` — upstream's
     `resume` replays the tail and says nothing, so a client cannot tell where
