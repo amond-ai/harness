@@ -374,6 +374,41 @@ it('still resolves a request by its exact id when the result matches a remembere
   await expect(answer).resolves.toMatchObject({ output: 'ans-exact' })
 })
 
+it('does not hand a buffered late result to the next turn\'s question either', async () => {
+  // The other path into a request: the late result arrives before the question is asked, so it
+  // is buffered, and the question finds it there rather than in `pendingToolResults` (cubic
+  // review, PR #32).
+  const { client, ask, startNext, finishTurn } = await twoTurns()
+  // Every `start` is either accepted or refused at once, so counting them says when the bridge
+  // has read everything sent so far — `startNext`'s own retries included, whose refusals can
+  // still be in flight when it returns.
+  const send = client.send
+  let starts = 0
+  client.send = (message) => {
+    starts += message.type === 'start' ? 1 : 0
+    send(message)
+  }
+  const refusals = (): number => client.frames.filter(frame => frame.type === 'error' && frame.phase === 'start').length
+
+  await startNext()
+  void ask('old-1')
+  finishTurn()
+
+  await startNext()
+  // One socket is read in order, so once the `start` sent after the result is refused, the
+  // result has been buffered.
+  client.send({ type: 'tool-result', toolCallId: 'never-seen', output: 'ans-from-old-attempt' })
+  client.send({ type: 'start', prompt: 'go' })
+  await expect.poll(refusals).toBe(starts - 2)
+
+  const answer = ask('new-1')
+  const waiting = new Promise<'waiting'>(resolve => setTimeout(resolve, 25, 'waiting'))
+  expect(await Promise.race([answer, waiting])).toBe('waiting')
+
+  client.send({ type: 'tool-result', toolCallId: 'new-1', output: 'ans-own' })
+  await expect(answer).resolves.toMatchObject({ output: 'ans-own' })
+})
+
 it('forgets a remembered request after the turn following its own', async () => {
   const { client, ask, startNext, finishTurn } = await twoTurns()
   await startNext()
