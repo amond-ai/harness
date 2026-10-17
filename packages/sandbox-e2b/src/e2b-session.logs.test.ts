@@ -177,6 +177,21 @@ describe('createE2bSession', () => {
       await expect(drain(fake)).rejects.toThrow('e2b unavailable')
     })
 
+    it('fails rather than dropping the terminal when the exit record will not open', async () => {
+      // Read as absent, the record would leave the replay without a terminal event — a turn
+      // that finished reported as one still running.
+      const fake = fakeSandbox()
+      fake.files.set(`${ROOT}/run-1.out`, encode('{"type":"result"}\n'))
+      fake.files.set(`${ROOT}/run-1.exit`, encode('0'))
+      const inner = fake.sandbox.files.read
+      fake.sandbox.files.read = ((path: string, opts: { format: 'bytes' | 'stream' }) =>
+        path === `${ROOT}/run-1.exit`
+          ? Promise.reject(new Error('e2b unavailable'))
+          : inner(path, opts as { format: 'bytes' })) as E2bSandboxLike['files']['read']
+
+      await expect(drain(fake)).rejects.toThrow('e2b unavailable')
+    })
+
     it('reads a journal file as empty once e2b confirms it is not there', async () => {
       // A turn that wrote no stderr leaves no `.err`, and that must not fail its replay. The
       // probe is what tells this apart from the failed open above.

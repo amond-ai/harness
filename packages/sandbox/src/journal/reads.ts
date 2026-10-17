@@ -99,10 +99,13 @@ export function createProcessLogs(
    * stdout runs to completion before stderr starts, because `demuxProcessEvents` splits
    * on the event tag and the exit record is read first — it is four bytes, and reading it
    * up front keeps the terminal event's exit code from depending on what the transcript
-   * did to the clock.
+   * did to the clock. It is read under `'fail'` like the two streams: a record that failed to
+   * read would otherwise end the replay with no terminal event, as if the turn were still
+   * running. A record that reads but is oversized or not a number still counts as none — the
+   * wrapper did not write that.
    */
   async function* wholeTranscript(): AsyncGenerator<ProcessLogEvent> {
-    const exitCode = await readExitCode()
+    const exitCode = await readExitCode({ partial: 'fail' })
     let stdout = 0
     for await (const chunk of streamFile(paths.stdout, 'fail')) {
       stdout += chunk.length

@@ -331,7 +331,8 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
     try {
       // `'fail'` so a read that dies mid-file cannot be parsed as an exit code: half of
       // `137` is `1`, which is a perfectly plausible failure the turn never had. Absence
-      // still arrives as no chunks — a file that will not open is silence either way.
+      // still arrives as no chunks. A file that will not open is silence too, unless the
+      // caller's own read is final (`partial: 'fail'`), which opens strictly.
       const stream = streamFile(paths.exit, 'fail', {
         signal: options?.signal,
         strictOpen: options?.partial === 'fail',
