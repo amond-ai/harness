@@ -83,11 +83,14 @@ export function reportFrame(
 
 /**
  * A frame's outward effects — the observer's report, the host's log line, the mirror's append —
- * for a frame no earlier attempt has published.
+ * for a frame no earlier attempt is known to have published.
  *
- * Apart from the fold because a retry re-reads frames the failed attempt already published
- *: the round folds those into its state again, which is what recovers what the failed
- * step never committed, but emits them only once.
+ * Apart from the fold because a retry re-reads frames the failed attempt already published:
+ * the round folds those into its state again, which is what recovers what the failed step
+ * never committed, but emits them only once — as far as it can tell, which is up to the
+ * mirror's cursor. Above it the append has to be redone, since the failed step's appends were
+ * lost with it, and the report and the log line go out again beside it; a consumer dedupes
+ * those on `seq` ({@link TurnRoundSpec.onFrame}).
  */
 export function publishFrame(
   frame: string,
