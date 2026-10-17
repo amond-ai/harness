@@ -41,7 +41,8 @@ export type ProcessEnding
 const CHUNK_BYTES = 65_536
 
 export interface LogReadSources {
-  readLogs: () => Promise<DaytonaSessionLogs>
+  /** Rejects with `signal`'s reason once it aborts, whether or not the read itself stops. */
+  readLogs: (signal?: AbortSignal) => Promise<DaytonaSessionLogs>
   ending: () => Promise<ProcessEnding | undefined>
   now: () => string
   /** How long a following read waits between polls. */
@@ -144,10 +145,15 @@ export function createProcessLogs(
     }
   }
 
-  /** The watchdog's read: what arrived since last time, and nothing before it. */
-  async function positioned(since: string): Promise<readonly ProcessLogEvent[]> {
+  /**
+   * The watchdog's read: what arrived since last time, and nothing before it.
+   *
+   * The signal reaches the read, so a watchdog that times out is not held by a read still
+   * pending against the sandbox.
+   */
+  async function positioned(since: string, signal: AbortSignal | undefined): Promise<readonly ProcessLogEvent[]> {
     const from = decodeCursor(since)
-    const logs = await readLogs()
+    const logs = await readLogs(signal)
     return replayPositioned({
       stdout: sliceFrom(logs.stdout, from.stdout),
       stderr: sliceFrom(logs.stderr, from.stderr),
@@ -233,7 +239,7 @@ export function createProcessLogs(
       return followingStream(logOptions)
     }
     if (logOptions?.since !== undefined) {
-      const events = await positioned(logOptions.since)
+      const events = await positioned(logOptions.since, logOptions.signal)
       return new ReadableStream({
         start(controller) {
           for (const event of events) {

@@ -15,6 +15,7 @@
 import type { JournalMeta, JournalPaths } from './journal'
 import type { JournalSlice } from './log-replay'
 import type { VercelSandboxLike } from './vercel-surface'
+import { abortable } from '@amond-ai/sandbox/journal'
 import { journalPaths, parseJournalMeta } from './journal'
 
 const META_SUFFIX = '.meta.json'
@@ -37,9 +38,15 @@ export interface JournalIo {
   readMeta: (processId: string) => Promise<JournalMeta | undefined>
   readListedMeta: (processId: string) => Promise<JournalMeta | undefined>
   metaMatching: (processId: string, meta: JournalMeta | undefined) => JournalMeta | undefined
-  readSliceFrom: (path: string, offset: number) => Promise<JournalSlice>
-  /** A whole journal file, or `undefined` when there is no such file. */
-  readWhole: (path: string) => Promise<Uint8Array | undefined>
+  /** Rejects with `signal`'s reason once it aborts. See {@link JournalIo.readWhole}. */
+  readSliceFrom: (path: string, offset: number, signal?: AbortSignal) => Promise<JournalSlice>
+  /**
+   * A whole journal file, or `undefined` when there is no such file.
+   *
+   * `signal` is handed to the SDK, which cancels the request, and the read is raced against it
+   * as well, so an abort ends the wait even where the SDK is slow to honour it.
+   */
+  readWhole: (path: string, signal?: AbortSignal) => Promise<Uint8Array | undefined>
   readExitCode: (paths: JournalPaths) => Promise<number | undefined>
   /** A pid the wrapper journalled, or `undefined` for anything that is not one. */
   readPid: (path: string) => Promise<number | undefined>
@@ -115,8 +122,8 @@ export function createJournalIo(sandbox: VercelSandboxLike, root: string): Journ
   }
 
   /** Absent is `undefined`; every other failure is the caller's to judge, so it propagates. */
-  async function readWhole(path: string): Promise<Uint8Array | undefined> {
-    return await sandbox.readFileToBuffer({ path }) ?? undefined
+  async function readWhole(path: string, signal?: AbortSignal): Promise<Uint8Array | undefined> {
+    return await abortable(sandbox.readFileToBuffer({ path }, { signal }), signal) ?? undefined
   }
 
   /**
@@ -137,8 +144,8 @@ export function createJournalIo(sandbox: VercelSandboxLike, root: string): Journ
    * re-read output it has already counted — reporting a wedged turn as alive on its own old
    * bytes, and replaying a large stale segment each time.
    */
-  async function readSliceFrom(path: string, offset: number): Promise<JournalSlice> {
-    const bytes = await readWhole(path)
+  async function readSliceFrom(path: string, offset: number, signal?: AbortSignal): Promise<JournalSlice> {
+    const bytes = await readWhole(path, signal)
     if (bytes === undefined) {
       return { data: new Uint8Array(), total: Math.max(0, offset) }
     }

@@ -93,6 +93,26 @@ describe('logs({ since }): the watchdog\'s sample', () => {
     const cursor = (await collect(await handle.logs())).at(-1)?.cursor ?? ''
     expect(await collect(await handle.logs({ since: cursor }))).toEqual([])
   })
+
+  it('stops waiting on the read when the caller aborts', async () => {
+    // `getSessionCommandLogs` takes no signal, so this one never settles: a watchdog that timed
+    // out must still get its answer back rather than wait on a degraded daemon.
+    const fake = fakeSandbox()
+    const handle = await session(fake).exec(['claude'])
+    let reads = 0
+    fake.sandbox.process.getSessionCommandLogs = async () => {
+      reads++
+      return new Promise(() => {})
+    }
+    const controller = new AbortController()
+
+    const pending = handle.logs({ since: '0:0', signal: controller.signal })
+    await Promise.resolve()
+    controller.abort(new Error('watchdog'))
+
+    await expect(pending).rejects.toThrow('watchdog')
+    expect(reads).toBe(1)
+  })
 })
 
 describe('logs({ follow: true }): the live read', () => {
