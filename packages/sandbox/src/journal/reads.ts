@@ -16,7 +16,7 @@
  * | following (`follow`) | `@amond-ai/harness-sandbox`, live | the process exits or the caller aborts |
  */
 import type { ProcessLogEvent, ProcessLogsOptions } from '../types'
-import type { JournalTail } from './follow'
+import type { JournalReadOptions } from './follow'
 import type { JournalPaths } from './paths'
 import type { JournalSlice } from './replay'
 import { followJournal } from './follow'
@@ -34,13 +34,13 @@ export type PartialRead = 'silence' | 'fail'
 
 export interface LogReadSources {
   paths: JournalPaths
-  readExitCode: () => Promise<number | undefined>
-  readSliceFrom: (path: string, offset: number) => Promise<JournalSlice>
+  readExitCode: (options?: JournalReadOptions) => Promise<number | undefined>
+  readSliceFrom: (path: string, offset: number, options?: JournalReadOptions) => Promise<JournalSlice>
   /** Where a file ends, for a follower starting at the live tail. See {@link JournalTail.readEndOffset}. */
-  readEndOffset: (path: string) => Promise<number>
+  readEndOffset: (path: string, options?: JournalReadOptions) => Promise<number>
   streamFile: (path: string, partial?: PartialRead) => AsyncGenerator<Uint8Array>
   /** The session's liveness verdict — see {@link JournalTail.isGone}. Follow reads only. */
-  isGone: () => Promise<boolean>
+  isGone: (signal?: AbortSignal) => Promise<boolean>
   now: () => string
   /** Monotonic milliseconds, for rate-limiting the liveness probe. Follow reads only. */
   elapsedMs: () => number
@@ -122,11 +122,13 @@ export function createProcessLogs(
   }
 
   /** The watchdog's read: what arrived since last time, and nothing before it. */
-  async function incrementSince(since: string): Promise<readonly ProcessLogEvent[]> {
+  async function incrementSince(since: string, signal: AbortSignal | undefined): Promise<readonly ProcessLogEvent[]> {
     const from = decodeCursor(since)
+    // The signal reaches both reads: a watchdog that times out must not return while either is
+    // still pending against the sandbox.
     const [stdout, stderr] = await Promise.all([
-      readSliceFrom(paths.stdout, from.stdout),
-      readSliceFrom(paths.stderr, from.stderr),
+      readSliceFrom(paths.stdout, from.stdout, { signal }),
+      readSliceFrom(paths.stderr, from.stderr, { signal }),
     ])
     return replayPositioned({ stdout, stderr }, now())
   }
@@ -198,7 +200,7 @@ export function createProcessLogs(
       return followingStream(logOptions)
     }
     if (logOptions?.since !== undefined) {
-      const events = await incrementSince(logOptions.since)
+      const events = await incrementSince(logOptions.since, logOptions.signal)
       return new ReadableStream({
         start(controller) {
           for (const event of events) {

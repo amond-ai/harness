@@ -1,4 +1,4 @@
-import type { JournalSlice, PartialRead } from '@amond-ai/sandbox/journal'
+import type { JournalReadOptions, JournalSlice, PartialRead } from '@amond-ai/sandbox/journal'
 /**
  * Reading the journal back out of the sandbox filesystem.
  *
@@ -12,6 +12,7 @@ import type { JournalSlice, PartialRead } from '@amond-ai/sandbox/journal'
  */
 import type { E2bSandboxLike } from './e2b-surface'
 import type { JournalMeta, JournalPaths } from './journal'
+import { abortable } from '@amond-ai/sandbox/journal'
 import { journalPaths, parseJournalMeta } from './journal'
 
 const META_SUFFIX = '.meta.json'
@@ -25,14 +26,26 @@ const META_SUFFIX = '.meta.json'
  */
 const EXIT_RECORD_LIMIT = 32
 
+export interface StreamOptions {
+  /** Ends the read early, rejecting with the signal's reason. */
+  signal?: AbortSignal
+  /**
+   * Whether a file that will not open is a failure unless it is definitively absent.
+   *
+   * Off, an open that fails is silence — right for a poll, which asks again. On, it is the
+   * {@link JournalIo.readEndOffset} judgement, for a read whose answer is final.
+   */
+  strictOpen?: boolean
+}
+
 export interface JournalIo {
   entries: () => Promise<{ name: string }[]>
   readListedMeta: (processId: string) => Promise<JournalMeta | undefined>
-  readSliceFrom: (path: string, offset: number) => Promise<JournalSlice>
+  readSliceFrom: (path: string, offset: number, options?: JournalReadOptions) => Promise<JournalSlice>
   /** Where a journal file currently ends — never a silent `0` for a read that failed. */
-  readEndOffset: (path: string) => Promise<number>
-  streamFile: (path: string, partial?: PartialRead) => AsyncGenerator<Uint8Array>
-  readExitCode: (paths: JournalPaths) => Promise<number | undefined>
+  readEndOffset: (path: string, options?: JournalReadOptions) => Promise<number>
+  streamFile: (path: string, partial?: PartialRead, options?: StreamOptions) => AsyncGenerator<Uint8Array>
+  readExitCode: (paths: JournalPaths, options?: JournalReadOptions) => Promise<number | undefined>
   readMeta: (processId: string) => Promise<JournalMeta | undefined>
   metaMatching: (processId: string, meta: JournalMeta | undefined) => JournalMeta | undefined
 }
@@ -128,11 +141,15 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
    * already counted — reporting a wedged turn as alive on its own old bytes, and replaying a
    * large stale segment each time (codex review, PR #260).
    */
-  async function readSliceFrom(path: string, offset: number): Promise<JournalSlice> {
+  async function readSliceFrom(path: string, offset: number, options?: JournalReadOptions): Promise<JournalSlice> {
     const chunks: Uint8Array[] = []
     let total = 0
     let kept = 0
-    for await (const chunk of streamFile(path)) {
+    const stream = streamFile(path, options?.partial, {
+      signal: options?.signal,
+      strictOpen: options?.partial === 'fail',
+    })
+    for await (const chunk of stream) {
       const start = total
       total += chunk.length
       if (total <= offset) {
@@ -166,13 +183,18 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
    * slice this backend takes from the SDK. A probe that itself fails counts as "may exist",
    * which keeps the safe direction: fail the subscription rather than silently replay.
    */
-  async function readEndOffset(path: string): Promise<number> {
+  async function readEndOffset(path: string, options?: JournalReadOptions): Promise<number> {
+    const signal = options?.signal
+    signal?.throwIfAborted()
     let reader: ReadableStreamDefaultReader<Uint8Array>
     try {
-      reader = (await sandbox.files.read(path, { format: 'stream' })).getReader()
+      reader = (await abortable(sandbox.files.read(path, { format: 'stream', signal }), signal)).getReader()
     }
     catch (cause) {
-      if (await isMissing(path)) {
+      if (signal?.aborted === true) {
+        throw signal.reason
+      }
+      if (await isMissing(path, signal)) {
         return 0
       }
       throw cause
@@ -180,7 +202,7 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
     try {
       let total = 0
       for (;;) {
-        const { done, value } = await reader.read()
+        const { done, value } = await abortable(reader.read(), signal)
         if (done) {
           return total
         }
@@ -188,16 +210,31 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
       }
     }
     finally {
-      await reader.cancel().catch(() => {})
+      await settleCancel(reader, signal)
     }
   }
 
-  /** Whether the path is definitively not there; a probe that fails answers `false`. */
-  async function isMissing(path: string): Promise<boolean> {
+  /** Cancel the reader, without waiting on a read the caller has already abandoned. */
+  async function settleCancel(reader: ReadableStreamDefaultReader<Uint8Array>, signal: AbortSignal | undefined): Promise<void> {
+    const cancelled = reader.cancel().catch(() => {})
+    if (signal?.aborted !== true) {
+      await cancelled
+    }
+  }
+
+  /**
+   * Whether the path is definitively not there; a probe that fails answers `false`.
+   *
+   * `exists` takes no signal, so the caller stops waiting on it instead: a read aborted while
+   * the probe is in flight rejects with the signal's reason rather than sitting on a degraded
+   * request until it times out (codex review, PR #30).
+   */
+  async function isMissing(path: string, signal: AbortSignal | undefined): Promise<boolean> {
     try {
-      return !await sandbox.files.exists(path)
+      return !await abortable(sandbox.files.exists(path), signal)
     }
     catch {
+      signal?.throwIfAborted()
       return false
     }
   }
@@ -216,17 +253,29 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
    * has not written to that stream yet, and a turn that produced no stderr must not fail its
    * own replay.
    */
-  async function* streamFile(path: string, partial: PartialRead = 'silence'): AsyncGenerator<Uint8Array> {
+  async function* streamFile(
+    path: string,
+    partial: PartialRead = 'silence',
+    options?: StreamOptions,
+  ): AsyncGenerator<Uint8Array> {
+    const signal = options?.signal
+    signal?.throwIfAborted()
     let reader: ReadableStreamDefaultReader<Uint8Array>
     try {
-      reader = (await sandbox.files.read(path, { format: 'stream' })).getReader()
+      reader = (await abortable(sandbox.files.read(path, { format: 'stream', signal }), signal)).getReader()
     }
-    catch {
+    catch (cause) {
+      if (signal?.aborted === true) {
+        throw signal.reason
+      }
+      if (options?.strictOpen === true && !await isMissing(path, signal)) {
+        throw cause
+      }
       return
     }
     try {
       for (;;) {
-        const { done, value } = await reader.read()
+        const { done, value } = await abortable(reader.read(), signal)
         if (done || value === undefined) {
           return
         }
@@ -236,19 +285,21 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
       }
     }
     catch (cause) {
-    // A read that dies mid-file serves what it already yielded; see above.
-      if (partial === 'fail') {
+    // A read that dies mid-file serves what it already yielded; see above. An abort is the
+    // caller leaving, not a read that died, and is never served as a short transcript.
+      if (partial === 'fail' || signal?.aborted === true) {
         throw cause
       }
     }
     finally {
+    // Not awaited once the caller has aborted: the read it gave up on may be the one that hangs.
     // Cancelled, not merely unlocked. `releaseLock` frees the reader; the response body
     // behind it stays open, and a consumer that stops reading the transcript early —
     // `logs()`'s returned stream is cancellable, and its `cancel` returns this generator
     // — would strand one e2b connection per abandoned read for the rest of the session
     // (gemini review, PR #260). Cancelling a stream that already ran to completion is a
     // no-op, so this costs nothing on the normal path.
-      await reader.cancel().catch(() => {})
+      await settleCancel(reader, signal)
     }
   }
 
@@ -272,14 +323,18 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
    * stream and abandoned past the cap, so an oversized file costs one bounded read and then
    * reads as no exit record — which is the honest answer: `printf` did not write that.
    */
-  async function readExitCode(paths: JournalPaths): Promise<number | undefined> {
+  async function readExitCode(paths: JournalPaths, options?: JournalReadOptions): Promise<number | undefined> {
     const chunks: Uint8Array[] = []
     let total = 0
     try {
       // `'fail'` so a read that dies mid-file cannot be parsed as an exit code: half of
       // `137` is `1`, which is a perfectly plausible failure the turn never had. Absence
       // still arrives as no chunks — a file that will not open is silence either way.
-      for await (const chunk of streamFile(paths.exit, 'fail')) {
+      const stream = streamFile(paths.exit, 'fail', {
+        signal: options?.signal,
+        strictOpen: options?.partial === 'fail',
+      })
+      for await (const chunk of stream) {
         total += chunk.length
         if (total > EXIT_RECORD_LIMIT) {
           return undefined
@@ -287,7 +342,12 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
         chunks.push(chunk)
       }
     }
-    catch {
+    catch (cause) {
+      // The poll reads a failure as no record yet; a read whose answer is final does not, or a
+      // blip would be reported as a wrapper that never wrote one. An abort is never a record.
+      if (options?.partial === 'fail' || options?.signal?.aborted === true) {
+        throw cause
+      }
       return undefined
     }
     if (total === 0) {

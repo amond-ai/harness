@@ -51,26 +51,40 @@
  * mirroring what `waitForExit` spends on the same question.
  */
 import type { ProcessLogEvent } from '../types'
+import type { PartialRead } from './reads'
 import type { JournalSlice } from './replay'
 import { encodeCursor, replayPositioned } from './replay'
 
+/**
+ * What a journal read is told about the caller waiting on it.
+ *
+ * `signal` ends the read early, rejecting with the signal's reason. `partial` is the
+ * {@link PartialRead} policy: omitted, a failed read answers silence, as the polling loop wants;
+ * `'fail'`, it rejects instead, for a read whose answer is final. A backend that cannot honour
+ * either may ignore it, and the read is then as it was before.
+ */
+export interface JournalReadOptions {
+  signal?: AbortSignal
+  partial?: PartialRead
+}
+
 export interface JournalTail {
   /** Bytes at or after `offset`, plus the file's full length. */
-  readSliceFrom: (path: string, offset: number) => Promise<JournalSlice>
+  readSliceFrom: (path: string, offset: number, options?: JournalReadOptions) => Promise<JournalSlice>
   /**
    * Where a file ends, for `from: 'tail'`. Rejects rather than answering `0` for a read
    * that failed — see `readEndOffset` in `journal-io.ts` for why that distinction matters
    * here and nowhere else.
    */
-  readEndOffset: (path: string) => Promise<number>
+  readEndOffset: (path: string, options?: JournalReadOptions) => Promise<number>
   /** The journalled exit code, or `undefined` while the process is still running. */
-  readExitCode: () => Promise<number | undefined>
+  readExitCode: (options?: JournalReadOptions) => Promise<number | undefined>
   /**
    * Whether the process is gone for good, as the session decides it: absent from e2b's table
    * *and* leaving no survivor in its own session. The verdict this loop ends on, because it is
    * the one the turn cannot write.
    */
-  isGone: () => Promise<boolean>
+  isGone: (signal?: AbortSignal) => Promise<boolean>
   now: () => string
   /** Monotonic milliseconds, for rate-limiting the liveness probe. */
   elapsedMs: () => number
@@ -130,11 +144,42 @@ function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
 /**
  * Everything the journal holds from `from` onwards, and everything it gains until the process
  * exits or the caller aborts.
+ *
+ * An abort ends the stream cleanly even when it cuts a read short: the reads reject with the
+ * signal's reason, and that is the caller leaving rather than a failure to report.
  */
 export async function* followJournal(
   tail: JournalTail,
   options: FollowOptions,
 ): AsyncGenerator<ProcessLogEvent> {
+  try {
+    yield* follow(tail, options)
+  }
+  catch (error) {
+    if (options.signal?.aborted === true) {
+      return
+    }
+    throw error
+  }
+}
+
+async function* follow(
+  tail: JournalTail,
+  options: FollowOptions,
+): AsyncGenerator<ProcessLogEvent> {
+  const { signal } = options
+
+  /**
+   * Whether the caller has given up.
+   *
+   * A function rather than `signal?.aborted` inline: an early `return` on the inline form makes
+   * TypeScript narrow it to `false` for the rest of the generator, and the loop's own check
+   * after it is then reported as unreachable.
+   */
+  function isAborted(): boolean {
+    return signal?.aborted === true
+  }
+
   /**
    * The journal's current end, paid for with one full read of each file.
    *
@@ -143,18 +188,25 @@ export async function* followJournal(
    */
   async function currentEnd(): Promise<{ stdout: number, stderr: number }> {
     const [stdout, stderr] = await Promise.all([
-      tail.readEndOffset(tail.paths.stdout),
-      tail.readEndOffset(tail.paths.stderr),
+      tail.readEndOffset(tail.paths.stdout, { signal }),
+      tail.readEndOffset(tail.paths.stderr, { signal }),
     ])
     return { stdout, stderr }
   }
 
+  // A follower aborted before it started has nothing to subscribe to, and `currentEnd` is a full
+  // read of each file.
+  if (isAborted()) {
+    return
+  }
+
   const at = options.from === 'tail' ? await currentEnd() : { ...options.from }
 
-  async function* drain(): AsyncGenerator<ProcessLogEvent, boolean> {
+  /** `partial: 'fail'` is for the final drain, whose answer nothing polls again to correct. */
+  async function* drain(partial?: PartialRead): AsyncGenerator<ProcessLogEvent, boolean> {
     const [stdout, stderr] = await Promise.all([
-      tail.readSliceFrom(tail.paths.stdout, at.stdout),
-      tail.readSliceFrom(tail.paths.stderr, at.stderr),
+      tail.readSliceFrom(tail.paths.stdout, at.stdout, { signal, partial }),
+      tail.readSliceFrom(tail.paths.stderr, at.stderr, { signal, partial }),
     ])
     at.stdout = stdout.total
     at.stderr = stderr.total
@@ -165,11 +217,14 @@ export async function* followJournal(
 
   /** How the stream ends once {@link JournalTail.isGone} has agreed the process is gone. */
   async function* ending(): AsyncGenerator<ProcessLogEvent> {
-    yield* drain()
+    // Neither read here is polled again, so a failure answered as silence would be final: bytes
+    // dropped from the end of the transcript, or an exit record read as absent and reported as
+    // `no_exit_record`. They reject instead, and the terminal is only built after both succeed.
+    yield* drain('fail')
     if (!options.terminal) {
       return
     }
-    const settled = await tail.readExitCode()
+    const settled = await tail.readExitCode({ signal, partial: 'fail' })
     const cursor = encodeCursor(at.stdout, at.stderr)
     yield settled === undefined
       // The wrapper died before recording `$?`. Named exactly as `statusOf` names it, so a
@@ -198,21 +253,21 @@ export async function* followJournal(
   let claimed = false
 
   for (;;) {
-    if (options.signal?.aborted === true) {
+    if (isAborted()) {
       return
     }
     yield* drain()
-    if (await tail.readExitCode() !== undefined && !claimed) {
+    if (await tail.readExitCode({ signal }) !== undefined && !claimed) {
       claimed = true
       nextProbeAt = tail.elapsedMs()
     }
     if (tail.elapsedMs() >= nextProbeAt) {
       nextProbeAt = tail.elapsedMs() + tail.livenessIntervalMs
-      if (await tail.isGone()) {
+      if (await tail.isGone(signal)) {
         yield* ending()
         return
       }
     }
-    await sleep(tail.intervalMs, options.signal)
+    await sleep(tail.intervalMs, signal)
   }
 }

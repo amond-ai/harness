@@ -4,8 +4,9 @@
 // the reads (`logs()` over a journal) and tail behind it. A backend supplies the file reads
 // and the liveness verdict; what it reads them *with* — an SDK, `exec` — is its own.
 
+export { abortable } from './abort'
 export { followJournal } from './follow'
-export type { FollowOptions, JournalTail } from './follow'
+export type { FollowOptions, JournalReadOptions, JournalTail } from './follow'
 export {
   isProcessId,
   journalPaths,
