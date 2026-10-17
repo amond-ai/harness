@@ -113,6 +113,24 @@ describe('kill', () => {
     warn.mockRestore()
   })
 
+  /**
+   * A record whose identity does not parse is not a bare pid: trusted as one it would skip the
+   * identity check and signal whatever holds that number now. It is no record at all, so the
+   * default kill falls back to the session.
+   */
+  it('does not trust a pid whose recorded identity is truncated', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fake = fakeSandbox()
+    const handle = await session(fake).exec(['claude'])
+    recordPid(fake, 'run-1', '4242 boot-a')
+
+    await handle.kill()
+    expect(fake.ran).toEqual([])
+    expect(fake.sessions.has('run-1')).toBe(false)
+    expect(warn.mock.calls.map(([message]) => String(message)).join('\n')).toMatch(/no recorded pid/)
+    warn.mockRestore()
+  })
+
   /** A garbled pid file is no pid at all: `kill -KILL -- -0` would signal every process. */
   it('refuses a pid file that does not name a killable process', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})

@@ -54,13 +54,26 @@ export interface PidIdentity {
   startTime: string
 }
 
-/** A pid file back into its parts; `identity` is absent for a bare pid or a host without `/proc`. */
+/**
+ * A pid file back into its parts; `identity` is absent for a bare pid or a host without `/proc`.
+ *
+ * Only those two shapes are accepted. A record with an identity that does not parse — truncated,
+ * or written by the turn itself — answers `NaN`, so the kill treats it as no record at all: taken
+ * as a bare pid it would skip {@link identityCheck} and signal whatever holds that number now
+ * (cubic review, PR #31). A host whose `/proc` is only partly readable writes one of the two
+ * fields and lands here too; it cannot be told from a truncated record, so it takes the same
+ * safe direction — a session delete for the default kill, no named signal at all.
+ */
 export function parsePidRecord(text: string): { pid: number, identity?: PidIdentity } {
-  const [pid, bootId, startTime, ...rest] = text.trim().split(/\s+/)
-  const identity = bootId !== undefined && startTime !== undefined && rest.length === 0 && /^\w[\w-]*$/.test(bootId) && /^\d+$/.test(startTime)
-    ? { bootId, startTime }
-    : undefined
-  return { pid: Number(pid), identity }
+  const fields = text.trim().split(/\s+/)
+  const [pid, bootId = '', startTime = ''] = fields
+  if (fields.length === 1) {
+    return { pid: Number(pid) }
+  }
+  if (fields.length === 3 && /^\w[\w-]*$/.test(bootId) && /^\d+$/.test(startTime)) {
+    return { pid: Number(pid), identity: { bootId, startTime } }
+  }
+  return { pid: Number.NaN }
 }
 
 /** `/proc/<pid>/stat` past the parenthesised name, whose own spaces would shift the fields. */
