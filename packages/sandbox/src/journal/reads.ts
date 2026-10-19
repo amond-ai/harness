@@ -27,8 +27,10 @@ import { decodeCursor, encodeCursor, replayPositioned } from './replay'
  *
  * `'silence'` is the watchdog's reading — a sample that ends early simply reports less.
  * `'fail'` is `replayTurn`'s: it judges the turn from the transcript, so one truncated
- * without saying so is a verdict reached on evidence that was never all there. Only a read
- * that dies *after* the file opened is affected.
+ * without saying so is a verdict reached on evidence that was never all there. That covers a
+ * file that will not open as well as a read that dies partway: under `'fail'`, only a file the
+ * backend confirms is absent reads as empty, because a stream never written is a turn that
+ * produced none.
  */
 export type PartialRead = 'silence' | 'fail'
 
@@ -38,6 +40,7 @@ export interface LogReadSources {
   readSliceFrom: (path: string, offset: number, options?: JournalReadOptions) => Promise<JournalSlice>
   /** Where a file ends, for a follower starting at the live tail. See {@link JournalTail.readEndOffset}. */
   readEndOffset: (path: string, options?: JournalReadOptions) => Promise<number>
+  /** A whole file in chunks; see {@link PartialRead} for what a failed read means. */
   streamFile: (path: string, partial?: PartialRead) => AsyncGenerator<Uint8Array>
   /** The session's liveness verdict — see {@link JournalTail.isGone}. Follow reads only. */
   isGone: (signal?: AbortSignal) => Promise<boolean>
@@ -96,10 +99,13 @@ export function createProcessLogs(
    * stdout runs to completion before stderr starts, because `demuxProcessEvents` splits
    * on the event tag and the exit record is read first — it is four bytes, and reading it
    * up front keeps the terminal event's exit code from depending on what the transcript
-   * did to the clock.
+   * did to the clock. It is read under `'fail'` like the two streams: a record that failed to
+   * read would otherwise end the replay with no terminal event, as if the turn were still
+   * running. A record that reads but is oversized or not a number still counts as none — the
+   * wrapper did not write that.
    */
   async function* wholeTranscript(): AsyncGenerator<ProcessLogEvent> {
-    const exitCode = await readExitCode()
+    const exitCode = await readExitCode({ partial: 'fail' })
     let stdout = 0
     for await (const chunk of streamFile(paths.stdout, 'fail')) {
       stdout += chunk.length

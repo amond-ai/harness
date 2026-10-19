@@ -257,7 +257,9 @@ export function createE2bSession(
         readExitCode: options => readExitCode(paths, options),
         readSliceFrom,
         readEndOffset,
-        streamFile,
+        // A `'fail'` read is the whole transcript, whose answer is final: a file that will not
+        // open fails it too, unless `exists` says the file is not there.
+        streamFile: (path, partial) => streamFile(path, partial, { strictOpen: partial === 'fail' }),
         // The same verdict `waitForExit` ends on, composed here rather than re-derived: gone
         // from e2b's table *and* no survivor in the wrapper's own session. A follow read that
         // trusted the journal alone would end on an exit the turn can write for itself, and

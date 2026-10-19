@@ -249,9 +249,11 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
    * successful run as a failed one whenever the result line sat past the failed chunk — and a
    * transcript with a hole in it as complete whenever it did not (codex review, PR #260).
    *
-   * A file that will not *open* is silence for both: the ordinary reason is that the wrapper
-   * has not written to that stream yet, and a turn that produced no stderr must not fail its
-   * own replay.
+   * A file that will not *open* is silence unless `strictOpen` is set: the ordinary reason is
+   * that the wrapper has not written to that stream yet, and a turn that produced no stderr must
+   * not fail its own replay. With `strictOpen` the file still reads as empty when `exists`
+   * confirms it is absent, and the open failure is thrown otherwise. That is for a read whose
+   * answer is final, where a stream lost to a blip would make a short transcript look whole.
    */
   async function* streamFile(
     path: string,
@@ -329,7 +331,8 @@ export function createJournalIo(sandbox: E2bSandboxLike, root: string): JournalI
     try {
       // `'fail'` so a read that dies mid-file cannot be parsed as an exit code: half of
       // `137` is `1`, which is a perfectly plausible failure the turn never had. Absence
-      // still arrives as no chunks — a file that will not open is silence either way.
+      // still arrives as no chunks. A file that will not open is silence too, unless the
+      // caller's own read is final (`partial: 'fail'`), which opens strictly.
       const stream = streamFile(paths.exit, 'fail', {
         signal: options?.signal,
         strictOpen: options?.partial === 'fail',
