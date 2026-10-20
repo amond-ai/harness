@@ -185,10 +185,10 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
       return existing
     }
     const minted = newNonce()
-    if (!isWrapperNonce(minted)) {
+    if (!isWrapperNonce(minted) || new TextEncoder().encode(minted).length > NONCE_BYTES) {
       throw new Error(
         `the wrapper nonce minted for sandbox state directory '${stateDir}' is not usable:`
-        + ` expected [A-Za-z0-9_-]+`,
+        + ` expected [A-Za-z0-9_-]+ of at most ${NONCE_BYTES} bytes`,
       )
     }
     if (await host.createFile(noncePath(stateDir), new TextEncoder().encode(minted))) {

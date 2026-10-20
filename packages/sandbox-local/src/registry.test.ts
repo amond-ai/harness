@@ -322,6 +322,18 @@ describe('ensure', () => {
     })
     await expect(registry.ensure()).rejects.toThrow(/not usable/)
   })
+
+  it('refuses a minted nonce longer than recovery can read back', async () => {
+    const fake = fakeHost()
+    const registry = createProcessRegistry({
+      host: fake.host,
+      stateDir: STATE,
+      now: () => AT,
+      newNonce: () => 'n'.repeat(65),
+    })
+    await expect(registry.ensure()).rejects.toThrow(/not usable/)
+    expect(fake.files.has(noncePath(STATE))).toBe(false)
+  })
 })
 
 describe('the wrapper nonce', () => {

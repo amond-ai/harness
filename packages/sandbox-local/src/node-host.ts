@@ -14,7 +14,8 @@
 import type { LocalHost, LocalProcessRow, LocalSlice, LocalSpawned, LocalSpawnSpec } from './local-surface'
 import { Buffer } from 'node:buffer'
 import { execFile as execFileCallback, spawn } from 'node:child_process'
-import { mkdir, open, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { link, mkdir, open, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import process from 'node:process'
 import { promisify } from 'node:util'
 import { WRAPPER_SHELL } from './journal'
@@ -198,10 +199,17 @@ export function nodeLocalHost(): LocalHost {
     readSlice,
     writeFile: async (path: string, data: Uint8Array) => writeFile(path, data),
     createFile: async (path: string, data: Uint8Array) => {
+      // The contents are written in full to a sibling nobody looks for, and only then linked into
+      // place. `link(2)` fails with EEXIST rather than replacing, so exactly one caller publishes
+      // and the destination only ever appears with its complete contents: a loser (or a crash
+      // between the write and the link) never exposes an empty or partial file at `path`.
+      // The sibling shares the directory because a hard link cannot cross filesystems, and its
+      // name neither ends in `.meta.json` nor equals the nonce path, so listing ignores it.
+      const slash = path.lastIndexOf('/')
+      const staging = `${path.slice(0, slash + 1)}.staging-${randomUUID()}.tmp`
+      await writeFile(staging, data, { flag: 'wx' })
       try {
-        // `wx` is the exclusive create: the existence check and the write are one `open(2)`,
-        // so there is no window between them for a second orchestrator to win.
-        await writeFile(path, data, { flag: 'wx' })
+        await link(staging, path)
         return true
       }
       catch (error) {
@@ -209,6 +217,9 @@ export function nodeLocalHost(): LocalHost {
           return false
         }
         throw error
+      }
+      finally {
+        await unlink(staging).catch(() => {})
       }
     },
     mkdir: async (path: string) => {

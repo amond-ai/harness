@@ -82,7 +82,12 @@ export interface LocalHost {
   readSlice: (path: string, offset: number, length?: number) => Promise<LocalSlice>
   writeFile: (path: string, data: Uint8Array) => Promise<void>
   /**
-   * Write a file only if nothing is there yet. `false` when something already was.
+   * Publish a file only if nothing is there yet. `false` when something already was.
+   *
+   * Implementations must make the file appear at `path` with its complete contents or not at
+   * all: a caller that loses the race reads the winner's file straight away, so it must never be
+   * observable empty or partially written. The Node host writes a sibling and hard-links it
+   * into place; `link(2)` refuses to replace, so exactly one caller wins.
    *
    * Apart from {@link LocalHost.writeFile} because the answer is the point rather than the
    * write: the sandbox's wrapper nonce has to be minted once and then *agreed on*, and two
