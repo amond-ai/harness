@@ -156,9 +156,22 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
    * Absence is not an error here. It is the ordinary state of a sandbox nothing has been
    * started in, and {@link import('./journal').parseJournalScript} is where the decision that
    * follows from it is written down.
+   *
+   * Neither is a file that exists but cannot be read (permissions stripped, replaced by a
+   * directory, an I/O fault): for discovery that is the same as no usable nonce, and letting the
+   * rejection through would make `listProcesses`, `status` and `destroy` fail where recovery
+   * should claim nothing and liveness should fall back to the start time. {@link settleNonce}
+   * is what still refuses to spawn without one.
    */
   async function readNonce(): Promise<string | undefined> {
-    const { data, total } = await host.readSlice(noncePath(stateDir), 0, NONCE_BYTES)
+    let slice: Awaited<ReturnType<typeof host.readSlice>>
+    try {
+      slice = await host.readSlice(noncePath(stateDir), 0, NONCE_BYTES)
+    }
+    catch {
+      return undefined
+    }
+    const { data, total } = slice
     if (data.length === 0 || total > NONCE_BYTES) {
       return undefined
     }

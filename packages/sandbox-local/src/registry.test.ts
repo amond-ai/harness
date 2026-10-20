@@ -373,6 +373,28 @@ describe('the wrapper nonce', () => {
     expect(moved).toBe('gone')
   })
 
+  it('treats a nonce file that exists but cannot be read as none', async () => {
+    // Any command in the sandbox can `chmod 000` the file or swap it for a directory, so the read
+    // rejecting is reachable. Discovery has to answer as it does for a missing file rather than
+    // fail `listProcesses`, `status` and `destroy`; only `ensure()` may refuse, because it is the
+    // one caller that would otherwise spawn a wrapper nobody can recover.
+    const fake = fakeHost()
+    placeWrapper(fake, 4711, 'p1')
+    const readSlice = fake.host.readSlice
+    fake.host.readSlice = async (path, offset, length) => {
+      if (path === noncePath(STATE)) {
+        throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+      }
+      return readSlice(path, offset, length)
+    }
+    await expect(registryOver(fake).recovered()).resolves.toEqual(new Map())
+    await expect(registryOver(fake).list()).resolves.toEqual([])
+    await expect(registryOver(fake).liveness(recordFor(4711))).resolves.toBe('live')
+    const moved = await registryOver(fake).liveness(recordFor(4711, { kernelStartedAt: 'another day' }))
+    expect(moved).toBe('gone')
+    await expect(registryOver(fake).ensure()).rejects.toThrow(/could not be read/)
+  })
+
   it('reads a nonce file larger than any it minted as none', async () => {
     // The file lives where the sandbox's own commands can write, and this read happens on every
     // liveness probe — so the cap is what keeps a command from making it arbitrarily expensive.

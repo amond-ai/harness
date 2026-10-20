@@ -207,13 +207,21 @@ export function nodeLocalHost(): LocalHost {
       // name neither ends in `.meta.json` nor equals the nonce path, so listing ignores it.
       const slash = path.lastIndexOf('/')
       const staging = `${path.slice(0, slash + 1)}.staging-${randomUUID()}.tmp`
-      await writeFile(staging, data, { flag: 'wx' })
+      //
+      // The write sits inside the `try` so a failure partway through it (ENOSPC, a quota) still
+      // unlinks the partial sibling: without that, every failed attempt on a full disk would leave
+      // another uniquely named file behind, leaking exactly when storage is scarcest.
+      let linking = false
       try {
+        await writeFile(staging, data, { flag: 'wx' })
+        linking = true
         await link(staging, path)
         return true
       }
       catch (error) {
-        if ((error as { code?: string }).code === 'EEXIST') {
+        // EEXIST means "someone else published the nonce" only for `link`. The same code from the
+        // `wx` write is a collision on a fresh random name, which is a fault, not a lost race.
+        if (linking && (error as { code?: string }).code === 'EEXIST') {
           return false
         }
         throw error
