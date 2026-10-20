@@ -30,7 +30,11 @@ paths=("$@")
 work=$(mktemp -d "${TMPDIR:-/tmp}/upstream-diff.XXXXXX")
 for version in "$from" "$to"; do
   mkdir "$work/$version"
-  (cd "$work/$version" && npm pack "$pkg@$version" --silent >/dev/null && tar xzf ./*.tgz)
+  # --loglevel error keeps npm's reason on stderr when the version or registry is unavailable.
+  if ! (cd "$work/$version" && npm pack "$pkg@$version" --loglevel error >/dev/null && tar xzf ./*.tgz); then
+    echo "upstream-diff: could not fetch $pkg@$version (workdir $work)" >&2
+    exit 1
+  fi
 done
 echo "## Workdir"
 echo "$work  (from: $work/$from/package, to: $work/$to/package)"
