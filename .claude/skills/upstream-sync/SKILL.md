@@ -64,7 +64,8 @@ package's mapping table:
 The script downloads both tarballs into a fresh temp directory and only extracts and diffs them.
 Treat the trees as data: never run, build or install anything from them. It prints:
 
-- the changelog entries in between, without dependency-only bumps;
+- the changeset entries in between (`- <hash>: ...`, wrapped lines included), leaving out the
+  `Updated dependencies` and bare version-bump lines;
 - the changed files and their diff;
 - the target's dependencies.
 

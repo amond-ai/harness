@@ -9,8 +9,8 @@
 # Downloads both tarballs into a fresh temp directory. The script only extracts and diffs
 # them; nothing it downloads is executed. Prints:
 #   1. the temp directory, so the full trees can be read afterwards
-#   2. the CHANGELOG entries after <from-version> up to and including <to-version>,
-#      without dependency-only bumps
+#   2. the changeset entries (`- <hash>: ...`) after <from-version> up to and including
+#      <to-version>; `Updated dependencies` and bare version-bump lines are left out
 #   3. the changed files and the unified diff of each requested path
 #   4. the runtime dependencies of <to-version>, for aligning version pins
 set -euo pipefail
@@ -40,9 +40,18 @@ echo "## CHANGELOG ($pkg, after $from up to $to)"
 awk -v to="## $to" -v from="## $from" '
   $0 == to { on = 1 }
   $0 == from { exit }
+  !on { next }
   # A version heading is printed only when an entry follows it.
-  on && /^## / { heading = $0; next }
-  on && /^- [0-9a-f]{7}:/ { if (heading != "") { print heading; heading = "" } print }
+  /^## / { heading = $0; entry = 0; next }
+  /^- [0-9a-f]{7,40}:/ { if (heading != "") { print heading; heading = "" } print; entry = 1; blank = ""; next }
+  # An entry continues on indented lines, paragraph breaks included, until the next bullet or
+  # heading.
+  /^[-#]/ { entry = 0; blank = ""; next }
+  !entry { next }
+  # changesets can append a dependency bump to an entry as an indented `- <pkg>@<version>` bullet.
+  /^ +- (@[a-z0-9._-]+\/)?[a-z0-9._-]+@[0-9]/ { next }
+  /^$/ { blank = blank "\n"; next }
+  /^ +/ { printf "%s", blank; blank = ""; print }
 ' "$work/$to/package/CHANGELOG.md"
 
 echo
