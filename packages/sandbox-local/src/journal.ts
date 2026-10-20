@@ -403,6 +403,35 @@ export function parseJournalScript(
   return command ? { id, command: command as unknown as SandboxCommand } : undefined
 }
 
+/**
+ * Does this row have the *public* shape of the wrapper this state directory would give `id` —
+ * everything {@link parseJournalScript} checks except the nonce?
+ *
+ * Not a claim, and never to be read as one: every part of what this matches is public, which is
+ * the whole of #4. What it answers is narrower and only useful to a caller that already holds a
+ * record naming this pid — whether a row that failed to authenticate is a *stranger*, or is
+ * shaped exactly like the wrapper the record describes and failed only on the nonce. The second
+ * is what a wrapper of ours looks like once `.nonce` has been removed or replaced under it, and
+ * what one spawned before nonces existed looks like (an opener with no second word at all), so
+ * the identity's first word is compared and whatever follows it is ignored.
+ */
+export function wearsWrapperShape(line: string, stateDir: string, id: string): boolean {
+  if (!isProcessId(id) || !line.startsWith(WRAPPER_PREFIX)) {
+    return false
+  }
+  const from = WRAPPER_PREFIX.length
+  const idEnd = line.indexOf(SCRIPT_OPEN_CLOSE, from)
+  if (idEnd < 0) {
+    return false
+  }
+  const identity = line.slice(from, idEnd)
+  const split = identity.indexOf(IDENTITY_SEPARATOR)
+  if ((split < 0 ? identity : identity.slice(0, split)) !== id) {
+    return false
+  }
+  return line.lastIndexOf(`${redirection(journalPaths(stateDir, id))} & __c=$!`) >= idEnd + SCRIPT_OPEN_CLOSE.length
+}
+
 /** What the backend must remember about a process once nothing is holding its handle. */
 export interface ProcessRecord {
   id: string

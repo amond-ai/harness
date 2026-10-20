@@ -128,7 +128,15 @@ it. That is the same bar the rest of this package holds — a command here runs 
 the orchestrator's environment — and what it closes is the case that was actually reachable, a
 process that reproduces the marker without trying to. Delete `.nonce` and recovery claims
 nothing at all: an orphan that could once have been ended is lost, which is the cheaper of the
-two mistakes available at that point.
+two mistakes available at that point. A process that still has its record is not called dead on
+that evidence either: a row shaped like its own wrapper but carrying the wrong nonce reads as
+unknown, so `destroy()` refuses rather than signalling it or deleting the state.
+
+**Upgrading from a release without the nonce.** Wrappers that an earlier release spawned carry no
+nonce, so this release does not recognise them. A turn whose record survives the upgrade falls
+back to its kernel start time where one was pinned, and otherwise reads as unknown. It is neither
+killed nor cleaned up. A turn whose record is already gone cannot be recovered at all. Let running
+turns finish, or stop them, before you upgrade.
 
 One limit worth knowing before you rely on recovery: a process found through the process table
 rather than through its record carries the argv **as the process table renders it**, and `ps`

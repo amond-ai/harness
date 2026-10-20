@@ -24,7 +24,7 @@
  */
 import type { ProcessRecord } from './journal'
 import type { LocalHost, LocalProcessRow } from './local-surface'
-import { isWrapperNonce, journalPaths, noncePath, parseJournalScript, parseProcessRecord, serializeProcessRecord } from './journal'
+import { isWrapperNonce, journalPaths, noncePath, parseJournalScript, parseProcessRecord, serializeProcessRecord, wearsWrapperShape } from './journal'
 import { isProcessId } from './paths'
 
 const RECORD_SUFFIX = '.meta.json'
@@ -238,10 +238,15 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
    *
    * "Wherever it can be read" now includes having the sandbox's nonce to read it against.
    * Without one the marker proves nothing, so a row that looks like a wrapper falls through to
-   * whatever a stranger's row falls through to: the start time, or — for a record that never
-   * got one — the `false` branch below. That combination is doubly degenerate, the nonce file
-   * removed *and* the host unable to answer at spawn time, and it is the answer this already
-   * gave for any row it could not parse rather than one the nonce introduced.
+   * the start time. A record that never got a start time is where that runs out, and it is not
+   * as rare as it sounds: a sandbox command that deletes `.nonce` is enough, because the next
+   * `exec` mints a fresh one and every wrapper already running stops authenticating. Such a row
+   * is not evidence of a stranger — it is shaped exactly like the wrapper this record names and
+   * failed only on the nonce — so it is answered as `undefined`, never as `false`. `'gone'` from
+   * here is what lets `destroy()` remove the journal of a process that is still writing to the
+   * checkout; `'unknown'` makes it refuse instead, and signals nothing, so the reproduction #4
+   * was about gains no foothold either. Only a row shaped for some *other* id, or for nothing,
+   * is ruled out.
    */
   function ownsPid(record: ProcessRecord, row: LocalProcessRow, nonce: string | undefined): boolean | undefined {
     const wrapper = parseJournalScript(row.command, stateDir, nonce)
@@ -249,8 +254,9 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
       return wrapper.id === record.id
     }
     if (row.command !== '' && record.kernelStartedAt === undefined) {
-      // Someone else's process, holding a pid this record was never able to pin down.
-      return false
+      // Shaped like this record's own wrapper, so possibly ours with its nonce lost from under it;
+      // otherwise someone else's process, holding a pid this record was never able to pin down.
+      return wearsWrapperShape(row.command, stateDir, record.id) ? undefined : false
     }
     return record.kernelStartedAt === undefined ? undefined : row.startedAt === record.kernelStartedAt
   }

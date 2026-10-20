@@ -374,6 +374,37 @@ describe('the wrapper nonce', () => {
     expect(moved).toBe('gone')
   })
 
+  it('will not call a wrapper shaped like its own dead when only the nonce fails', async () => {
+    // A record with no start time has nothing left but the command line. A sandbox command that
+    // deletes `.nonce` makes the next `exec` mint a fresh one, and from then on this record's own
+    // wrapper — and one spawned before nonces existed — fails to authenticate. Answering 'gone'
+    // there is what let `destroy()` remove the journal of a process still writing to the checkout.
+    const unpinned = recordFor(4711, { kernelStartedAt: undefined })
+    const legacy = `/bin/sh -c : 'p1' ; 'claude' '-p' > '${STATE}/p1.out' 2> '${STATE}/p1.err' & __c=$!`
+    for (const command of [
+      `/bin/sh -c ${journalledScript(['claude', '-p'], journalPaths(STATE, 'p1'), 'a-rotated-nonce')}`,
+      legacy,
+    ]) {
+      const fake = fakeHost()
+      placeNonce(fake)
+      fake.place({ pid: 4711, command })
+      await expect(registryOver(fake).liveness(unpinned)).resolves.toBe('unknown')
+      // And 'unknown' signals nothing: the reproduction #4 was about gains no foothold here.
+      await expect(registryOver(fake).signalGroup(unpinned, 9)).resolves.toBe(false)
+      expect(fake.table.has(4711)).toBe(true)
+    }
+  })
+
+  it('still rules out a row shaped for some other process id', async () => {
+    const fake = fakeHost()
+    placeNonce(fake)
+    fake.place({
+      pid: 4711,
+      command: `/bin/sh -c ${journalledScript(['claude', '-p'], journalPaths(STATE, 'p2'), 'a-rotated-nonce')}`,
+    })
+    await expect(registryOver(fake).liveness(recordFor(4711, { kernelStartedAt: undefined }))).resolves.toBe('gone')
+  })
+
   it('treats a nonce file that exists but cannot be read as none', async () => {
     // Any command in the sandbox can `chmod 000` the file or swap it for a directory, so the read
     // rejecting is reachable. Discovery has to answer as it does for a missing file rather than

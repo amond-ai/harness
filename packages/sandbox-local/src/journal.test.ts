@@ -7,6 +7,7 @@ import {
   parseJournalScript,
   parseProcessRecord,
   serializeProcessRecord,
+  wearsWrapperShape,
 } from './journal'
 
 const PATHS = journalPaths('/state', 'p1')
@@ -211,6 +212,20 @@ describe('parseJournalScript', () => {
     // our wrappers from a reproduction of one, and the safe answer is to claim neither.
     expect(parseJournalScript(`/bin/sh -c ${journalledScript(['claude', '-p'], PATHS, NONCE)}`, '/state', undefined))
       .toBeUndefined()
+  })
+})
+
+describe('wearsWrapperShape', () => {
+  it('matches this id\'s wrapper whatever its nonce, and nothing else', () => {
+    // Everything here is public, so this is never a claim — only the difference between a row
+    // that failed on the nonce alone and a stranger, for a caller that already holds a record.
+    const rotated = `/bin/sh -c ${journalledScript(['claude', '-p'], PATHS, 'another-nonce')}`
+    const legacy = `/bin/sh -c : 'p1' ; 'claude' '-p' > '/state/p1.out' 2> '/state/p1.err' & __c=$!`
+    expect(wearsWrapperShape(rotated, '/state', 'p1')).toBe(true)
+    expect(wearsWrapperShape(legacy, '/state', 'p1')).toBe(true)
+    expect(wearsWrapperShape(rotated, '/state', 'p2')).toBe(false)
+    expect(wearsWrapperShape(rotated, '/elsewhere', 'p1')).toBe(false)
+    expect(wearsWrapperShape(`grep -R ${journalledScript(['claude'], PATHS, NONCE)} /var/log`, '/state', 'p1')).toBe(false)
   })
 })
 
