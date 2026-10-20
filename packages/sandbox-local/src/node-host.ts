@@ -15,6 +15,7 @@ import type { LocalHost, LocalProcessRow, LocalSlice, LocalSpawned, LocalSpawnSp
 import { Buffer } from 'node:buffer'
 import { execFile as execFileCallback, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { constants as fsConstants } from 'node:fs'
 import { link, mkdir, open, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import process from 'node:process'
 import { promisify } from 'node:util'
@@ -58,10 +59,21 @@ async function sizeOf(path: string): Promise<number | undefined> {
   }
 }
 
+/**
+ * Read a slice of a regular file.
+ *
+ * Anything else is refused with `EINVAL`. A sandbox's own commands can write to the state
+ * directory, so a journal or the nonce file can be replaced by a FIFO; a plain `open(path, 'r')`
+ * on a FIFO with no writer blocks before any size limit or error handling applies, and every
+ * caller of this read — listing, recovery, status, exec, destroy — would hang with it. The open
+ * is therefore non-blocking (a no-op for regular files), and the kind is checked on the opened
+ * descriptor rather than on the path, so a replacement between a check and the open cannot slip
+ * through.
+ */
 async function readSlice(path: string, offset: number, length?: number): Promise<LocalSlice> {
   let handle
   try {
-    handle = await open(path, 'r')
+    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK)
   }
   catch (error) {
     if (isMissing(error)) {
@@ -72,7 +84,11 @@ async function readSlice(path: string, offset: number, length?: number): Promise
     throw error
   }
   try {
-    const total = (await handle.stat()).size
+    const info = await handle.stat()
+    if (!info.isFile()) {
+      throw Object.assign(new Error(`'${path}' is not a regular file`), { code: 'EINVAL' })
+    }
+    const total = info.size
     const available = Math.max(0, total - offset)
     const want = length === undefined ? available : Math.min(length, available)
     if (want === 0) {

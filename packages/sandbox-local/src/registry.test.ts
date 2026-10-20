@@ -310,6 +310,7 @@ describe('ensure', () => {
     const fake = fakeHost()
     placeNonce(fake, 'not a nonce')
     await expect(registryOver(fake).ensure()).rejects.toThrow(/could not be read/)
+    await expect(registryOver(fake).ensure()).rejects.toThrow(noncePath(STATE))
   })
 
   it('refuses a minted nonce that would not survive the wrapper it goes into', async () => {

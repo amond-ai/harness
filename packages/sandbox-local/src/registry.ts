@@ -213,7 +213,8 @@ export function createProcessRegistry(options: ProcessRegistryOptions): ProcessR
     }
     throw new Error(
       `sandbox state directory '${stateDir}' holds a wrapper nonce that could not be read;`
-      + ` a command started now could not be recovered after a restart`,
+      + ` a command started now could not be recovered after a restart.`
+      + ` Remove '${noncePath(stateDir)}' once no command from this sandbox is running`,
     )
   }
 

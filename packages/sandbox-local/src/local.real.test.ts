@@ -11,7 +11,7 @@
  * POSIX only, and skipped elsewhere rather than pretended: process groups, signal numbers and
  * `ps` have no Windows equivalent, which is a limit of the backend and not of this suite.
  */
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
@@ -142,17 +142,29 @@ describe.skipIf(!posix)('against a real machine', () => {
     // wrapper's command line as the machine's own `ps` renders it — the sandbox's nonce
     // included. A fake host can model that string; only a real one shows that `ps` hands the
     // whole two-word marker back unchanged, which is what every claim below rests on.
+    //
+    // The command stays alive until the test ends it, because the recovery has to find it in the
+    // table: a short sleep races the host's process-table latency, and a command that has
+    // already exited is correctly not listed, which would fail the assertion for the wrong
+    // reason.
     const session = providerFor('p-recover').session('run-recover')
-    const handle = await session.exec(['sh', '-c', 'sleep 0.6 ; echo done'])
-    await rm(join(root, '.state', 'run-recover', 'p-recover.meta.json'))
+    const handle = await session.exec(['sh', '-c', 'sleep 30'])
+    try {
+      await rm(join(root, '.state', 'run-recover', 'p-recover.meta.json'))
 
-    const relaunched = providerFor('p-recover').session('run-recover')
-    await expect(relaunched.listProcesses()).resolves.toMatchObject([{
-      id: 'p-recover',
-      state: 'running',
-      command: ['sh', '-c', 'sleep 0.6 ; echo done'],
-    }])
-    await expect(handle.waitForExit({ timeout: 10_000 })).resolves.toEqual({ code: 0, timedOut: false })
+      const relaunched = providerFor('p-recover').session('run-recover')
+      await expect(relaunched.listProcesses()).resolves.toMatchObject([{
+        id: 'p-recover',
+        state: 'running',
+        command: ['sh', '-c', 'sleep 30'],
+      }])
+    }
+    finally {
+      // The test ends the process itself, so its exit code says nothing about the backend and
+      // is not asserted; only that it is over before the suite removes its root.
+      await handle.kill(9)
+      await handle.waitForExit({ timeout: 10_000 })
+    }
   })
 
   it('claims nothing once the nonce is gone, wrapper still in the table or not', async () => {
@@ -160,14 +172,28 @@ describe.skipIf(!posix)('against a real machine', () => {
     // nonce there is nothing left that tells one of our wrappers from a command line shaped
     // like one, and `destroy()` signals the group of everything the listing names — so the
     // listing names nothing. An orphan that could once have been ended is the price.
+    //
+    // The wrapper must still be in the table when the listing runs, or an empty answer proves
+    // nothing: a long-lived command, and a liveness probe on the wrapper's pid taken from the
+    // record before the test deletes it (the handle's own `status()` reads that record).
     const session = providerFor('p-nonce').session('run-nonce')
-    const handle = await session.exec(['sh', '-c', 'sleep 0.6'])
-    await rm(join(root, '.state', 'run-nonce', 'p-nonce.meta.json'))
-    await rm(join(root, '.state', 'run-nonce', '.nonce'))
+    const handle = await session.exec(['sh', '-c', 'sleep 30'])
+    try {
+      const metaPath = join(root, '.state', 'run-nonce', 'p-nonce.meta.json')
+      const { pid } = JSON.parse(await readFile(metaPath, 'utf8')) as { pid: number }
+      await rm(metaPath)
+      await rm(join(root, '.state', 'run-nonce', '.nonce'))
 
-    const relaunched = providerFor('p-nonce').session('run-nonce')
-    await expect(relaunched.listProcesses()).resolves.toEqual([])
-    await expect(handle.waitForExit({ timeout: 10_000 })).resolves.toEqual({ code: 0, timedOut: false })
+      const relaunched = providerFor('p-nonce').session('run-nonce')
+      expect(() => process.kill(pid, 0)).not.toThrow()
+      await expect(relaunched.listProcesses()).resolves.toEqual([])
+      expect(() => process.kill(pid, 0)).not.toThrow()
+    }
+    finally {
+      // Ended by the test, so no exit code is asserted.
+      await handle.kill(9)
+      await handle.waitForExit({ timeout: 10_000 })
+    }
   })
 
   it('resolves a caller\'s absolute path inside the sandbox', async () => {

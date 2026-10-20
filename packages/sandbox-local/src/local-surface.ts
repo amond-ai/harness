@@ -78,6 +78,9 @@ export interface LocalHost {
    * An absent file reads as empty rather than throwing: a journal is created by the wrapper's
    * first write, so "the process has produced no stderr yet" and "there is no such process"
    * arrive here identically and only the caller can tell them apart.
+   *
+   * A path that exists but is not a regular file (a FIFO, a directory, a device) rejects rather
+   * than being read, and must do so without blocking on it.
    */
   readSlice: (path: string, offset: number, length?: number) => Promise<LocalSlice>
   writeFile: (path: string, data: Uint8Array) => Promise<void>
