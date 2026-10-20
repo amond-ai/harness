@@ -163,7 +163,9 @@ URL that provably cannot be dialed.
 
 Process groups, signal numbers and `ps` all mean something specific here, and Windows has no
 equivalent for any of the three. macOS and Linux are supported; the real-machine suite
-(`src/local.real.test.ts`) skips itself elsewhere rather than pretending.
+(`src/local.real.test.ts`) skips itself elsewhere rather than pretending. The filesystem under
+`stateRoot` must support hard links, because `.nonce` is published with `link(2)`; on one that does
+not (exFAT, some SMB and FUSE mounts) the first `exec` fails rather than running without a nonce.
 
 `src/node-host.ts` is the only *shipped* module that imports a `node:` builtin, and it uses
 specifiers rather than any one engine's API, so it runs on Node, Bun and Deno alike. Everything
