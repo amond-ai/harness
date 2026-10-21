@@ -80,7 +80,8 @@ export interface LocalHost {
    * arrive here identically and only the caller can tell them apart.
    *
    * A path that exists but is not a regular file (a FIFO, a directory, a device) rejects rather
-   * than being read, and must do so without blocking on it.
+   * than being read, and must do so without blocking on it: a directory with `EISDIR`, any
+   * other kind with `EINVAL`.
    */
   readSlice: (path: string, offset: number, length?: number) => Promise<LocalSlice>
   writeFile: (path: string, data: Uint8Array) => Promise<void>

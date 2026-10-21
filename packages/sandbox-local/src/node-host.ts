@@ -38,7 +38,10 @@ const PS_MAX_BUFFER = 16 * 1024 * 1024
  * Extra reads given to a process-table row whose arguments `ps` could not read.
  *
  * Bounded because zombies render the same way and never become readable. Each attempt is one
- * `ps -p` for every such row at once, so the bound is on forks per listing, not per row.
+ * `ps -p` for every such row at once, so the bound is on forks per listing, not per row. An
+ * attempt that makes none of them readable ends the rereads early: macOS prints hardened and
+ * other-user processes as `(comm)` for good, so those rows would otherwise cost every listing
+ * the full bound.
  */
 const UNREADABLE_REREADS = 2
 
@@ -70,7 +73,8 @@ async function sizeOf(path: string): Promise<number | undefined> {
 /**
  * Read a slice of a regular file.
  *
- * Anything else is refused with `EINVAL`. A sandbox's own commands can write to the state
+ * Anything else is refused: a directory with `EISDIR`, as a plain read of one fails, and any
+ * other kind (a FIFO, a device) with `EINVAL`. A sandbox's own commands can write to the state
  * directory, so a journal or the nonce file can be replaced by a FIFO; a plain `open(path, 'r')`
  * on a FIFO with no writer blocks before any size limit or error handling applies, and every
  * caller of this read — listing, recovery, status, exec, destroy — would hang with it. The open
@@ -93,6 +97,9 @@ async function readSlice(path: string, offset: number, length?: number): Promise
   }
   try {
     const info = await handle.stat()
+    if (info.isDirectory()) {
+      throw Object.assign(new Error(`'${path}' is a directory`), { code: 'EISDIR' })
+    }
     if (!info.isFile()) {
       throw Object.assign(new Error(`'${path}' is not a regular file`), { code: 'EINVAL' })
     }
@@ -171,7 +178,7 @@ async function processes(): Promise<LocalProcessRow[]> {
 
 /**
  * Ask again about the rows whose arguments `ps` could not read, up to
- * {@link UNREADABLE_REREADS} times.
+ * {@link UNREADABLE_REREADS} times, stopping as soon as an attempt reads none of them.
  *
  * Recovery has no other look at a process whose record is gone, so one missed read is a live
  * wrapper left out of the listing — and out of what `destroy()` ends. The miss is transient on
@@ -188,10 +195,15 @@ async function rereadUnreadable(rows: LocalProcessRow[]): Promise<LocalProcessRo
     if (unreadable.length === 0) {
       break
     }
+    let resolved = false
     for (const again of await rowsOf(unreadable)) {
       if (again.startedAt === byPid.get(again.pid)?.startedAt) {
         byPid.set(again.pid, again)
+        resolved ||= again.command !== ''
       }
+    }
+    if (!resolved) {
+      break
     }
   }
   return rows.map(row => byPid.get(row.pid) ?? row)

@@ -56,6 +56,10 @@ describe('nodeLocalHost.readSlice', () => {
     await expect(nodeLocalHost().readSlice(fifo, 0, 64)).rejects.toMatchObject({ code: 'EINVAL' })
   }, 2_000)
 
+  it('rejects a directory with EISDIR', async () => {
+    await expect(nodeLocalHost().readSlice(dir, 0, 64)).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+
   it('reads a regular file and reports a missing one as empty', async () => {
     const file = join(dir, 'journal')
     await writeFile(file, 'hello')
