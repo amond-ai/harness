@@ -201,7 +201,7 @@ describe('the claude-code harness under HarnessAgent', () => {
     const firstDelta = new Promise<void>((resolve) => {
       inFlight = resolve
     })
-    const turn = await session.doPromptTurn({ prompt: 'say hello', emit: (part) => {
+    const turn = await session.doPromptTurn({ prompt: 'say hello', skills: [], tools: [], emit: (part) => {
       if (part.type === 'text-delta') {
         inFlight()
       }
