@@ -39,7 +39,7 @@ inventing different ones would mean writing and maintaining a mapping layer for 
 that already has the right semantics.
 
 The copy costs nothing and buys both: `getSandbox(...)`'s return value satisfies
-`SandboxSession` with **zero mapping**, so `sandbox-cloudflare.ts` in the orchestrator is a
+`SandboxSession` with **zero mapping**, so [`@amond-ai/sandbox-cloudflare`](../sandbox-cloudflare) is a
 naming layer that returns the client unchanged, and its `satisfies SandboxProvider` fails at
 build time if upstream ever diverges — rather than at the first replay in production.
 
@@ -75,7 +75,7 @@ exists to avoid.
 
 | Backend | Package | Notes |
 | --- | --- | --- |
-| `cloudflare` | `apps/cf-orchestrator/src/run/sandbox-cloudflare.ts` | Wraps `getSandbox` — no mapping |
+| `cloudflare` | [`@amond-ai/sandbox-cloudflare`](../sandbox-cloudflare) | Wraps `getSandbox` — no mapping |
 | `e2b` | [`@amond-ai/sandbox-e2b`](../sandbox-e2b) | Journals transcripts and exit status to the sandbox filesystem |
 
 `SANDBOX_BACKEND` selects between them; see `apps/cf-orchestrator/src/run/sandbox-provider.ts`.
