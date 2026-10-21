@@ -13,6 +13,9 @@ import type { LocalProcessRow } from './local-surface'
 /** `<pid> <5 lstart tokens> <the rest, verbatim>`. */
 const ROW = /^\s*(\d+)\s+(\S+(?:\s+\S+){4})\s+(\S.*)$/
 
+/** macOS `ps`'s `(<comm>)` in place of arguments it could not read — see {@link readableCommand}. */
+const UNREAD_ARGS = /^\(.*\)$/
+
 export function parsePsRow(line: string): LocalProcessRow | undefined {
   const match = ROW.exec(line)
   if (!match) {
@@ -22,7 +25,21 @@ export function parsePsRow(line: string): LocalProcessRow | undefined {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     return undefined
   }
-  return { pid, startedAt: match[2]!.replace(/\s+/g, ' '), command: match[3]! }
+  return { pid, startedAt: match[2]!.replace(/\s+/g, ' '), command: readableCommand(match[3]!) }
+}
+
+/**
+ * A command line, or `''` where `ps` printed its stand-in for one it could not read.
+ *
+ * macOS `ps` renders a process whose arguments it failed to read as `(<comm>)`, and the failure
+ * is not reserved for zombies: an idle `/bin/sh -c` wrapper with a live command under it came
+ * back as `(bash)` on roughly one read in a hundred (measured 2026-10-21, more often under
+ * load). Taken at face value that is a stranger's command line, so recovery passes over a live
+ * wrapper and liveness can call one gone. `''` is the registry's word for "unreadable", which it
+ * answers with the start time rather than with a verdict.
+ */
+function readableCommand(command: string): string {
+  return UNREAD_ARGS.test(command) ? '' : command
 }
 
 /**

@@ -107,7 +107,9 @@ have started. Three things make that work, and each is a decision rather than a 
    recycled inside that second compares equal, and there is no portable finer clock (`/proc` is
    Linux-only). A row whose command line is unreadable falls back to the time rather than to a
    verdict: truncated argv is not evidence of a stranger, and calling a live turn dead is the
-   expensive mistake.
+   expensive mistake. macOS `ps` prints `(bash)` for a live wrapper whose arguments it
+   momentarily failed to read, so that stand-in counts as unreadable, and recovery reads such a
+   row again before passing over it.
    A process this check cannot confirm is never signalled. `kill` reports the non-delivery and
    leaves the caller's bounded wait to escalate, as `SandboxProcessHandle.kill` requires.
 3. **A process is over when its *group* is empty**, not when the wrapper exited. A command that

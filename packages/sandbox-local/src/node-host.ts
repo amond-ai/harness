@@ -35,6 +35,14 @@ const EMPTY = new Uint8Array()
 const PS_MAX_BUFFER = 16 * 1024 * 1024
 
 /**
+ * Extra reads given to a process-table row whose arguments `ps` could not read.
+ *
+ * Bounded because zombies render the same way and never become readable; each one costs a
+ * `ps -p` per attempt, and a machine has few of them.
+ */
+const UNREADABLE_REREADS = 2
+
+/**
  * Whether a syscall failed because the path names nothing.
  *
  * `ENOTDIR` counts alongside `ENOENT`: a path that walks *through* a regular file — a caller
@@ -149,13 +157,34 @@ async function processes(): Promise<LocalProcessRow[]> {
     const { stdout } = await execFile('ps', ['-A', '-ww', '-o', 'pid=,lstart=,args='], {
       maxBuffer: PS_MAX_BUFFER,
     })
-    return parsePsTable(stdout)
+    return await Promise.all(parsePsTable(stdout).map(reread))
   }
   catch {
     // Recovery is a best-effort second opinion, asked for only when a record is already
     // missing. A `ps` that will not run leaves the caller exactly where it was.
     return []
   }
+}
+
+/**
+ * Ask again about a row whose arguments `ps` could not read, up to {@link UNREADABLE_REREADS}
+ * times.
+ *
+ * Recovery has no other look at a process whose record is gone, so one missed read is a live
+ * wrapper left out of the listing — and out of what `destroy()` ends. The miss is transient on
+ * macOS (see `ps-table.ts`), so a second read usually has the arguments. A pid that has gone or
+ * changed hands in between keeps the original row: its unreadable command line claims nothing.
+ */
+async function reread(row: LocalProcessRow): Promise<LocalProcessRow> {
+  let current = row
+  for (let attempt = 0; current.command === '' && attempt < UNREADABLE_REREADS; attempt++) {
+    const again = await identify(row.pid)
+    if (again === undefined || again.startedAt !== row.startedAt) {
+      return current
+    }
+    current = again
+  }
+  return current
 }
 
 async function identify(pid: number): Promise<LocalProcessRow | undefined> {
