@@ -80,12 +80,14 @@ async function sizeOf(path: string): Promise<number | undefined> {
  * caller of this read — listing, recovery, status, exec, destroy — would hang with it. The open
  * is therefore non-blocking (a no-op for regular files), and the kind is checked on the opened
  * descriptor rather than on the path, so a replacement between a check and the open cannot slip
- * through.
+ * through. That order means a replacement pointing at a terminal is opened before it is refused,
+ * so the open also passes `O_NOCTTY`: without it, an orchestrator that leads a session with no
+ * controlling terminal would take that terminal as its own.
  */
 async function readSlice(path: string, offset: number, length?: number): Promise<LocalSlice> {
   let handle
   try {
-    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK)
+    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | fsConstants.O_NOCTTY)
   }
   catch (error) {
     if (isMissing(error)) {
