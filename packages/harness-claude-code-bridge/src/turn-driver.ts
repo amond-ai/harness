@@ -1200,15 +1200,6 @@ async function runTurn({
         }
       }
 
-      if (type === 'result') {
-        const result = msg as ClaudeMessage & {
-          terminal_reason?: string
-          deferred_tool_use?: Record<string, unknown>
-        }
-        terminalReason = result.terminal_reason
-        deferredToolUse = result.deferred_tool_use
-      }
-
       if (type === 'system' && msg.subtype === 'background_tasks_changed') {
         liveBackgroundTasks = countActiveBackgroundTasks(msg)
       }
@@ -1257,6 +1248,32 @@ async function runTurn({
       }
 
       if (type === 'result') {
+        /*
+         * A result that answers no message this input sent is not the turn's: it is
+         * skipped before its ending, error or usage can count for the turn. It only
+         * closes the step it streamed, and drops the error that turn latched. Except
+         * while the turn waits on background work (patch 35): the turn the CLI wakes
+         * when that work settles answers a `task-notification`, not a sent message, and
+         * its result is the one that ends the turn.
+         */
+        const answersSentMessage = queryInput.answersSentMessage(msg)
+        if (!awaitingBackground && !answersSentMessage) {
+          if (streamEventState.stepOpen) {
+            emitFinishStep({
+              state: streamEventState,
+              emit,
+              usage: streamEventState.pendingStepUsage,
+            })
+          }
+          streamEventState.observedTerminalError = undefined
+          continue
+        }
+        const result = msg as ClaudeMessage & {
+          terminal_reason?: string
+          deferred_tool_use?: Record<string, unknown>
+        }
+        terminalReason = result.terminal_reason
+        deferredToolUse = result.deferred_tool_use
         if (msg.subtype === 'success') {
           /*
            * `success` does not mean the turn succeeded: the CLI flags a
@@ -1319,17 +1336,6 @@ async function runTurn({
               emit,
               usage: streamEventState.pendingStepUsage ?? harnessUsage,
             })
-          }
-          /*
-           * A result that answers no message this input sent is not the turn's: it is
-           * skipped before it can end the turn or change the background wait below.
-           * Except while the turn waits on background work (patch 35): the turn the CLI
-           * wakes when that work settles answers a `task-notification`, not a sent
-           * message, and its result is the one that ends the turn.
-           */
-          const answersSentMessage = queryInput.answersSentMessage(msg)
-          if (!awaitingBackground && !answersSentMessage) {
-            continue
           }
           queryInput.observeResult()
           /*

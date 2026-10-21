@@ -262,6 +262,50 @@ it('skips a result that answers no message the bridge sent, and ends on the one 
   expect(finish.harnessMetadata).toEqual({ 'claude-code': { costUsd: 0.02, sessionId: 'sess-1' } })
 })
 
+it.each([
+  ['an is_error success', followUpResult({ is_error: true, result: 'the background task failed' })],
+  ['an error subtype', followUpResult({ subtype: 'error_during_execution', errors: ['the background task failed'] })],
+])('does not fail the turn on %s result that answers no message the bridge sent', async (_, stray) => {
+  const query = createFakeQuery([
+    initMessage(),
+    stray,
+    resultMessage({ result: 'answered the prompt', total_cost_usd: 0.02 }),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'document the feature' })
+  const finish = await client.waitFor(frame => frame.type === 'finish')
+
+  expect(client.frames.some(frame => frame.type === 'error')).toBe(false)
+  expect(finish.stopped).toBe('completed')
+  expect(finish.harnessMetadata).toEqual({ 'claude-code': { costUsd: 0.02, sessionId: 'sess-1' } })
+})
+
+it('does not end the turn on an error latched by a turn whose result it skipped', async () => {
+  const query = createFakeQuery([
+    initMessage(),
+    {
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'the background task hit a limit' }] },
+      error: 'rate_limit',
+      parent_tool_use_id: null,
+      session_id: 'sess-1',
+    },
+    followUpResult({ result: '' }),
+    // An empty result is what a structured_output answer leaves behind.
+    resultMessage({ result: '', total_cost_usd: 0.02 }),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'document the feature' })
+  const finish = await client.waitFor(frame => frame.type === 'finish')
+
+  expect(client.frames.some(frame => frame.type === 'error')).toBe(false)
+  expect(finish.stopped).toBe('completed')
+})
+
 it('still ends the woken turn of a CLI that echoes the ids it was sent', async () => {
   const fake = createFakeQuery([initMessage()])
   const query = withInitialMessageId(fake)

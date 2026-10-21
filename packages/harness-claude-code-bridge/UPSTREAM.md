@@ -321,6 +321,13 @@ disposing the query with `return()` on every ending, and forwarding
     woken-turn result, which answers a `task-notification`, so the woken turn
     would never end. Here it yields while the turn waits on background work,
     and a result it skips changes neither the wait nor the live task count.
+    It also runs first in the `result` branch, where upstream runs it after
+    the error and usage handling: a skipped result's `is_error` or error
+    subtype would otherwise fail the turn it does not belong to, and its usage
+    would count toward it. Nor does a skipped result's `terminal_reason` or
+    `deferred_tool_use` become the turn's ending, and the error its turn
+    latched is dropped. It only closes the step it streamed, with that step's
+    own usage.
     This amendment takes no number of its own.
 
 The 1.0.162 re-vendor took five upstream changes:
