@@ -327,6 +327,79 @@ it('emits one paired call for a web search Codex sent without an id', async () =
   client.close()
 })
 
+it('emits one paired call for a command Codex sent without an id', async () => {
+  const codex = createFakeCodex([
+    threadStarted(),
+    {
+      type: 'item.started',
+      item: { type: 'command_execution', command: 'ls', status: 'in_progress' },
+    },
+    {
+      type: 'item.completed',
+      item: {
+        type: 'command_execution',
+        command: 'ls',
+        aggregated_output: 'README.md\n',
+        exit_code: 0,
+        status: 'completed',
+      },
+    },
+    turnCompleted(),
+  ])
+  host = await startHost({ codex: codex.factory })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'list the files' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const calls = client.frames.filter(frame => frame.type === 'tool-call')
+  const results = client.frames.filter(frame => frame.type === 'tool-result')
+  expect(calls.map(call => call.input)).toEqual([JSON.stringify({ command: 'ls' })])
+  expect(results.map(result => result.toolCallId)).toEqual([calls[0]?.toolCallId])
+  client.close()
+})
+
+it('emits one paired call for an MCP tool call Codex sent without an id', async () => {
+  const codex = createFakeCodex([
+    threadStarted(),
+    {
+      type: 'item.started',
+      item: {
+        type: 'mcp_tool_call',
+        server: 'docs',
+        tool: 'search',
+        arguments: { q: 'codex' },
+        status: 'in_progress',
+      },
+    },
+    {
+      type: 'item.completed',
+      item: {
+        type: 'mcp_tool_call',
+        server: 'docs',
+        tool: 'search',
+        arguments: { q: 'codex' },
+        result: { content: [], structured_content: { hits: 1 } },
+        status: 'completed',
+      },
+    },
+    turnCompleted(),
+  ])
+  host = await startHost({ codex: codex.factory })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'search the docs' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const calls = client.frames.filter(frame => frame.type === 'tool-call')
+  const results = client.frames.filter(frame => frame.type === 'tool-result')
+  expect(calls.map(call => [call.toolName, call.input])).toEqual([
+    ['mcp__docs__search', JSON.stringify({ q: 'codex' })],
+  ])
+  expect(results.map(result => result.toolCallId)).toEqual([calls[0]?.toolCallId])
+  client.close()
+})
+
 it('reports an error item as a warning rather than an ending', async () => {
   const codex = createFakeCodex([
     threadStarted(),

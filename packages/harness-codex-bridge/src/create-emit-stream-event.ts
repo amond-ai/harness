@@ -201,7 +201,7 @@ export function createEmitStreamEvent({
 
     if (item.type === 'command_execution') {
       const nativeName = 'shell'
-      if (event.type === 'item.started') {
+      const sendCall = (): void => {
         send({
           type: 'tool-call',
           toolCallId: id,
@@ -211,7 +211,21 @@ export function createEmitStreamEvent({
           providerExecuted: true,
         })
       }
+      /*
+       * A command Codex sent without an id gets a fresh fallback id per event,
+       * so a call emitted at `item.started` would never pair with its result.
+       * It waits for `item.completed`, which carries the command too, and is
+       * emitted there with the result (patch 38).
+       */
+      if (event.type === 'item.started') {
+        if (item.id !== undefined) {
+          sendCall()
+        }
+      }
       else if (event.type === 'item.completed') {
+        if (item.id === undefined) {
+          sendCall()
+        }
         send({
           type: 'tool-result',
           toolCallId: id,
@@ -232,7 +246,7 @@ export function createEmitStreamEvent({
 
     if (item.type === 'mcp_tool_call') {
       const toolName = getMcpToolName(item)
-      if (event.type === 'item.started') {
+      const sendCall = (): void => {
         send({
           type: 'tool-call',
           toolCallId: id,
@@ -243,7 +257,16 @@ export function createEmitStreamEvent({
           dynamic: true,
         })
       }
+      // Held until `item.completed` without an id, as a command is above.
+      if (event.type === 'item.started') {
+        if (item.id !== undefined) {
+          sendCall()
+        }
+      }
       else if (event.type === 'item.completed') {
+        if (item.id === undefined) {
+          sendCall()
+        }
         send({
           type: 'tool-result',
           toolCallId: id,
