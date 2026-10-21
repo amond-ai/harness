@@ -29,6 +29,7 @@
  * makes five calls creates one sandbox.
  */
 import type {
+  SandboxNetworkPolicy,
   SandboxPortEndpoint,
   SandboxPortEndpointOptions,
   SandboxProvider,
@@ -36,12 +37,18 @@ import type {
 } from '@amond-ai/sandbox'
 import type { E2bSandboxLike, E2bSessionOptions } from './e2b-session'
 import { createE2bSession } from './e2b-session'
+import { applyE2bNetworkUpdate, toE2bNetworkUpdate } from './network-policy'
 
 /** The `Sandbox` statics this provider needs, structural so tests can stand in for them. */
 export interface E2bSandboxApi {
   create: (
     template: string,
-    opts: { metadata?: Record<string, string>, envs?: Record<string, string>, timeoutMs?: number },
+    opts: {
+      metadata?: Record<string, string>
+      envs?: Record<string, string>
+      timeoutMs?: number
+      network?: { allowPublicTraffic?: boolean }
+    },
   ) => Promise<E2bSandboxLike>
   connect: (sandboxId: string) => Promise<E2bSandboxLike>
   list: (query: { pleaseSandboxId?: string }) => Promise<{ sandboxId: string }[]>
@@ -65,7 +72,17 @@ export interface E2bProviderOptions extends Partial<Omit<E2bSessionOptions, 'jou
    * a turn that outlives it keeps its sandbox instead of being stopped under itself.
    */
   timeoutMs?: number
+  /**
+   * `false` makes the sandbox's ports answer only requests carrying its traffic access token,
+   * which {@link SandboxProvider.portEndpoint} then returns in `headers`. Applies to sandboxes
+   * this provider creates; one it reattaches to keeps whatever it was created with. Left to
+   * e2b's default (public) when unset. A restricted port answers 403 to a bare URL, so the
+   * harness session's deprecated `getPortUrl`, which drops `headers`, cannot reach it.
+   */
+  allowPublicTraffic?: boolean
 }
+
+const TRAFFIC_ACCESS_TOKEN_HEADER = 'e2b-traffic-access-token'
 
 /** e2b's prebuilt Claude Code image: ships `claude`, invoked as `-p --output-format stream-json`. */
 const DEFAULT_TEMPLATE = 'claude'
@@ -139,6 +156,9 @@ export function createE2bProvider(options: E2bProviderOptions): SandboxProvider 
       metadata: { [SANDBOX_ID_METADATA_KEY]: sandboxId },
       envs: options.envs,
       timeoutMs: options.timeoutMs,
+      ...(options.allowPublicTraffic === undefined
+        ? {}
+        : { network: { allowPublicTraffic: options.allowPublicTraffic } }),
     })
   }
 
@@ -228,7 +248,15 @@ export function createE2bProvider(options: E2bProviderOptions): SandboxProvider 
       const sandbox = await acquire(sandboxId)
       // Never the scheme as asked when it is a plaintext one — {@link TLS_SCHEME} carries why.
       const protocol = TLS_SCHEME[endpointOptions?.protocol ?? DEFAULT_PROTOCOL]
-      return { url: new URL(`${protocol}://${sandbox.getHost(port)}`).toString() }
+      const url = new URL(`${protocol}://${sandbox.getHost(port)}`).toString()
+      const { trafficAccessToken } = sandbox
+      return trafficAccessToken === undefined
+        ? { url }
+        : { url, headers: { [TRAFFIC_ACCESS_TOKEN_HEADER]: trafficAccessToken } }
+    },
+    setNetworkPolicy: async (sandboxId: string, policy: SandboxNetworkPolicy): Promise<void> => {
+      const update = toE2bNetworkUpdate(policy)
+      await applyE2bNetworkUpdate(await acquire(sandboxId), update)
     },
   }
 }

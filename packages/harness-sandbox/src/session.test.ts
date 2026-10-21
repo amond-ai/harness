@@ -1,4 +1,7 @@
-import type { HarnessV1NetworkSandboxSession } from '@ai-sdk/harness'
+import type { HarnessV1NetworkPolicy, HarnessV1NetworkSandboxSession } from '@ai-sdk/harness'
+import type { SandboxNetworkPolicy } from '@amond-ai/sandbox'
+import { HarnessCapabilityUnsupportedError } from '@ai-sdk/harness'
+import { SandboxCapabilityUnsupportedError } from '@amond-ai/sandbox'
 import { describe, expect, it } from 'vitest'
 import { fakeSandboxProvider } from './sandbox.fixtures'
 import { createHarnessSandboxSession } from './session'
@@ -57,6 +60,51 @@ describe('createHarnessSandboxSession', () => {
       const { session: s } = session('sbx-7')
 
       expect(await s.getPortUrl({ port: 3002, protocol: 'https' })).toBe('https://sbx-7.example/3002')
+    })
+  })
+
+  describe('network policy', () => {
+    function withPolicy(apply: (sandboxId: string, policy: SandboxNetworkPolicy) => Promise<void>) {
+      const { provider } = fakeSandboxProvider({ backend: 'fake' })
+      return createHarnessSandboxSession({
+        sandboxes: { ...provider, setNetworkPolicy: apply },
+        sandboxId: 'sbx-7',
+        defaultWorkingDirectory: '/workspace',
+        ports: [],
+      })
+    }
+
+    it('is absent when the provider has no network policy to set', () => {
+      expect(session().session.setNetworkPolicy).toBeUndefined()
+    })
+
+    it('asks the provider to set it for the sandbox this session is bound to', async () => {
+      const applied: { sandboxId: string, policy: SandboxNetworkPolicy }[] = []
+      const policy: HarnessV1NetworkPolicy = { mode: 'custom', allowedHosts: ['api.anthropic.com'] }
+      await withPolicy(async (sandboxId, p) => {
+        applied.push({ sandboxId, policy: p })
+      }).setNetworkPolicy?.(policy)
+
+      expect(applied).toEqual([{ sandboxId: 'sbx-7', policy }])
+    })
+
+    it('reports a backend refusal as the harness\'s capability error', async () => {
+      const refusal = new SandboxCapabilityUnsupportedError('fake', 'cannot deny CIDRs')
+      const set = withPolicy(async () => {
+        throw refusal
+      }).setNetworkPolicy?.({ mode: 'deny-all' })
+
+      await expect(set).rejects.toBeInstanceOf(HarnessCapabilityUnsupportedError)
+      await expect(set).rejects.toMatchObject({ message: 'cannot deny CIDRs', cause: refusal })
+    })
+
+    it('passes any other failure through untouched', async () => {
+      const failure = new Error('transport reset')
+      const set = withPolicy(async () => {
+        throw failure
+      }).setNetworkPolicy?.({ mode: 'allow-all' })
+
+      await expect(set).rejects.toBe(failure)
     })
   })
 

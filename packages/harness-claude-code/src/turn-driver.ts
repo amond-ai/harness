@@ -465,9 +465,10 @@ export interface TurnDriverRun {
    * Passed in rather than built here because opening the socket is the one part that cannot run
    * outside workerd (`sdk-socket.ts` reaches `@cloudflare/sandbox`), and this module has to stay
    * importable from `bun test`. `run-workflow.ts` is workerd-only already, so it passes
-   * `turnHostSocketOpener(env)`; the `cli` driver never calls it.
+   * `turnHostSocketOpener(env)`; the `cli` driver never calls it. `headers` are the endpoint's
+   * own, as `SdkTurnDriverInput.openSocket` describes.
    */
-  openSocket: (url: string) => Promise<WsLike>
+  openSocket: (url: string, headers?: Readonly<Record<string, string>>) => Promise<WsLike>
   /**
    * Which driver to build — the run's own, pinned at dispatch, never `TURN_DRIVER` read here.
    *

@@ -32,7 +32,7 @@ injection points below, and the package's own test suite runs in-process.
 | Injection | Where | Why it is not decided here |
 |---|---|---|
 | `SandboxProvider` | `turnDriver(provider, …)` | Which container, on which backend — and it is resolved *per use*, never held across a step. |
-| `openSocket(endpoint)` | `TurnDriverRun.openSocket` | How a bridge endpoint is dialed: the standard `WebSocket` on most runtimes, `@amond-ai/harness-transport-cloudflare` where the port is private and reachable only through `wsConnect`. |
+| `openSocket(url, headers?)` | `TurnDriverRun.openSocket` | How a bridge endpoint is dialed: the standard `WebSocket` on most runtimes, `@amond-ai/harness-transport-cloudflare` where the port is private and reachable only through `wsConnect`. Send `headers` with the upgrade — a restricted port (e2b's traffic access token, Daytona's preview token) refuses a dial without them. |
 | `claudeArgv(turn)` | `TurnDriverRun.claudeArgv` | What a `claude` turn is invoked with — flags, plugins, settings sources — is the deployment's policy. `cli` only. |
 | `settingSources` | `TurnDriverRun.settingSources` | The same list, as the `sdk` host's `start` frame carries it. |
 | `LiveMirror` | `TurnAwaitSpec.mirror` / `TurnRoundSpec.mirror` | Where the turn's bytes are published (R2, a file, nothing) and how they are masked. |
@@ -51,7 +51,8 @@ import { createHarnessSandboxProvider } from '@amond-ai/harness-sandbox'
 
 const agent = new HarnessAgent({
   harness: createClaudeCode({
-    // `sandboxes` is an @amond-ai/sandbox provider, `openSocket` dials a bridge endpoint,
+    // `sandboxes` is an @amond-ai/sandbox provider, `openSocket` dials a bridge endpoint
+    // with the headers it is handed,
     // `config` is the TurnDriverConfig thresholds, and `env` is the only way a credential
     // reaches a turn.
     sandboxes,

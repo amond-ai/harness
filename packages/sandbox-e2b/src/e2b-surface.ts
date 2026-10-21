@@ -76,7 +76,25 @@ export interface E2bSandboxLike {
    * once the sandbox is in hand.
    */
   getHost: (port: number) => string
+  /**
+   * The token a request to {@link getHost} must carry when the sandbox was created with
+   * `network.allowPublicTraffic: false`; absent for a sandbox whose ports are open. e2b hands
+   * it back on `connect` as well as `create`, so a reattached sandbox still has it.
+   */
+  readonly trafficAccessToken?: string
   /** Re-applies the sandbox's lifetime, restarting e2b's countdown from now. */
   setTimeout: (timeoutMs: number) => Promise<void>
+  getInfo: () => Promise<{ network?: { egressProxy?: unknown, rules?: Record<string, unknown> } }>
+  /**
+   * Replaces the sandbox's egress configuration *whole* — e2b clears every field the update
+   * leaves out, an egress proxy and per-host rules included.
+   */
+  updateNetwork: (network: E2bNetworkUpdate) => Promise<void>
   kill: () => Promise<boolean>
+}
+
+export interface E2bNetworkUpdate {
+  allowOut?: string[]
+  denyOut?: string[]
+  allowInternetAccess?: boolean
 }

@@ -4,10 +4,10 @@
  * The infra surface is where the two models diverge most, and each divergence is settled
  * here rather than pushed onto a backend:
  *
- * - **Ports are asked of the provider, not the session.** The contract puts `portEndpoint`
- *   on `SandboxProvider` on purpose — `SandboxSession` is satisfied by
- *   `@cloudflare/sandbox`'s own client with no mapping layer, and one added method would end
- *   that. So this session closes over the provider and its id.
+ * - **Ports and network policy are asked of the provider, not the session.** The contract
+ *   puts `portEndpoint` and `setNetworkPolicy` on `SandboxProvider` on purpose —
+ *   `SandboxSession` is satisfied by `@cloudflare/sandbox`'s own client with no mapping layer,
+ *   and one added method would end that. So this session closes over the provider and its id.
  * - **`stop` and `destroy` are the same call.** The contract has one `destroy()`. The harness
  *   requires both to be idempotent and to survive an already-stopped sandbox, so a *successful*
  *   teardown is latched and concurrent callers share the one in flight. A failed one is not:
@@ -22,8 +22,10 @@
  *   hands that view to user-tool `execute()` calls; a tool that reaches past the declared
  *   type must find nothing there, not a working `stop`.
  */
-import type { HarnessV1NetworkSandboxSession } from '@ai-sdk/harness'
+import type { HarnessV1NetworkPolicy, HarnessV1NetworkSandboxSession } from '@ai-sdk/harness'
 import type { SandboxProvider } from '@amond-ai/sandbox'
+import { HarnessCapabilityUnsupportedError } from '@ai-sdk/harness'
+import { SandboxCapabilityUnsupportedError } from '@amond-ai/sandbox'
 import { createFileSurface } from './files'
 import { createProcessSurface } from './process'
 
@@ -69,6 +71,18 @@ export function createHarnessSandboxSession(
   const getPortEndpoint: HarnessV1NetworkSandboxSession['getPortEndpoint'] = ({ port, protocol }) =>
     sandboxes.portEndpoint(sandboxId, port, { protocol })
 
+  const setNetworkPolicy = async (policy: HarnessV1NetworkPolicy): Promise<void> => {
+    try {
+      await sandboxes.setNetworkPolicy?.(sandboxId, policy)
+    }
+    catch (cause) {
+      if (cause instanceof SandboxCapabilityUnsupportedError) {
+        throw new HarnessCapabilityUnsupportedError({ message: cause.message, cause })
+      }
+      throw cause
+    }
+  }
+
   return {
     ...restricted,
     id: sandboxId,
@@ -79,9 +93,10 @@ export function createHarnessSandboxSession(
     getPortUrl: async endpointOptions => (await getPortEndpoint(endpointOptions)).url,
     stop: destroy,
     destroy,
-    // `setNetworkPolicy`, `setPorts`, `setRequestTransformations` and
-    // `addRequestTransformations` are omitted, the way the harness's own just-bash provider
-    // omits them: the contract has no primitive to answer any of them with. The consequence
+    ...(sandboxes.setNetworkPolicy ? { setNetworkPolicy } : {}),
+    // `setPorts`, `setRequestTransformations` and `addRequestTransformations` are omitted,
+    // the way the harness's own just-bash provider omits them: the contract has no primitive
+    // to answer any of them with. The consequence
     // is not cosmetic — an adapter calls `addRequestTransformations?.()` and falls back to
     // legacy credential forwarding when it is absent, so a session here gets that fallback.
     restricted: () => restricted,

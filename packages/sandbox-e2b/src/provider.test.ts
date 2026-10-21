@@ -1,5 +1,6 @@
 import type { E2bSandboxLike } from './e2b-session'
 import type { E2bSandboxApi } from './provider'
+import { SandboxCapabilityUnsupportedError } from '@amond-ai/sandbox'
 import { describe, expect, it } from 'vitest'
 import { encode, fakeSandbox, ROOT } from './e2b-session.fixtures'
 import { createE2bProvider } from './provider'
@@ -24,6 +25,8 @@ function stubSandbox(sandboxId: string, killed: string[] = []): E2bSandboxLike {
     },
     getHost: port => `${String(port)}-${sandboxId}.e2b.app`,
     setTimeout: async () => {},
+    getInfo: async () => ({}),
+    updateNetwork: async () => {},
     kill: async () => {
       killed.push(sandboxId)
       return true
@@ -356,6 +359,52 @@ describe('createE2bProvider', () => {
     expect(endpoint.headers).toBeUndefined()
   })
 
+  /**
+   * Read off the sandbox, not off the provider's `allowPublicTraffic`: this provider is left
+   * at the default, and the sandbox it reattaches to was created restricted by an earlier one.
+   */
+  it('carries the traffic access token of a sandbox whose ports are restricted', async () => {
+    const { api } = fakeApi({ 'run-42': 'sbx-existing' })
+    const connect = api.connect
+    api.connect = async sandboxId => ({ ...await connect(sandboxId), trafficAccessToken: 'tok-1' })
+    const endpoint = await createE2bProvider({ api }).portEndpoint('run-42', 3001, { protocol: 'ws' })
+
+    expect(endpoint).toEqual({
+      url: 'wss://3001-sbx-existing.e2b.app/',
+      headers: { 'e2b-traffic-access-token': 'tok-1' },
+    })
+  })
+
+  it('applies a network policy to the sandbox e2b holds for the id', async () => {
+    const { api, calls } = fakeApi({ 'run-42': 'sbx-existing' })
+    const updates: unknown[] = []
+    const connect = api.connect
+    api.connect = async sandboxId => ({
+      ...await connect(sandboxId),
+      updateNetwork: async (update) => {
+        updates.push(update)
+      },
+    })
+    await createE2bProvider({ api }).setNetworkPolicy?.('run-42', { mode: 'deny-all' })
+
+    expect(calls.connected).toEqual(['sbx-existing'])
+    expect(updates).toEqual([{ allowInternetAccess: false }])
+  })
+
+  /** Refused on the mapping alone: creating a sandbox only to refuse the policy on it is waste. */
+  it('refuses a policy e2b cannot express without acquiring a sandbox', async () => {
+    const { api, calls } = fakeApi()
+    const set = createE2bProvider({ api }).setNetworkPolicy?.('run-42', {
+      mode: 'custom',
+      allowedHosts: ['api.anthropic.com'],
+      deniedCIDRs: ['169.254.169.254/32'],
+    })
+
+    await expect(set).rejects.toBeInstanceOf(SandboxCapabilityUnsupportedError)
+    expect(calls.listed).toEqual([])
+    expect(calls.created).toEqual([])
+  })
+
   it('forwards the follow polling intervals to the sessions it opens', async () => {
     // `E2bProviderOptions` accepts both — it extends the session's options — so a deployment
     // that tunes the tail's cadence has every reason to expect them to arrive. They were not
@@ -404,5 +453,25 @@ describe('createE2bProvider', () => {
 
     expect(calls.created[0].opts.envs).toEqual({ ANTHROPIC_API_KEY: 'k' })
     expect(calls.created[0].opts.timeoutMs).toBe(3_600_000)
+  })
+
+  it('creates a restricted sandbox when public traffic is turned off', async () => {
+    const { api, calls } = fakeApi()
+    const create = api.create
+    api.create = async (template, opts) => ({
+      ...await create(template, opts),
+      ...(opts.network?.allowPublicTraffic === false ? { trafficAccessToken: 'tok-new' } : {}),
+    })
+    const endpoint = await createE2bProvider({ api, allowPublicTraffic: false }).portEndpoint('run-42', 3001, { protocol: 'ws' })
+
+    expect(calls.created[0].opts.network).toEqual({ allowPublicTraffic: false })
+    expect(endpoint.headers).toEqual({ 'e2b-traffic-access-token': 'tok-new' })
+  })
+
+  it('leaves the network to e2b\'s default when public traffic is not configured', async () => {
+    const { api, calls } = fakeApi()
+    await createE2bProvider({ api }).session('run-42').exists('/')
+
+    expect(calls.created[0].opts).not.toHaveProperty('network')
   })
 })

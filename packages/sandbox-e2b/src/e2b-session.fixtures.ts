@@ -236,6 +236,8 @@ export function fakeSandbox(nextPid = 2054): Fake {
     setTimeout: async (timeoutMs) => {
       state.calls.renewed.push(timeoutMs)
     },
+    getInfo: async () => ({}),
+    updateNetwork: async () => {},
     kill: async () => {
       state.killed.sandbox = true
       return true

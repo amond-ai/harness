@@ -35,8 +35,12 @@ export interface SdkTurnDriverInput {
   sandboxId: string
   config: TurnDriverConfig
   runId: string
-  /** Dial one endpoint URL — the consumer's socket opener in production, a scripted one in a test. */
-  openSocket: (url: string) => Promise<WsLike>
+  /**
+   * Dial one endpoint URL — the consumer's socket opener in production, a scripted one in a test.
+   * `headers` are the endpoint's own (`SandboxPortEndpoint.headers`): a backend whose ports are
+   * restricted authenticates the dial with them, so an opener that drops them is refused there.
+   */
+  openSocket: (url: string, headers?: Readonly<Record<string, string>>) => Promise<WsLike>
   /** `settingSources` for the `start` frame, as the consumer names them. */
   settingSources: readonly string[]
   /** Entropy for the per-turn channel token; production passes `crypto.getRandomValues`. */
@@ -94,7 +98,7 @@ export function sdkTurnDriver(input: SdkTurnDriverInput): TurnDriver {
       throw new Error(`sdk turn handle has no port process_id=${handle.processId}`)
     }
     const endpoint = await input.provider.portEndpoint(input.sandboxId, handle.port, { protocol: 'ws' })
-    return await input.openSocket(bridgeEndpointUrl(endpoint.url, handle.token ?? ''))
+    return await input.openSocket(bridgeEndpointUrl(endpoint.url, handle.token ?? ''), endpoint.headers)
   }
 
   return {
