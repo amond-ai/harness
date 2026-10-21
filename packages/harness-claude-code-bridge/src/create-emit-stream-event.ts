@@ -89,7 +89,11 @@ export interface ClaudeStreamEventState {
    * Upstream also keeps `modelResponseStreaming`, which toggles with this
    * flag at the same `message_start` and `message_stop`; this flag stands in
    * for it, so an early `finish-step` is held back until the response ends
-   * and covers every tool call of that response.
+   * and covers every tool call of that response. That holds only when deltas
+   * stream: under `emitDeltas: false` no `message_start` arrives, this flag
+   * is never set, and an approval for a response's first `tool_use` can pause
+   * the step before the response's later `tool_use` blocks arrive. Those get
+   * their own later pause.
    */
   responseOpen: boolean
   stepOpen: boolean

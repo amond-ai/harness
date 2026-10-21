@@ -243,8 +243,9 @@ function createApprovalResolver(input: {
   toolName: string,
   toolInput: Record<string, unknown>,
   approvalId: string,
+  agentId: string | undefined,
 ) => Promise<Record<string, unknown>> {
-  return async (toolName, toolInput, approvalId) => {
+  return async (toolName, toolInput, approvalId, agentId) => {
     if (input.approvalPolicy === 'deny') {
       return {
         behavior: 'deny',
@@ -278,11 +279,20 @@ function createApprovalResolver(input: {
       approvalId,
       toolCallId: approvalId,
     })
-    input.markWaitingOnHostInput(approvalId)
+    // A subagent's call (`agentID` set) is not marked: its parent's Task call
+    // already holds the parent step open, and the mapper drops the subagent's
+    // messages, so its result would never take the id back out of the parent
+    // step. Upstream has the same gap.
+    const waitsInParentStep = agentId === undefined
+    if (waitsInParentStep) {
+      input.markWaitingOnHostInput(approvalId)
+    }
 
-    const decision = await decisionPromise.finally(() =>
-      input.clearWaitingOnHostInput(approvalId),
-    )
+    const decision = await decisionPromise.finally(() => {
+      if (waitsInParentStep) {
+        input.clearWaitingOnHostInput(approvalId)
+      }
+    })
     return decision.approved
       ? { behavior: 'allow', updatedInput: toolInput, toolUseID: approvalId }
       : {
@@ -344,8 +354,8 @@ function createPermissionOptions(input: {
             canUseTool: (
               toolName: string,
               toolInput: Record<string, unknown>,
-              options: { toolUseID: string },
-            ) => resolveApproval(toolName, toolInput, options.toolUseID),
+              options: { toolUseID: string, agentID?: string },
+            ) => resolveApproval(toolName, toolInput, options.toolUseID, options.agentID),
           }),
     }
   }
@@ -377,7 +387,7 @@ function createPermissionOptions(input: {
     canUseTool: async (
       toolName: string,
       toolInput: Record<string, unknown>,
-      options: { toolUseID: string },
+      options: { toolUseID: string, agentID?: string },
     ) => {
       if (
         !inactiveNativeTools.has(toolName)
@@ -388,7 +398,7 @@ function createPermissionOptions(input: {
       ) {
         return { behavior: 'allow', updatedInput: toolInput }
       }
-      return resolveApproval(toolName, toolInput, options.toolUseID)
+      return resolveApproval(toolName, toolInput, options.toolUseID, options.agentID)
     },
   }
 }
@@ -515,7 +525,12 @@ function createQuestionPreToolUseHook(input: {
     })
 
     const questionKey = claudeCodeQuestionKey(nativeInput)
-    input.markWaitingOnHostInput(toolCallId)
+    // A subagent's question (`agent_id` set) is not marked, for the reason
+    // the approval resolver gives: the parent step would never drop its id.
+    const waitsInParentStep = hookInput.agent_id === undefined
+    if (waitsInParentStep) {
+      input.markWaitingOnHostInput(toolCallId)
+    }
     const result = await input.turn
       .requestToolResult({
         toolCallId,
@@ -531,7 +546,11 @@ function createQuestionPreToolUseHook(input: {
           )
         },
       })
-      .finally(() => input.clearWaitingOnHostInput(toolCallId))
+      .finally(() => {
+        if (waitsInParentStep) {
+          input.clearWaitingOnHostInput(toolCallId)
+        }
+      })
     const nativeResult = toNativeQuestionResult({
       result,
       nativeInput,

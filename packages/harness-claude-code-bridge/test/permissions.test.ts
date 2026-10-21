@@ -328,3 +328,54 @@ it('neither pends nor pauses the step on the host under approvalPolicy deny', as
   expect(client.frames.some(frame => frame.type === 'tool-approval-request')).toBe(false)
   expect(finishReasons(client.frames)).toEqual(['stop'])
 })
+
+it('leaves a subagent\'s approval out of the parent step, which closes on the Task result', async () => {
+  const { options, client, query } = await startAndConnect({ permissionMode: 'default', approvalPolicy: 'forward' })
+  const rawOf = (role: string, marker: string) => (frame: Frame): boolean => frame.type === 'raw'
+    && (frame.rawValue as { type?: string }).type === role
+    && JSON.stringify(frame.rawValue).includes(marker)
+
+  query.push(MESSAGE_START)
+  query.push({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id: 'task', name: 'Task', input: { prompt: 'look around' } }] },
+  })
+  query.push(MESSAGE_STOP)
+  await client.waitFor(frame => frame.type === 'tool-call' && frame.toolCallId === 'task')
+
+  // The SDK asks about the subagent's own calls through the same `canUseTool`, naming the agent.
+  const child = options.canUseTool?.('Bash', PWD, {
+    signal: new AbortController().signal,
+    toolUseID: 'child',
+    agentID: 'agent-1',
+  } as never)
+  await client.waitFor(frame => frame.type === 'tool-approval-request' && frame.approvalId === 'child')
+  client.send({ type: 'tool-approval-response', approvalId: 'child', approved: true })
+  expect(await child).toEqual({ behavior: 'allow', updatedInput: PWD, toolUseID: 'child' })
+
+  query.push({
+    type: 'user',
+    parent_tool_use_id: 'task',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'child', content: '/work' }] },
+  })
+  query.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'task', content: 'task-done' }] } })
+  query.push(MESSAGE_START)
+  query.push({
+    type: 'assistant',
+    message: { content: [{ type: 'text', text: 'later-response' }], usage: { input_tokens: 7, output_tokens: 3 } },
+  })
+  query.push(MESSAGE_STOP)
+  query.push(resultMessage())
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const steps = client.frames.filter(frame => frame.type === 'finish-step')
+  expect(finishReasons(client.frames)).toEqual(['stop', 'stop'])
+  const taskResult = client.frames.findIndex(rawOf('user', 'task-done'))
+  const later = client.frames.findIndex(rawOf('assistant', 'later-response'))
+  // The parent's Task step ends on the Task result, before the later response...
+  expect(client.frames.indexOf(steps[0]!)).toBeGreaterThan(taskResult)
+  expect(client.frames.indexOf(steps[0]!)).toBeLessThan(later)
+  // ...which gets a step, and usage, of its own.
+  expect(client.frames.indexOf(steps[1]!)).toBeGreaterThan(later)
+  expect(steps[1]!.usage).toMatchObject({ inputTokens: { total: 7 }, outputTokens: { total: 3 } })
+})

@@ -90,7 +90,10 @@ Each is a separate commit in this repository and is intended to go upstream.
    host (`markWaitingOnHostInput`) until the decision settles. Upstream's
    `finishApprovalStep` is gone with it. Under `'deny'` the resolver answers
    before any of that, so a denied call marks nothing and no early
-   `finish-step` (patch 27) follows it.
+   `finish-step` (patch 27) follows it. A subagent's call (`canUseTool` with
+   `agentID`) is asked the same way but not marked, because the mapper drops
+   the subagent's messages and its result would never close the parent step
+   it was marked in. Upstream has the same gap.
 10. `feat(turn-host): fail a routed turn whose command did not load` — a
     routed prompt whose command is missing from `system`/`init`'s
     `slash_commands` fails the turn before a token is spent.
@@ -207,7 +210,12 @@ Each is a separate commit in this repository and is intended to go upstream.
     `finish-step` exemption. Upstream's `modelResponseStreaming` is not
     carried: it toggles with `responseOpen` (0291550) at the same
     `message_start` and `message_stop`, and `closeStepIfReady` already returns
-    while `responseOpen` is set.
+    while `responseOpen` is set. Holding the pause to the response's end, so
+    one pause covers all of that response's calls, works only when deltas
+    stream. Under `emitDeltas: false` no `message_start` arrives and
+    `responseOpen` is never set, so an approval for a response's first
+    `tool_use` can pause the step before the response's later `tool_use`
+    blocks arrive, and those get their own later pause.
 
 28. `fix(turn-host): fail a turn whose success result the CLI flagged as an
     error` — upstream's `is_error` check, applied only when the ending would
@@ -281,9 +289,11 @@ Each is a separate commit in this repository and is intended to go upstream.
     call as waiting on the host, before `requestToolResult`, and clears the
     mark when the request settles. A question the policy decided, or one with
     no host to answer it, is reported through the runtime's `tool-call` and
-    pauses nothing. The hook's set of reported calls is now the stream state's
-    `emittedToolCallIds`, which upstream adds for the mapper and the approval
-    path. The mapper, the approval path and the hook share it, so each native
+    pauses nothing. A subagent's forwarded question (hook input with
+    `agent_id`) is asked but not marked, for the reason patch 9 gives, and
+    upstream has the same gap. The hook's set of reported calls is now the
+    stream state's `emittedToolCallIds`, which upstream adds for the mapper
+    and the approval path. The mapper, the approval path and the hook share it, so each native
     call gets one `tool-call` from whichever of them sees it first. Like
     upstream, the mapper no longer skips a call whose approval was requested
     (the `approvalRequestedToolUseIds` check is gone) and relies on the shared
