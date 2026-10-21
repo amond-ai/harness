@@ -105,7 +105,8 @@ Nothing in the set may depend on `apps/*`, `@pleaseai/agent-core`, `@pleaseai/sa
 every run. External dependencies are unconstrained — `harness-transport-cloudflare` keeps
 `@cloudflare/sandbox` and `sandbox-e2b` keeps `e2b`, both of which travel with their manifests.
 Runtime coupling is constrained, though: only `harness-transport-cloudflare`,
-`harness-bridge-runtime` and `harness-claude-code-bridge` may name a runtime, and the same test
+`sandbox-cloudflare`, `harness-bridge-runtime`, `harness-claude-code-bridge` and
+`harness-codex-bridge` may name a runtime, and the same test
 holds every other member to no `@cloudflare/*` dependency and no `cloudflare:`/`node:`/`bun:`
 import — with one module-level exception, `sandbox-local/src/node-host.ts`. That exception makes
 `sandbox-local` host-process-only rather than portable: its package entry re-exports

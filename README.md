@@ -29,6 +29,7 @@ out.
 | `@amond-ai/harness-transport` | the orchestrator | The `WsLike` socket shape, the upgrade headers, and a socket opener built on the standard `WebSocket` constructor. Deno, Node 22+, Bun, and browsers dial with this. |
 | `@amond-ai/harness-transport-cloudflare` | Cloudflare Workers | The opener for a Cloudflare Sandbox, whose ports are private and reached through `Sandbox.wsConnect`, plus the workerd `fetch` upgrade path. |
 | `@amond-ai/sandbox` | both | The sandbox contract: `SandboxProvider`, `SandboxSession`, `SandboxProcessHandle`, files, logs, and `portEndpoint`. No dependencies. |
+| `@amond-ai/sandbox-cloudflare` | Cloudflare Workers | A Cloudflare Sandbox backend for the contract. A naming layer over `getSandbox`, whose client satisfies the contract with no mapping, plus a port endpoint tagged for `harness-transport-cloudflare`. |
 | `@amond-ai/sandbox-e2b` | the orchestrator | An e2b backend for the contract. Journals a process's output to the sandbox filesystem so it survives the process and a reconnect. |
 | `@amond-ai/sandbox-local` | the orchestrator | A local-process backend for the contract, for a desktop app that runs on the user's own machine. Journals the transcript, pid and exit status to disk and verifies liveness against the kernel, so a relaunched app finds the turn it started. Not an isolation boundary. |
 | `@amond-ai/sandbox-vercel` | the orchestrator | A Vercel Sandbox backend for the contract. Journals a process's output to the sandbox filesystem, because Vercel forgets a command across a session resume and exposes no process list at all. |
@@ -139,14 +140,14 @@ whose version equals the CLI's.
 
 | Runtime | Driver | Socket opener | Sandbox provider |
 | --- | --- | --- | --- |
-| Cloudflare Workers | `harness-claude-code` | `harness-transport-cloudflare` | Cloudflare Sandbox (in the consuming app today), e2b |
+| Cloudflare Workers | `harness-claude-code` | `harness-transport-cloudflare` | Cloudflare Sandbox, e2b |
 | Vercel (Node) | `harness-claude-code` | `harness-transport` | Vercel Sandbox, e2b |
 | Deno desktop | `harness-claude-code` | `harness-transport` | local process, e2b; Docker is planned |
 | Node, Bun | `harness-claude-code` | `harness-transport` | local process, e2b |
 
-The only runtime-specific packages are the Cloudflare transport and the two halves of the host —
-the shared bridge runtime and the Claude adapter on it — which run on Node inside the image, plus
-one module of `sandbox-local`, whose subject is the machine and which therefore cannot be written
+The only runtime-specific packages are the Cloudflare transport and sandbox backend, and the
+host — the shared bridge runtime and the Claude and Codex adapters on it — which runs on Node
+inside the image, plus one module of `sandbox-local`, whose subject is the machine and which therefore cannot be written
 without host primitives. Everything else has no `node:`, `bun:`, or `cloudflare:` import, and
 `closure.test.ts` asserts exactly that on every run.
 

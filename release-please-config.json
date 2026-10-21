@@ -46,6 +46,11 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true
     },
+    "packages/sandbox-cloudflare": {
+      "release-type": "node",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true
+    },
     "packages/sandbox-daytona": {
       "release-type": "node",
       "changelog-path": "CHANGELOG.md",
