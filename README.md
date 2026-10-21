@@ -145,10 +145,9 @@ whose version equals the CLI's.
 | Deno desktop | `harness-claude-code` | `harness-transport` | local process, e2b; Docker is planned |
 | Node, Bun | `harness-claude-code` | `harness-transport` | local process, e2b |
 
-The only runtime-specific packages are the Cloudflare transport and sandbox backend, and the two
-halves of the host — the shared bridge runtime and the Claude adapter on it — which run on Node
-inside the image, plus
-one module of `sandbox-local`, whose subject is the machine and which therefore cannot be written
+The only runtime-specific packages are the Cloudflare transport and sandbox backend, and the
+host — the shared bridge runtime and the Claude and Codex adapters on it — which runs on Node
+inside the image, plus one module of `sandbox-local`, whose subject is the machine and which therefore cannot be written
 without host primitives. Everything else has no `node:`, `bun:`, or `cloudflare:` import, and
 `closure.test.ts` asserts exactly that on every run.
 

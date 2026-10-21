@@ -17,14 +17,14 @@ export function createCloudflareProvider(
     backend: 'cloudflare',
     session: (sandboxId: string): SandboxSession =>
       getSandbox(namespace, sandboxId, SANDBOX_OPTIONS),
-    portEndpoint: (
+    portEndpoint: async (
       sandboxId: string,
       port: number,
       options?: SandboxPortEndpointOptions,
     ): Promise<SandboxPortEndpoint> => {
       const url = new URL(`${options?.protocol ?? DEFAULT_PROTOCOL}://localhost:${String(port)}/`)
       url.searchParams.set(SANDBOX_ID_PARAM, sandboxId)
-      return Promise.resolve({ url: url.toString() })
+      return { url: url.toString() }
     },
   } satisfies SandboxProvider
 }
