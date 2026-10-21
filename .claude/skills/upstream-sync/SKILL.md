@@ -140,9 +140,9 @@ Work in a worktree on its own branch, not on `main`. For each **take** row:
 
 In each package you moved:
 
-- Point **Packages taken from** at the new versions, and **Commit** and **Tag** too where the
-  file records them (`harness-codex-bridge` takes published packages and has neither). Keep
-  the previous base in a "(re-vendored from …)" note.
+- Point **Packages taken from** at the new versions, and **Commit** and **Tag** at the
+  upstream commit and tag that published them. Keep the previous base in a
+  "(re-vendored from …)" note.
 - Add a paragraph saying what the re-vendor took as-is and where it departs.
 - Update a patch entry when its text no longer matches the code. Do not delete or renumber
   patches. A patch upstream now covers stays in the list, marked as superseded, with the version
