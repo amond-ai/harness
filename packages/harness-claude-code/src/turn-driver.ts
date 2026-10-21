@@ -111,6 +111,12 @@ export interface TurnStartSpec {
    * prompt-cache prefix, which a per-run value would break for a different reason.
    */
   instructions?: string
+  /**
+   * The model this turn runs on, as the consumer named it for the turn. `sdk` only: it is the
+   * `model` of the host's `start` frame, and the `cli` driver does not read it — like
+   * `sessionId`. Absent means the Agent SDK's default model.
+   */
+  model?: string
   /** Which attempt this is — a turn host's port and state directory are derived from it. */
   attempt: number
   /** Working directory for the turn, or `undefined` when the run has no checkout. */

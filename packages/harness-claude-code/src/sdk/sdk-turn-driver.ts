@@ -148,6 +148,7 @@ export function sdkTurnDriver(input: SdkTurnDriverInput): TurnDriver {
         prompt: turn.prompt,
         permissionMode: turn.permissionMode,
         instructions: turn.instructions,
+        model: turn.model,
         // The two ceilings are read off the deployment's config rather than carried on the spec:
         // they are `start`-frame fields the SDK enforces, so the `cli` driver would only have
         // received a member it must ignore. This driver already holds the config.

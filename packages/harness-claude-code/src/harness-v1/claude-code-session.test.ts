@@ -122,6 +122,22 @@ describe('the claude-code harness under HarnessAgent', () => {
     await session.destroy()
   })
 
+  it('sends the model a turn selected on the start frame, and no model key when none was', async () => {
+    const host = fakeHost()
+    const agent = new HarnessAgent({ harness: harnessOver(host), permissionMode: 'allow-all', model: 'claude-x' })
+    const plain = new HarnessAgent({ harness: harnessOver(host), permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    const other = await plain.createSession({ sessionId: 's2', sandboxSession: SANDBOX_SESSION })
+
+    await agent.generate({ session, prompt: 'say hello' })
+    await plain.generate({ session: other, prompt: 'say hello' })
+
+    expect(host.starts[0]).toMatchObject({ model: 'claude-x' })
+    expect(host.starts[1]).not.toHaveProperty('model')
+    await session.destroy()
+    await other.destroy()
+  })
+
   it('suspends mid-stream and continues from that cursor, losing and repeating nothing', async () => {
     const host = fakeHost()
     const agent = new HarnessAgent({ harness: harnessOver(host), permissionMode: 'allow-all' })
