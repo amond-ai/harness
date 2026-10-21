@@ -1,6 +1,9 @@
+import type { Options } from '@anthropic-ai/claude-agent-sdk'
+import type { Frame } from './harness'
 import { sdkPermissionModeSchema } from '@amond-ai/harness-protocol/claude-code'
 import { afterEach, expect, it } from 'vitest'
 import { DENIED_BY_REVIEWER_MESSAGE, DENY_BY_RUN_POLICY_MESSAGE } from '../src/permission-policy'
+import { resultMessage } from './harness'
 import { callPreToolUse, hostRef, startAndCaptureOptions, startAndConnect } from './pre-tool-use'
 
 afterEach(async () => {
@@ -211,4 +214,168 @@ it('bypasses without canUseTool, and the run policy still bites through the hook
     await hostRef.current?.close()
     hostRef.current = undefined
   }
+})
+
+const PWD = { command: 'pwd' }
+
+/** One response calling `Bash` once per id, in parallel. */
+function bashCalls(...ids: string[]): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    message: { content: ids.map(id => ({ type: 'tool_use', id, name: 'Bash', input: PWD })) },
+  }
+}
+
+function bashResults(...ids: string[]): Record<string, unknown> {
+  return {
+    type: 'user',
+    message: { content: ids.map(id => ({ type: 'tool_result', tool_use_id: id, content: '/work' })) },
+  }
+}
+
+const MESSAGE_START = { type: 'stream_event', event: { type: 'message_start' } }
+const MESSAGE_STOP = { type: 'stream_event', event: { type: 'message_stop' } }
+
+/** Ask `canUseTool` about one `Bash` call, the way the SDK does. */
+function askApproval(options: Options, toolUseID: string): Promise<unknown> | undefined {
+  return options.canUseTool?.('Bash', PWD, { signal: new AbortController().signal, toolUseID } as never)
+}
+
+function finishReasons(frames: Frame[]): Array<string | undefined> {
+  return frames
+    .filter(frame => frame.type === 'finish-step')
+    .map(frame => (frame.finishReason as { raw?: string }).raw)
+}
+
+it.each(['before', 'after'] as const)(
+  'emits one tool-call per call when canUseTool runs %s the assistant message reports it',
+  async (ordering) => {
+    const { options, client, query } = await startAndConnect({ permissionMode: 'default', approvalPolicy: 'forward' })
+
+    query.push(MESSAGE_START)
+    if (ordering === 'after') {
+      query.push(bashCalls('first', 'second'))
+      await client.waitFor(frame => frame.type === 'tool-call' && frame.toolCallId === 'second')
+    }
+    const decisions = ['first', 'second'].map(id => askApproval(options, id))
+    await client.waitFor(frame => frame.type === 'tool-approval-request' && frame.approvalId === 'second')
+    if (ordering === 'before') {
+      query.push(bashCalls('first', 'second'))
+    }
+    query.push(MESSAGE_STOP)
+    for (const id of ['first', 'second']) {
+      client.send({ type: 'tool-approval-response', approvalId: id, approved: true })
+    }
+    await Promise.all(decisions)
+    query.push(bashResults('first', 'second'))
+    query.push(resultMessage())
+    await client.waitFor(frame => frame.type === 'finish')
+
+    expect(client.frames.filter(frame => frame.type === 'tool-call').map(frame => frame.toolCallId))
+      .toEqual(['first', 'second'])
+    expect(client.frames.filter(frame => frame.type === 'tool-approval-request').map(frame => frame.approvalId))
+      .toEqual(['first', 'second'])
+  },
+)
+
+it('pauses the step on the host again for an approval asked after the first resolved', async () => {
+  const { options, client, query } = await startAndConnect({ permissionMode: 'default', approvalPolicy: 'forward' })
+
+  query.push(MESSAGE_START)
+  query.push(bashCalls('first', 'second'))
+  await client.waitFor(frame => frame.type === 'tool-call' && frame.toolCallId === 'second')
+  // The CLI dispatches the response's calls one at a time: `second` queues behind `first`'s prompt.
+  const first = askApproval(options, 'first')
+  await client.waitFor(frame => frame.type === 'tool-approval-request' && frame.approvalId === 'first')
+  query.push(MESSAGE_STOP)
+  await client.waitFor(frame => frame.type === 'finish-step')
+  client.send({ type: 'tool-approval-response', approvalId: 'first', approved: true })
+  expect(await first).toEqual({ behavior: 'allow', updatedInput: PWD, toolUseID: 'first' })
+
+  const second = askApproval(options, 'second')
+  const request = await client.waitFor(frame => frame.type === 'tool-approval-request' && frame.approvalId === 'second')
+  const pause = await client.waitFor(frame => frame.type === 'finish-step' && frame.seq! > request.seq!)
+  client.send({ type: 'tool-approval-response', approvalId: 'second', approved: false, reason: 'Not allowed' })
+  expect(await second).toEqual({ behavior: 'deny', message: 'Not allowed', toolUseID: 'second' })
+  query.push(bashResults('first', 'second'))
+  query.push(resultMessage())
+  await client.waitFor(frame => frame.type === 'finish')
+
+  expect(pause.finishReason).toEqual({ unified: 'tool-calls', raw: 'host-input' })
+  // One pause per approval, then the step's own end once both calls have their results.
+  expect(finishReasons(client.frames)).toEqual(['host-input', 'host-input', 'stop'])
+})
+
+it('neither pends nor pauses the step on the host under approvalPolicy deny', async () => {
+  const { options, client, query } = await startAndConnect({ permissionMode: 'default', approvalPolicy: 'deny' })
+
+  query.push(MESSAGE_START)
+  query.push(bashCalls('first'))
+  await client.waitFor(frame => frame.type === 'tool-call' && frame.toolCallId === 'first')
+  expect(await askApproval(options, 'first')).toEqual({
+    behavior: 'deny',
+    message: DENY_BY_RUN_POLICY_MESSAGE,
+    toolUseID: 'first',
+  })
+  query.push(MESSAGE_STOP)
+  query.push({
+    type: 'user',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'first', content: DENY_BY_RUN_POLICY_MESSAGE, is_error: true }] },
+  })
+  query.push(resultMessage())
+  await client.waitFor(frame => frame.type === 'finish')
+
+  expect(client.frames.some(frame => frame.type === 'tool-approval-request')).toBe(false)
+  expect(finishReasons(client.frames)).toEqual(['stop'])
+})
+
+it('leaves a subagent\'s approval out of the parent step, which closes on the Task result', async () => {
+  const { options, client, query } = await startAndConnect({ permissionMode: 'default', approvalPolicy: 'forward' })
+  const rawOf = (role: string, marker: string) => (frame: Frame): boolean => frame.type === 'raw'
+    && (frame.rawValue as { type?: string }).type === role
+    && JSON.stringify(frame.rawValue).includes(marker)
+
+  query.push(MESSAGE_START)
+  query.push({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id: 'task', name: 'Task', input: { prompt: 'look around' } }] },
+  })
+  query.push(MESSAGE_STOP)
+  await client.waitFor(frame => frame.type === 'tool-call' && frame.toolCallId === 'task')
+
+  // The SDK asks about the subagent's own calls through the same `canUseTool`, naming the agent.
+  const child = options.canUseTool?.('Bash', PWD, {
+    signal: new AbortController().signal,
+    toolUseID: 'child',
+    agentID: 'agent-1',
+  } as never)
+  await client.waitFor(frame => frame.type === 'tool-approval-request' && frame.approvalId === 'child')
+  client.send({ type: 'tool-approval-response', approvalId: 'child', approved: true })
+  expect(await child).toEqual({ behavior: 'allow', updatedInput: PWD, toolUseID: 'child' })
+
+  query.push({
+    type: 'user',
+    parent_tool_use_id: 'task',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'child', content: '/work' }] },
+  })
+  query.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'task', content: 'task-done' }] } })
+  query.push(MESSAGE_START)
+  query.push({
+    type: 'assistant',
+    message: { content: [{ type: 'text', text: 'later-response' }], usage: { input_tokens: 7, output_tokens: 3 } },
+  })
+  query.push(MESSAGE_STOP)
+  query.push(resultMessage())
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const steps = client.frames.filter(frame => frame.type === 'finish-step')
+  expect(finishReasons(client.frames)).toEqual(['stop', 'stop'])
+  const taskResult = client.frames.findIndex(rawOf('user', 'task-done'))
+  const later = client.frames.findIndex(rawOf('assistant', 'later-response'))
+  // The parent's Task step ends on the Task result, before the later response...
+  expect(client.frames.indexOf(steps[0]!)).toBeGreaterThan(taskResult)
+  expect(client.frames.indexOf(steps[0]!)).toBeLessThan(later)
+  // ...which gets a step, and usage, of its own.
+  expect(client.frames.indexOf(steps[1]!)).toBeGreaterThan(later)
+  expect(steps[1]!.usage).toMatchObject({ inputTokens: { total: 7 }, outputTokens: { total: 3 } })
 })

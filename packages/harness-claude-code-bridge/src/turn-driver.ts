@@ -21,13 +21,14 @@ import { createClaudeCodeSystemPrompt } from './claude-code-system-prompt'
 import { toClaudeSkillsOption } from './claude-skills-option'
 import { createCompactionLatch } from './compaction-latch'
 import {
+  clearWaitingOnHostInput,
   createClaudeStreamEventState,
   createEmitStreamEvent,
   defaultUsage,
   emitFinishStep,
-  finishApprovalStep,
   isExternalMcpTool,
   mapUsage,
+  markWaitingOnHostInput,
 } from './create-emit-stream-event'
 import {
   createPreToolUseEvaluator,
@@ -229,17 +230,22 @@ function createApprovalResolver(input: {
   approvalPolicy: 'deny' | 'forward'
   turn: BridgeTurn
   emit: Emit
-  finishApprovalStep: (approvalId: string) => void
+  markWaitingOnHostInput: (toolUseId: string) => void
+  clearWaitingOnHostInput: (toolUseId: string) => void
   nativeToolCallNames: Map<string, string>
   approvalRequestedToolUseIds: Set<string>
-  /** Calls the `PreToolUse` hook already reported; their approval reuses that `tool-call`. */
-  reportedToolCallIds: ReadonlySet<string>
+  /**
+   * Calls a `tool-call` was already emitted for — by the stream mapper or the
+   * `PreToolUse` hook; their approval reuses that `tool-call`.
+   */
+  emittedToolCallIds: Set<string>
 }): (
   toolName: string,
   toolInput: Record<string, unknown>,
   approvalId: string,
+  agentId: string | undefined,
 ) => Promise<Record<string, unknown>> {
-  return async (toolName, toolInput, approvalId) => {
+  return async (toolName, toolInput, approvalId, agentId) => {
     if (input.approvalPolicy === 'deny') {
       return {
         behavior: 'deny',
@@ -250,9 +256,11 @@ function createApprovalResolver(input: {
 
     input.approvalRequestedToolUseIds.add(approvalId)
     input.nativeToolCallNames.set(approvalId, toolName)
-    // A question the hook could not forward was reported there, and then left
-    // to the pipeline that brought it here: one native call, one `tool-call`.
-    if (!input.reportedToolCallIds.has(approvalId)) {
+    // The assistant message may have reported this call already, and a
+    // question the hook could not forward was reported there, then left to
+    // the pipeline that brought it here: one native call, one `tool-call`.
+    if (!input.emittedToolCallIds.has(approvalId)) {
+      input.emittedToolCallIds.add(approvalId)
       input.emit({
         type: 'tool-call',
         toolCallId: approvalId,
@@ -263,14 +271,28 @@ function createApprovalResolver(input: {
         ...(isExternalMcpTool(toolName) ? { dynamic: true } : {}),
       })
     }
+    // Registered before the request goes out, so an answer the host sends
+    // as soon as it sees the request has a request to settle.
+    const decisionPromise = input.turn.requestToolApproval(approvalId)
     input.emit({
       type: 'tool-approval-request',
       approvalId,
       toolCallId: approvalId,
     })
-    input.finishApprovalStep(approvalId)
+    // A subagent's call (`agentID` set) is not marked: its parent's Task call
+    // already holds the parent step open, and the mapper drops the subagent's
+    // messages, so its result would never take the id back out of the parent
+    // step. Upstream has the same gap.
+    const waitsInParentStep = agentId === undefined
+    if (waitsInParentStep) {
+      input.markWaitingOnHostInput(approvalId)
+    }
 
-    const decision = await input.turn.requestToolApproval(approvalId)
+    const decision = await decisionPromise.finally(() => {
+      if (waitsInParentStep) {
+        input.clearWaitingOnHostInput(approvalId)
+      }
+    })
     return decision.approved
       ? { behavior: 'allow', updatedInput: toolInput, toolUseID: approvalId }
       : {
@@ -296,20 +318,22 @@ function createPermissionOptions(input: {
   inactiveNativeTools: readonly string[]
   turn: BridgeTurn
   emit: Emit
-  finishApprovalStep: (approvalId: string) => void
+  markWaitingOnHostInput: (toolUseId: string) => void
+  clearWaitingOnHostInput: (toolUseId: string) => void
   nativeToolCallNames: Map<string, string>
   approvalRequestedToolUseIds: Set<string>
-  reportedToolCallIds: ReadonlySet<string>
+  emittedToolCallIds: Set<string>
 }): Record<string, unknown> {
   const requestedMode = input.start.permissionMode ?? 'allow-all'
   const resolveApproval = createApprovalResolver({
     approvalPolicy: input.start.approvalPolicy ?? 'deny',
     turn: input.turn,
     emit: input.emit,
-    finishApprovalStep: input.finishApprovalStep,
+    markWaitingOnHostInput: input.markWaitingOnHostInput,
+    clearWaitingOnHostInput: input.clearWaitingOnHostInput,
     nativeToolCallNames: input.nativeToolCallNames,
     approvalRequestedToolUseIds: input.approvalRequestedToolUseIds,
-    reportedToolCallIds: input.reportedToolCallIds,
+    emittedToolCallIds: input.emittedToolCallIds,
   })
 
   /*
@@ -330,8 +354,8 @@ function createPermissionOptions(input: {
             canUseTool: (
               toolName: string,
               toolInput: Record<string, unknown>,
-              options: { toolUseID: string },
-            ) => resolveApproval(toolName, toolInput, options.toolUseID),
+              options: { toolUseID: string, agentID?: string },
+            ) => resolveApproval(toolName, toolInput, options.toolUseID, options.agentID),
           }),
     }
   }
@@ -363,7 +387,7 @@ function createPermissionOptions(input: {
     canUseTool: async (
       toolName: string,
       toolInput: Record<string, unknown>,
-      options: { toolUseID: string },
+      options: { toolUseID: string, agentID?: string },
     ) => {
       if (
         !inactiveNativeTools.has(toolName)
@@ -374,7 +398,7 @@ function createPermissionOptions(input: {
       ) {
         return { behavior: 'allow', updatedInput: toolInput }
       }
-      return resolveApproval(toolName, toolInput, options.toolUseID)
+      return resolveApproval(toolName, toolInput, options.toolUseID, options.agentID)
     },
   }
 }
@@ -466,6 +490,9 @@ function createQuestionPreToolUseHook(input: {
   turn: BridgeTurn
   emit: Emit
   nativeToolCallNames: Map<string, string>
+  emittedToolCallIds: Set<string>
+  markWaitingOnHostInput: (toolUseId: string) => void
+  clearWaitingOnHostInput: (toolUseId: string) => void
 }): HookCallback {
   return async (hookInput, toolUseID): Promise<HookJSONOutput> => {
     if (
@@ -482,6 +509,7 @@ function createQuestionPreToolUseHook(input: {
     const canonicalInput = toHarnessQuestionsInput(nativeInput)
     const toolCallId = toolUseID ?? hookInput.tool_use_id
     input.nativeToolCallNames.set(toolCallId, hookInput.tool_name)
+    input.emittedToolCallIds.add(toolCallId)
     input.emit({
       type: 'tool-call',
       toolCallId,
@@ -497,20 +525,32 @@ function createQuestionPreToolUseHook(input: {
     })
 
     const questionKey = claudeCodeQuestionKey(nativeInput)
-    const result = await input.turn.requestToolResult({
-      toolCallId,
-      matches: (candidate) => {
-        const nativeRequest = candidate.toolResult?.providerOptions?.[
-          'claude-code'
-        ]?.nativeRequest as
-        | Parameters<typeof claudeCodeQuestionKey>[0]
-        | undefined
-        return (
-          nativeRequest != null
-          && claudeCodeQuestionKey(nativeRequest) === questionKey
-        )
-      },
-    })
+    // A subagent's question (`agent_id` set) is not marked, for the reason
+    // the approval resolver gives: the parent step would never drop its id.
+    const waitsInParentStep = hookInput.agent_id === undefined
+    if (waitsInParentStep) {
+      input.markWaitingOnHostInput(toolCallId)
+    }
+    const result = await input.turn
+      .requestToolResult({
+        toolCallId,
+        matches: (candidate) => {
+          const nativeRequest = candidate.toolResult?.providerOptions?.[
+            'claude-code'
+          ]?.nativeRequest as
+          | Parameters<typeof claudeCodeQuestionKey>[0]
+          | undefined
+          return (
+            nativeRequest != null
+            && claudeCodeQuestionKey(nativeRequest) === questionKey
+          )
+        },
+      })
+      .finally(() => {
+        if (waitsInParentStep) {
+          input.clearWaitingOnHostInput(toolCallId)
+        }
+      })
     const nativeResult = toNativeQuestionResult({
       result,
       nativeInput,
@@ -766,10 +806,17 @@ async function runTurn({
     approvedRequests: start.approvedRequests,
     deniedRequests: start.deniedRequests,
   })
+  const markWaiting = (toolUseId: string): void =>
+    markWaitingOnHostInput({ state: streamEventState, emit, toolUseId })
+  const clearWaiting = (toolUseId: string): void =>
+    clearWaitingOnHostInput({ state: streamEventState, toolUseId })
   const questionPreToolUseHook = createQuestionPreToolUseHook({
     turn,
     emit,
     nativeToolCallNames: streamEventState.nativeToolCallNames,
+    emittedToolCallIds: streamEventState.emittedToolCallIds,
+    markWaitingOnHostInput: markWaiting,
+    clearWaitingOnHostInput: clearWaiting,
   })
   /*
    * The host answers a question itself only when the run forwards decisions
@@ -784,16 +831,19 @@ async function runTurn({
    * deferred, answered by a replayed approval, refused — would otherwise
    * reach the client as a result with no call.
    */
-  const runtimeQuestionCallIds = new Set<string>()
   const emitRuntimeQuestionCall = (call: {
     toolName: string
     toolInput: unknown
     toolCallId: string | undefined
   }): void => {
-    if (call.toolName !== 'AskUserQuestion' || call.toolCallId === undefined) {
+    if (
+      call.toolName !== 'AskUserQuestion'
+      || call.toolCallId === undefined
+      || streamEventState.emittedToolCallIds.has(call.toolCallId)
+    ) {
       return
     }
-    runtimeQuestionCallIds.add(call.toolCallId)
+    streamEventState.emittedToolCallIds.add(call.toolCallId)
     emit({
       type: 'tool-call',
       toolCallId: call.toolCallId,
@@ -808,12 +858,11 @@ async function runTurn({
     inactiveNativeTools,
     turn,
     emit,
-    finishApprovalStep: (approvalId) => {
-      finishApprovalStep({ state: streamEventState, emit, approvalId })
-    },
+    markWaitingOnHostInput: markWaiting,
+    clearWaitingOnHostInput: clearWaiting,
     nativeToolCallNames: streamEventState.nativeToolCallNames,
     approvalRequestedToolUseIds: streamEventState.approvalRequestedToolUseIds,
-    reportedToolCallIds: runtimeQuestionCallIds,
+    emittedToolCallIds: streamEventState.emittedToolCallIds,
   })
 
   /*

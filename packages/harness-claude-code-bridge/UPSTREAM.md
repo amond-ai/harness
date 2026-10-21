@@ -61,6 +61,11 @@ Each is a separate commit in this repository and is intended to go upstream.
    The `mcp__harness-tools__` special-casing in `create-emit-stream-event.ts`
    went with it: nothing registers that server any more, so the branch and the
    `mcpToolUseIds` set it fed were unreachable.
+   The host-tool half of 6c65131 is skipped for the same reason:
+   `HOST_TOOL_PREFIX` calls marked as waiting on the host, the handler's
+   `toolUseId` on `mcpHandlerCalls`, `findMcpHandlerCallId`,
+   `resolveMcpHandlerToolUseId`, the `takeMcpHandlerCall` rewrite, and the MCP
+   tool server handler's own `tool-call` dedupe and waiting marks.
 4. `feat(turn-host): emit every SDK message as a raw frame` — every SDK message
    except `stream_event` rides the wire verbatim as `{ type: 'raw', rawValue }`
    ahead of the harness parts derived from it. Since the 1.0.142 re-vendor the
@@ -80,6 +85,15 @@ Each is a separate commit in this repository and is intended to go upstream.
 9. `feat(turn-host): enforce the run's permission posture in the host` —
    `canUseTool` never pends under `approvalPolicy: 'deny'`, and a `PreToolUse`
    hook evaluates `approvedRequests` → `refuseTools` → `deferTools`.
+   Since 6c65131, a forwarded approval registers `requestToolApproval` before
+   it emits `tool-approval-request`, then marks its call as waiting on the
+   host (`markWaitingOnHostInput`) until the decision settles. Upstream's
+   `finishApprovalStep` is gone with it. Under `'deny'` the resolver answers
+   before any of that, so a denied call marks nothing and no early
+   `finish-step` (patch 27) follows it. A subagent's call (`canUseTool` with
+   `agentID`) is asked the same way but not marked, because the mapper drops
+   the subagent's messages and its result would never close the parent step
+   it was marked in. Upstream has the same gap.
 10. `feat(turn-host): fail a routed turn whose command did not load` — a
     routed prompt whose command is missing from `system`/`init`'s
     `slash_commands` fails the turn before a token is spent.
@@ -184,6 +198,24 @@ Each is a separate commit in this repository and is intended to go upstream.
     `finish-step` is a step's structure, not liveness, and a journal-rebuilt
     transcript without it would hold a step that never ends. The live-only
     flag therefore skips `raw` and `finish-step`.
+    Since 6c65131, a step whose tool calls wait on the host (patches 9 and
+    31) gets an early `finish-step` with `finishReason { unified:
+    'tool-calls', raw: 'host-input' }`, zero usage, and `harnessMetadata
+    ['claude-code'].inferredStep`. It is emitted once for each waiting call
+    that no earlier pause in the step covered. It goes through no
+    `emitFinishStep` bookkeeping, so it changes neither `stepUsage` nor the
+    step's pending usage, and the step's regular `finish-step` still reports
+    the usage the step streamed. When the response's `message_stop` emits it,
+    it is built from a `stream_event` and journaled under the same
+    `finish-step` exemption. Upstream's `modelResponseStreaming` is not
+    carried: it toggles with `responseOpen` (0291550) at the same
+    `message_start` and `message_stop`, and `closeStepIfReady` already returns
+    while `responseOpen` is set. Holding the pause to the response's end, so
+    one pause covers all of that response's calls, works only when deltas
+    stream. Under `emitDeltas: false` no `message_start` arrives and
+    `responseOpen` is never set, so an approval for a response's first
+    `tool_use` can pause the step before the response's later `tool_use`
+    blocks arrive, and those get their own later pause.
 
 28. `fix(turn-host): fail a turn whose success result the CLI flagged as an
     error` — upstream's `is_error` check, applied only when the ending would
@@ -253,6 +285,19 @@ Each is a separate commit in this repository and is intended to go upstream.
     are the runtime's half, in `harness-bridge-runtime` under the same number;
     the hook, the question translation and the answer parsing are this
     package's.
+    Since 6c65131, only a question actually forwarded to the host marks its
+    call as waiting on the host, before `requestToolResult`, and clears the
+    mark when the request settles. A question the policy decided, or one with
+    no host to answer it, is reported through the runtime's `tool-call` and
+    pauses nothing. A subagent's forwarded question (hook input with
+    `agent_id`) is asked but not marked, for the reason patch 9 gives, and
+    upstream has the same gap. The hook's set of reported calls is now the
+    stream state's `emittedToolCallIds`, which upstream adds for the mapper
+    and the approval path. The mapper, the approval path and the hook share it, so each native
+    call gets one `tool-call` from whichever of them sees it first. Like
+    upstream, the mapper no longer skips a call whose approval was requested
+    (the `approvalRequestedToolUseIds` check is gone) and relies on the shared
+    set instead. It still leaves every `AskUserQuestion` call to the hook.
 
 32. `feat(turn-host): bypass without canUseTool and with the stdio prompt
     tool` — upstream's bypass shape (no `canUseTool`, `permissionPromptToolName:
@@ -346,12 +391,18 @@ The 1.0.162 re-vendor took five upstream changes:
 
 Two upstream changes were already covered: a470e0d (the `total_cost_usd`
 running total) by patch 35, and 714f3fc (host-tool calls rejected by MCP input
-validation) by patch 3, which dropped host tools. Deferred: 6c65131 (parallel
-and sequential tool approvals, for a separate change), 1bebfcf
+validation) by patch 3, which dropped host tools. Deferred: 1bebfcf
 (`toModelOutput()`, with `@ai-sdk/harness`'s `convertHarnessToolModelOutput`),
 the image prompts dc1d7a6 and ca2a9f7, and the SDK bump c357e52. Skipped:
 bda96e8, which restarts recovered turns on the host side and is not vendored
 here.
+
+A separate change after the re-vendor took 6c65131 (1.0.151, parallel and
+sequential tool approvals). Its Claude Code adapter half adds one `tool-call`
+per tool call id, waiting-on-host tracking, and the early `finish-step`. It is
+re-applied under patches 9, 27 and 31. Its host-tool half is skipped under
+patch 3. Its protocol half came with the re-vendor (see
+`harness-protocol/UPSTREAM.md`).
 
 ## Upstream behaviour deliberately dropped
 
