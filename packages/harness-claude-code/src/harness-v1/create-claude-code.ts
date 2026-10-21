@@ -40,8 +40,12 @@ export const CLAUDE_CODE_HARNESS_ID = 'claude-code'
 export interface CreateClaudeCodeOptions {
   /** The sandbox provider a turn runs in; a session's `id` is the sandbox id the driver dials. */
   sandboxes: SandboxProvider
-  /** Dial one bridge endpoint URL — the one part that cannot be written once for every runtime. */
-  openSocket: (url: string) => Promise<WsLike>
+  /**
+   * Dial one bridge endpoint URL — the one part that cannot be written once for every runtime.
+   * Send `headers` with the upgrade: a restricted port (e2b's traffic access token, Daytona's
+   * preview token) refuses a dial without them.
+   */
+  openSocket: (url: string, headers?: Readonly<Record<string, string>>) => Promise<WsLike>
   config: TurnDriverConfig
   /** `settingSources` for the host's `start` frame, as the consumer names them. */
   settingSources: readonly string[]

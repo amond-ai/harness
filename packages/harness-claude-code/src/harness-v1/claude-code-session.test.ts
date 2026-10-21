@@ -95,6 +95,33 @@ describe('the claude-code harness under HarnessAgent', () => {
     await session.destroy()
   })
 
+  it('dials the bridge with the headers its port endpoint carries', async () => {
+    const host = fakeHost()
+    const headers = { 'e2b-traffic-access-token': 'tok-1' }
+    const dialed: (Readonly<Record<string, string>> | undefined)[] = []
+    const harness = createClaudeCode({
+      sandboxes: {
+        ...host.provider,
+        portEndpoint: async (id, port, options) => ({ ...await host.provider.portEndpoint(id, port, options), headers }),
+      },
+      openSocket: async (url, sent) => {
+        dialed.push(sent)
+        return host.openSocket(url)
+      },
+      config: CONFIG,
+      settingSources: ['project'],
+      env: () => ({ ANTHROPIC_API_KEY: 'test-key' }),
+    })
+    const agent = new HarnessAgent({ harness, permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+
+    await agent.generate({ session, prompt: 'say hello' })
+
+    expect(dialed.length).toBeGreaterThan(0)
+    expect(dialed.every(sent => sent === headers)).toBe(true)
+    await session.destroy()
+  })
+
   it('suspends mid-stream and continues from that cursor, losing and repeating nothing', async () => {
     const host = fakeHost()
     const agent = new HarnessAgent({ harness: harnessOver(host), permissionMode: 'allow-all' })

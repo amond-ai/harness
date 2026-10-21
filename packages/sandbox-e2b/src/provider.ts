@@ -76,7 +76,8 @@ export interface E2bProviderOptions extends Partial<Omit<E2bSessionOptions, 'jou
    * `false` makes the sandbox's ports answer only requests carrying its traffic access token,
    * which {@link SandboxProvider.portEndpoint} then returns in `headers`. Applies to sandboxes
    * this provider creates; one it reattaches to keeps whatever it was created with. Left to
-   * e2b's default (public) when unset.
+   * e2b's default (public) when unset. A restricted port answers 403 to a bare URL, so the
+   * harness session's deprecated `getPortUrl`, which drops `headers`, cannot reach it.
    */
   allowPublicTraffic?: boolean
 }

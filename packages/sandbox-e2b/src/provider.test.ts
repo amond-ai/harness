@@ -457,9 +457,15 @@ describe('createE2bProvider', () => {
 
   it('creates a restricted sandbox when public traffic is turned off', async () => {
     const { api, calls } = fakeApi()
-    await createE2bProvider({ api, allowPublicTraffic: false }).session('run-42').exists('/')
+    const create = api.create
+    api.create = async (template, opts) => ({
+      ...await create(template, opts),
+      ...(opts.network?.allowPublicTraffic === false ? { trafficAccessToken: 'tok-new' } : {}),
+    })
+    const endpoint = await createE2bProvider({ api, allowPublicTraffic: false }).portEndpoint('run-42', 3001, { protocol: 'ws' })
 
     expect(calls.created[0].opts.network).toEqual({ allowPublicTraffic: false })
+    expect(endpoint.headers).toEqual({ 'e2b-traffic-access-token': 'tok-new' })
   })
 
   it('leaves the network to e2b\'s default when public traffic is not configured', async () => {
