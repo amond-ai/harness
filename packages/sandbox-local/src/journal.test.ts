@@ -206,12 +206,17 @@ describe('parseJournalScript', () => {
   })
 
   it('claims nothing at all when the sandbox has no nonce to check against', () => {
-    // The nonce file is written before the sandbox's first wrapper and removed only with the
-    // state directory, so its absence means nothing was started here or the bookkeeping has
+    // The nonce file is written before the sandbox's first wrapper and this package removes it
+    // only with the state directory, so its absence means nothing was started here or the bookkeeping has
     // been interfered with. In the second case there is no longer anything separating one of
     // our wrappers from a reproduction of one, and the safe answer is to claim neither.
     expect(parseJournalScript(`/bin/sh -c ${journalledScript(['claude', '-p'], PATHS, NONCE)}`, '/state', undefined))
       .toBeUndefined()
+  })
+
+  it('claims nothing against a nonce no wrapper could carry', () => {
+    const bareSeparator = lineFor(['claude', '-p']).replace(`'p1 ${NONCE}'`, `'p1 '`)
+    expect(parseJournalScript(bareSeparator, '/state', '')).toBeUndefined()
   })
 })
 

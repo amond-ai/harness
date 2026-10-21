@@ -358,14 +358,16 @@ export function parseJournalScript(
   stateDir: string,
   nonce: string | undefined,
 ): RecoveredScript | undefined {
-  // A sandbox with no readable nonce claims nothing at all. The file is written before this
-  // sandbox's first wrapper is spawned and removed only along with the state directory, so its
-  // absence means either that nothing was ever started here — in which case there is nothing to
-  // find — or that the bookkeeping has been interfered with, in which case there is no longer
-  // anything that tells one of our wrappers from a reproduction of one. Recovering nothing
-  // costs an orphan that could once have been killed; recovering on the public part of the
-  // marker alone kills whatever reproduces it.
-  if (nonce === undefined) {
+  // A sandbox with no usable nonce claims nothing at all. The file is written before this
+  // sandbox's first wrapper is spawned, and this package removes it only along with the state
+  // directory, so its absence means either that nothing was ever started here — in which case
+  // there is nothing to find — or that the bookkeeping has been interfered with (deleted by hand,
+  // or by a command), in which case there is no longer anything that tells one of our wrappers
+  // from a reproduction of one. Recovering nothing costs an orphan that could once have been
+  // killed; recovering on the public part of the marker alone kills whatever reproduces it.
+  // A value no wrapper could carry is refused the same way: `''` would otherwise match an
+  // opener whose identity is the id and a bare separator.
+  if (nonce === undefined || !isWrapperNonce(nonce)) {
     return undefined
   }
   // Anchored at the start of the row, not searched for anywhere in it. A marker *found* in a

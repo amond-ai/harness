@@ -337,9 +337,11 @@ export function createLocalSession(options: LocalSessionOptions): SandboxSession
       // Both created and then verified: a state directory that is missing or unwritable fails
       // *silently* otherwise — the wrapper's redirection dies, so the command never runs, and
       // the caller learns only much later that the transcript is empty.
-      // The nonce comes back from the same call that makes the directory, because the two
-      // fail together and for one reason: a wrapper spawned without either is a command running
-      // in the checkout that no later orchestrator can find, name, or end.
+      // The nonce comes back from the same call that makes the directory, so no wrapper is
+      // spawned without the value recovery needs to find it: one carrying no readable nonce is a
+      // command running in the checkout that no later orchestrator can find, name, or end. The
+      // two can still fail apart — a `.nonce` that exists but cannot be read leaves the
+      // directory intact — and either failure throws here, before anything is spawned.
       const nonce = await registry.ensure()
       await host.mkdir(cwd)
       if (!await host.exists(cwd)) {

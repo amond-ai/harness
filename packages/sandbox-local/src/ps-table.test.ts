@@ -43,6 +43,7 @@ describe('parsePsRow on arguments ps could not read', () => {
     const macos = { parenthesisedStandIn: true }
     expect(parsePsRow('9 Fri Sep 12 21:33:01 2026 (github-monitor-c)', macos)?.command).toBe('')
     expect(parsePsRow('9 Fri Sep 12 21:33:01 2026 (Google Chrome He)', macos)?.command).toBe('')
+    expect(parsePsRow('9 Fri Sep 12 21:33:01 2026 (abcdefghijklmnopq)', macos)?.command).toBe('(abcdefghijklmnopq)')
     expect(parsePsRow('9 Fri Sep 12 21:33:01 2026 (a worker titled itself)', macos)?.command)
       .toBe('(a worker titled itself)')
   })
