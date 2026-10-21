@@ -85,12 +85,33 @@ export interface ClaudeStreamEventState {
    * stays open while it is set: the CLI can run a tool, and report its
    * result, before the response that called it has finished streaming, and
    * the step's usage is only whole once it has.
+   *
+   * Upstream also keeps `modelResponseStreaming`, which toggles with this
+   * flag at the same `message_start` and `message_stop`; this flag stands in
+   * for it, so an early `finish-step` is held back until the response ends
+   * and covers every tool call of that response.
    */
   responseOpen: boolean
   stepOpen: boolean
   externalMcpToolUseIds: Set<string>
   structuredOutputToolUseIds: Set<string>
   observedTerminalError: string | undefined
+  /*
+   * Tool calls of the open step whose progress depends on the host:
+   * permission prompts waiting for a decision and questions waiting for an
+   * answer. A waiting call can block dispatch of other calls in the
+   * response, so the mapper must allow a host pause even when those queued
+   * calls are not themselves waiting yet. The step stays open until the
+   * regular `finish-step`.
+   */
+  hostInputWaitingToolUseIds: Set<string>
+  earlyFinishStepToolUseIds: Set<string>
+  /*
+   * Every tool call id a `tool-call` was emitted for, by whichever of the
+   * mapper, the approval path or the `PreToolUse` hook saw it first: one
+   * native call, one `tool-call`.
+   */
+  emittedToolCallIds: Set<string>
 }
 
 type PartialBlock
@@ -113,6 +134,9 @@ export function createClaudeStreamEventState(): ClaudeStreamEventState {
     externalMcpToolUseIds: new Set(),
     structuredOutputToolUseIds: new Set(),
     observedTerminalError: undefined,
+    hostInputWaitingToolUseIds: new Set(),
+    earlyFinishStepToolUseIds: new Set(),
+    emittedToolCallIds: new Set(),
   }
 }
 
@@ -327,11 +351,13 @@ export function createEmitStreamEvent({
           if (dynamic) {
             state.externalMcpToolUseIds.add(block.id)
           }
-          if (state.approvalRequestedToolUseIds.has(block.id)) {
-            continue
-          }
           state.pendingStepToolUseIds.add(block.id)
           opensStep = true
+          // The approval path may have reported this call first.
+          if (state.emittedToolCallIds.has(block.id)) {
+            continue
+          }
+          state.emittedToolCallIds.add(block.id)
           emit({
             type: 'tool-call',
             toolCallId: block.id,
@@ -349,6 +375,9 @@ export function createEmitStreamEvent({
           state.pendingStepAssistantUsage = usage
           updatePendingStepUsage(state)
         }
+      }
+      if (state.hostInputWaitingToolUseIds.size > 0) {
+        closeStepIfReady({ state, emit })
       }
       return
     }
@@ -407,18 +436,29 @@ export function createEmitStreamEvent({
   }
 }
 
-export function finishApprovalStep({
+export function markWaitingOnHostInput({
   state,
   emit,
-  approvalId,
+  toolUseId,
 }: {
   state: ClaudeStreamEventState
   emit: Emit
-  approvalId: string
+  toolUseId: string
 }): void {
   state.stepOpen = true
-  state.pendingStepToolUseIds.delete(approvalId)
+  state.pendingStepToolUseIds.add(toolUseId)
+  state.hostInputWaitingToolUseIds.add(toolUseId)
   closeStepIfReady({ state, emit })
+}
+
+export function clearWaitingOnHostInput({
+  state,
+  toolUseId,
+}: {
+  state: ClaudeStreamEventState
+  toolUseId: string
+}): void {
+  state.hostInputWaitingToolUseIds.delete(toolUseId)
 }
 
 export function emitFinishStep({
@@ -440,6 +480,7 @@ export function emitFinishStep({
   state.pendingStepDeltaUsage = undefined
   state.pendingStepUsage = undefined
   state.pendingStepToolUseIds = new Set()
+  state.earlyFinishStepToolUseIds = new Set()
   state.stepOpen = false
 }
 
@@ -450,15 +491,55 @@ function closeStepIfReady({
   state: ClaudeStreamEventState
   emit: Emit
 }): void {
+  if (!state.stepOpen || state.responseOpen || state.partialBlocks.size > 0) {
+    return
+  }
+  if (state.pendingStepToolUseIds.size === 0) {
+    emitFinishStep({ state, emit, usage: state.pendingStepUsage })
+    return
+  }
+  emitEarlyFinishStepIfReady({ state, emit })
+}
+
+/*
+ * The step's host pause: a `finish-step` for the tool calls that wait on the
+ * host, emitted once per call that an earlier one in the step did not cover.
+ * It carries zero usage and leaves the step's metering alone — the regular
+ * `finish-step` once the step's calls settle still reports the usage the step
+ * streamed. Upstream also gates this on `modelResponseStreaming`; the caller's
+ * `responseOpen` check is the same gate here.
+ */
+function emitEarlyFinishStepIfReady({
+  state,
+  emit,
+}: {
+  state: ClaudeStreamEventState
+  emit: Emit
+}): void {
   if (
     !state.stepOpen
-    || state.responseOpen
-    || state.pendingStepToolUseIds.size > 0
     || state.partialBlocks.size > 0
+    || state.pendingStepToolUseIds.size === 0
   ) {
     return
   }
-  emitFinishStep({ state, emit, usage: state.pendingStepUsage })
+  const uncovered = [...state.hostInputWaitingToolUseIds].filter(
+    toolUseId =>
+      state.pendingStepToolUseIds.has(toolUseId)
+      && !state.earlyFinishStepToolUseIds.has(toolUseId),
+  )
+  if (uncovered.length === 0) {
+    return
+  }
+  for (const toolUseId of uncovered) {
+    state.earlyFinishStepToolUseIds.add(toolUseId)
+  }
+  emit({
+    type: 'finish-step',
+    finishReason: { unified: 'tool-calls', raw: 'host-input' },
+    usage: defaultUsage(),
+    harnessMetadata: { 'claude-code': { inferredStep: true } },
+  })
 }
 
 function formatApiRetryWarning(msg: ClaudeMessage): string {
@@ -529,7 +610,8 @@ function handleStreamEvent({
    * and the transcript rebuilt from the journal hold the same lines.
    *
    * The response's end can also close a tool step whose results arrived
-   * while it still streamed. That `finish-step` is journaled too: the driver
+   * while it still streamed, or emit the early `finish-step` of one whose
+   * calls wait on the host. Either `finish-step` is journaled too: the driver
    * keeps a step's structure in the transcript, whatever message ended it.
    */
   if (event.type === 'message_stop') {

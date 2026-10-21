@@ -1,5 +1,5 @@
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
-import type { Client, Host } from './harness'
+import type { Client, FakeQuery, Host } from './harness'
 import { connect, createFakeQuery, initMessage, startHost } from './harness'
 
 /** The host a test started through `startAndConnect`, for its `afterEach` to close. */
@@ -27,10 +27,13 @@ export async function callPreToolUse(
   )) as never
 }
 
-/** Start a turn and hand back the `options` the driver called `query()` with, and the socket. */
+/**
+ * Start a turn and hand back the `options` the driver called `query()` with, the socket, and the
+ * fake query, for a test to push more SDK messages into the running turn.
+ */
 export async function startAndConnect(
   start: Record<string, unknown>,
-): Promise<{ options: Options, client: Client }> {
+): Promise<{ options: Options, client: Client, query: FakeQuery }> {
   const query = createFakeQuery([initMessage()])
   // A test may start several hosts; close the one this replaces, not only the last.
   await hostRef.current?.close()
@@ -44,7 +47,7 @@ export async function startAndConnect(
   if (query.options === undefined) {
     throw new Error('query() was not called')
   }
-  return { options: query.options, client }
+  return { options: query.options, client, query }
 }
 
 /** Start a turn and hand back the `options` the driver called `query()` with. */

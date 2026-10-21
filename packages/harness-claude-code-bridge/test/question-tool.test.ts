@@ -1,4 +1,4 @@
-import type { Client } from './harness'
+import type { Client, Frame } from './harness'
 import { afterEach, expect, it } from 'vitest'
 import { connect, createFakeQuery, initMessage, resultMessage, startHost } from './harness'
 import { callPreToolUse, hostRef, startAndConnect } from './pre-tool-use'
@@ -49,6 +49,69 @@ it('asks the host to answer a question under approvalPolicy forward, and runs it
     permissionDecision: 'allow',
     updatedInput: { questions: QUESTIONS, answers: { 'Which fruit?': 'pear' } },
   })
+})
+
+/** A response asking `QUESTIONS` under `toolUseId`, from its start to its stop. */
+function questionResponse(toolUseId: string): Array<Record<string, unknown>> {
+  return [
+    { type: 'stream_event', event: { type: 'message_start' } },
+    {
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: toolUseId, name: 'AskUserQuestion', input: { questions: QUESTIONS } }] },
+    },
+    { type: 'stream_event', event: { type: 'message_stop' } },
+  ]
+}
+
+function isMessageStop(frame: Frame): boolean {
+  return frame.type === 'raw'
+    && (frame.rawValue as { event?: { type?: string } }).event?.type === 'message_stop'
+}
+
+function finishReasons(frames: Frame[]): Array<string | undefined> {
+  return frames
+    .filter(frame => frame.type === 'finish-step')
+    .map(frame => (frame.finishReason as { raw?: string }).raw)
+}
+
+it('pauses the step on the host while a forwarded question waits for its answer', async () => {
+  const { options, client, query } = await startAndConnect({ approvalPolicy: 'forward' })
+  for (const message of questionResponse('toolu_qp')) {
+    query.push(message)
+  }
+  await client.waitFor(isMessageStop)
+
+  const decision = callPreToolUse(options, questionCall('toolu_qp') as never)
+  const call = await client.waitFor(frame => frame.type === 'tool-call' && frame.toolCallId === 'toolu_qp')
+  const pause = await client.waitFor(frame => frame.type === 'finish-step')
+  expect(pause).toMatchObject({
+    finishReason: { unified: 'tool-calls', raw: 'host-input' },
+    harnessMetadata: { 'claude-code': { inferredStep: true } },
+  })
+  expect(pause.seq).toBeGreaterThan(call.seq!)
+  client.send(questionAnswer('toolu_qp'))
+  expect((await decision).hookSpecificOutput?.permissionDecision).toBe('allow')
+  query.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_qp', content: 'apple' }] } })
+  query.push(resultMessage())
+  await client.waitFor(frame => frame.type === 'finish')
+
+  expect(finishReasons(client.frames)).toEqual(['host-input', 'stop'])
+})
+
+it('does not pause the step on the host for a question the run policy decided', async () => {
+  const { options, client, query } = await startAndConnect({ approvalPolicy: 'forward', deferTools: ['AskUserQuestion'] })
+  for (const message of questionResponse('toolu_qd')) {
+    query.push(message)
+  }
+  await client.waitFor(isMessageStop)
+
+  const outcome = await callPreToolUse(options, questionCall('toolu_qd') as never)
+  expect(outcome.hookSpecificOutput?.permissionDecision).toBe('defer')
+  query.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_qd', content: 'deferred', is_error: true }] } })
+  query.push(resultMessage())
+  await client.waitFor(frame => frame.type === 'finish')
+
+  expect(finishReasons(client.frames)).toEqual(['stop'])
 })
 
 it('denies a question whose host answer the questions-tool schema refuses', async () => {

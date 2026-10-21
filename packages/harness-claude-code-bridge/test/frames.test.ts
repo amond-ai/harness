@@ -300,6 +300,67 @@ it('closes a tool step at the response\'s message_stop, journaled, when its resu
   client.close()
 })
 
+it('pauses a response\'s parallel approvals on the host with one journaled finish-step, ahead of the step\'s own', async () => {
+  const pwd = { command: 'pwd' }
+  const query = createFakeQuery([
+    initMessage(),
+    { type: 'stream_event', event: { type: 'message_start', message: { usage: { input_tokens: 10, output_tokens: 1 } } } },
+    {
+      type: 'assistant',
+      message: {
+        content: ['first', 'second'].map(id => ({ type: 'tool_use', id, name: 'Bash', input: pwd })),
+        usage: { input_tokens: 10, output_tokens: 1 },
+      },
+    },
+    { type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 40 } } },
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing', permissionMode: 'default', approvalPolicy: 'forward' })
+  await client.waitFor(frame => frame.type === 'tool-call' && frame.toolCallId === 'second')
+  const decisions = ['first', 'second'].map(toolUseID =>
+    query.options?.canUseTool?.('Bash', pwd, { signal: new AbortController().signal, toolUseID } as never))
+  await client.waitFor(frame => frame.type === 'tool-approval-request' && frame.approvalId === 'second')
+  query.push({ type: 'stream_event', event: { type: 'message_stop' } })
+  const pause = await client.waitFor(frame => frame.type === 'finish-step')
+  for (const approvalId of ['first', 'second']) {
+    client.send({ type: 'tool-approval-response', approvalId, approved: true })
+  }
+  await Promise.all(decisions)
+  query.push({
+    type: 'user',
+    message: { content: ['first', 'second'].map(id => ({ type: 'tool_result', tool_use_id: id, content: '/work' })) },
+  })
+  query.push(resultMessage())
+  const finish = await client.waitFor(frame => frame.type === 'finish')
+
+  // Held back to the response's end, so one pause covers both waiting calls.
+  expect(pause).toMatchObject({
+    finishReason: { unified: 'tool-calls', raw: 'host-input' },
+    usage: { inputTokens: { total: 0 }, outputTokens: { total: 0 } },
+    harnessMetadata: { 'claude-code': { inferredStep: true } },
+  })
+  const stop = client.frames.findIndex(frame => frame.type === 'raw'
+    && (frame.rawValue as { event?: { type?: string } }).event?.type === 'message_stop')
+  expect(client.frames.indexOf(pause)).toBeGreaterThan(stop)
+  expect(client.frames.filter(frame => frame.type === 'tool-call').map(frame => frame.toolCallId))
+    .toEqual(['first', 'second'])
+  const steps = client.frames.filter(frame => frame.type === 'finish-step')
+  expect(steps.map(step => (step.finishReason as { raw: string }).raw)).toEqual(['host-input', 'stop'])
+  // The pause meters nothing: the step's own end still carries the usage it streamed.
+  expect(steps[1]!.usage).toMatchObject({ inputTokens: { total: 10 }, outputTokens: { total: 40 } })
+
+  // Structure, not liveness: the journal and the transcript replayed from it hold the same pause.
+  expect((await host.readJournal()).filter(frame => frame.type === 'finish-step')).toEqual(steps)
+  const replayed = await connect(host)
+  replayed.send({ type: 'resume', lastSeenEventId: 0 })
+  await replayed.waitFor(frame => frame.type === 'finish' && frame.seq === finish.seq)
+  expect(replayed.frames.filter(frame => frame.type === 'finish-step')).toEqual(steps)
+  replayed.close()
+  client.close()
+})
+
 it('forwards a rate_limit_event raw exactly once and maps nothing from it', async () => {
   const rateLimit = {
     type: 'rate_limit_event',
