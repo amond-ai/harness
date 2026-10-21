@@ -37,8 +37,8 @@ const PS_MAX_BUFFER = 16 * 1024 * 1024
 /**
  * Extra reads given to a process-table row whose arguments `ps` could not read.
  *
- * Bounded because zombies render the same way and never become readable; each one costs a
- * `ps -p` per attempt, and a machine has few of them.
+ * Bounded because zombies render the same way and never become readable. Each attempt is one
+ * `ps -p` for every such row at once, so the bound is on forks per listing, not per row.
  */
 const UNREADABLE_REREADS = 2
 
@@ -160,7 +160,7 @@ async function processes(): Promise<LocalProcessRow[]> {
     const { stdout } = await execFile('ps', ['-A', '-ww', '-o', 'pid=,lstart=,args='], {
       maxBuffer: PS_MAX_BUFFER,
     })
-    return await Promise.all(parsePsTable(stdout, PS_OPTIONS).map(reread))
+    return await rereadUnreadable(parsePsTable(stdout, PS_OPTIONS))
   }
   catch {
     // Recovery is a best-effort second opinion, asked for only when a record is already
@@ -170,24 +170,46 @@ async function processes(): Promise<LocalProcessRow[]> {
 }
 
 /**
- * Ask again about a row whose arguments `ps` could not read, up to {@link UNREADABLE_REREADS}
- * times.
+ * Ask again about the rows whose arguments `ps` could not read, up to
+ * {@link UNREADABLE_REREADS} times.
  *
  * Recovery has no other look at a process whose record is gone, so one missed read is a live
  * wrapper left out of the listing — and out of what `destroy()` ends. The miss is transient on
  * macOS (see `ps-table.ts`), so a second read usually has the arguments. A pid that has gone or
  * changed hands in between keeps the original row: its unreadable command line claims nothing.
+ *
+ * One `ps -p` per attempt for all of them together, not one per row: the misses come in bursts
+ * under load, which is the worst moment to fork a `ps` for each.
  */
-async function reread(row: LocalProcessRow): Promise<LocalProcessRow> {
-  let current = row
-  for (let attempt = 0; current.command === '' && attempt < UNREADABLE_REREADS; attempt++) {
-    const again = await identify(row.pid)
-    if (again === undefined || again.startedAt !== row.startedAt) {
-      return current
+async function rereadUnreadable(rows: LocalProcessRow[]): Promise<LocalProcessRow[]> {
+  const byPid = new Map(rows.map(row => [row.pid, row]))
+  for (let attempt = 0; attempt < UNREADABLE_REREADS; attempt++) {
+    const unreadable = [...byPid.values()].filter(row => row.command === '').map(row => row.pid)
+    if (unreadable.length === 0) {
+      break
     }
-    current = again
+    for (const again of await rowsOf(unreadable)) {
+      if (again.startedAt === byPid.get(again.pid)?.startedAt) {
+        byPid.set(again.pid, again)
+      }
+    }
   }
-  return current
+  return rows.map(row => byPid.get(row.pid) ?? row)
+}
+
+/** The rows `ps` has for these pids now; one that has gone is simply absent. */
+async function rowsOf(pids: readonly number[]): Promise<LocalProcessRow[]> {
+  try {
+    const { stdout } = await execFile('ps', ['-p', pids.join(','), '-ww', '-o', 'pid=,lstart=,args='], {
+      maxBuffer: PS_MAX_BUFFER,
+    })
+    return parsePsTable(stdout, PS_OPTIONS)
+  }
+  catch {
+    // Non-zero when none of the pids is left, or when `ps` will not run: either way there is
+    // nothing better to replace the unreadable rows with.
+    return []
+  }
 }
 
 async function identify(pid: number): Promise<LocalProcessRow | undefined> {

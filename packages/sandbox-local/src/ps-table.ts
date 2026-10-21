@@ -13,8 +13,15 @@ import type { LocalProcessRow } from './local-surface'
 /** `<pid> <5 lstart tokens> <the rest, verbatim>`. */
 const ROW = /^\s*(\d+)\s+(\S+(?:\s+\S+){4})\s+(\S.*)$/
 
-/** macOS `ps`'s `(<comm>)` in place of arguments it could not read — see {@link readableCommand}. */
-const UNREAD_ARGS = /^\(.*\)$/
+/**
+ * macOS `ps`'s `(<comm>)` in place of arguments it could not read — see {@link readableCommand}.
+ *
+ * `<comm>` is the kernel's process name, cut to `MAXCOMLEN` (16) characters and free to hold
+ * spaces (`(github-monitor-c)`, `(Google Chrome He)`), so the cap is the one thing that tells it
+ * apart from a parenthesised argv. A narrower character class would miss real stand-ins and
+ * bring back the misread this exists to stop.
+ */
+const UNREAD_ARGS = /^\(.{1,16}\)$/
 
 /**
  * What differs between the platforms' `ps`, decided by the caller so this file never has to
