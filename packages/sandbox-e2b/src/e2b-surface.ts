@@ -76,6 +76,12 @@ export interface E2bSandboxLike {
    * once the sandbox is in hand.
    */
   getHost: (port: number) => string
+  /**
+   * The token a request to {@link getHost} must carry when the sandbox was created with
+   * `network.allowPublicTraffic: false`; absent for a sandbox whose ports are open. e2b hands
+   * it back on `connect` as well as `create`, so a reattached sandbox still has it.
+   */
+  readonly trafficAccessToken?: string
   /** Re-applies the sandbox's lifetime, restarting e2b's countdown from now. */
   setTimeout: (timeoutMs: number) => Promise<void>
   kill: () => Promise<boolean>
