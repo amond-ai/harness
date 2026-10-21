@@ -16,7 +16,21 @@ const ROW = /^\s*(\d+)\s+(\S+(?:\s+\S+){4})\s+(\S.*)$/
 /** macOS `ps`'s `(<comm>)` in place of arguments it could not read — see {@link readableCommand}. */
 const UNREAD_ARGS = /^\(.*\)$/
 
-export function parsePsRow(line: string): LocalProcessRow | undefined {
+/**
+ * What differs between the platforms' `ps`, decided by the caller so this file never has to
+ * ask which platform it is on.
+ */
+export interface PsParseOptions {
+  /**
+   * Read a `(<comm>)` command as macOS `ps`'s stand-in for arguments it could not read. Off by
+   * default: on Linux a parenthesised command is a real argv (systemd's `(sd-pam)`), and
+   * reading it as unreadable would send it through pointless rereads and make a reused pid
+   * answer "unknown" instead of "gone".
+   */
+  parenthesisedStandIn?: boolean
+}
+
+export function parsePsRow(line: string, options: PsParseOptions = {}): LocalProcessRow | undefined {
   const match = ROW.exec(line)
   if (!match) {
     return undefined
@@ -25,7 +39,7 @@ export function parsePsRow(line: string): LocalProcessRow | undefined {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     return undefined
   }
-  return { pid, startedAt: match[2]!.replace(/\s+/g, ' '), command: readableCommand(match[3]!) }
+  return { pid, startedAt: match[2]!.replace(/\s+/g, ' '), command: options.parenthesisedStandIn ? readableCommand(match[3]!) : match[3]! }
 }
 
 /**
@@ -49,10 +63,10 @@ function readableCommand(command: string): string {
  * which being unrecognisable is not a reason to fail a discovery call that was asking about
  * something else entirely.
  */
-export function parsePsTable(output: string): LocalProcessRow[] {
+export function parsePsTable(output: string, options: PsParseOptions = {}): LocalProcessRow[] {
   const rows: LocalProcessRow[] = []
   for (const line of output.split('\n')) {
-    const row = parsePsRow(line)
+    const row = parsePsRow(line, options)
     if (row) {
       rows.push(row)
     }

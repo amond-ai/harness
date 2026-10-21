@@ -150,6 +150,9 @@ function signal(pid: number, sent: number): boolean {
   }
 }
 
+/** Only macOS `ps` prints `(<comm>)` for arguments it could not read; elsewhere it is a real argv. */
+const PS_OPTIONS = { parenthesisedStandIn: process.platform === 'darwin' }
+
 async function processes(): Promise<LocalProcessRow[]> {
   try {
     // `-ww` so a long wrapper script is not truncated to the terminal width: the command line
@@ -157,7 +160,7 @@ async function processes(): Promise<LocalProcessRow[]> {
     const { stdout } = await execFile('ps', ['-A', '-ww', '-o', 'pid=,lstart=,args='], {
       maxBuffer: PS_MAX_BUFFER,
     })
-    return await Promise.all(parsePsTable(stdout).map(reread))
+    return await Promise.all(parsePsTable(stdout, PS_OPTIONS).map(reread))
   }
   catch {
     // Recovery is a best-effort second opinion, asked for only when a record is already
@@ -198,7 +201,7 @@ async function identify(pid: number): Promise<LocalProcessRow | undefined> {
     const { stdout } = await execFile('ps', ['-p', String(pid), '-ww', '-o', 'pid=,lstart=,args='], {
       maxBuffer: PS_MAX_BUFFER,
     })
-    return parsePsRow(stdout.split('\n')[0] ?? '')
+    return parsePsRow(stdout.split('\n')[0] ?? '', PS_OPTIONS)
   }
   catch {
     // `ps` exits non-zero when the pid is gone, which is indistinguishable here from `ps` being
