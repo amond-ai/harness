@@ -5,7 +5,8 @@ on: it must run inside the sandbox image against a pinned SDK, and the patches
 below are not upstream yet.
 
 - **Repository**: [vercel/ai](https://github.com/vercel/ai)
-- **Packages taken from**: `@ai-sdk/harness-codex@1.0.113`, `@ai-sdk/harness@1.0.87`
+- **Packages taken from**: `@ai-sdk/harness-codex@1.0.160` (re-vendored from
+  `1.0.113`), `@ai-sdk/harness@1.0.87`
 - **License**: Apache-2.0 (both packages)
 
 `@ai-sdk/harness-codex@1.0.113` is a later release than the `@ai-sdk/harness@1.0.87`
@@ -20,6 +21,30 @@ turn's teardown waits for it, and is refused if the teardown outlasts the grace)
 `harness-protocol` pins `codex-bridge-protocol.ts` at `1.0.111`; that file is
 byte-identical in `1.0.113`, so the `start` this host parses is the one it
 vendored.
+
+The `1.0.113` → `1.0.160` re-vendor was a selective port, not a wholesale copy
+of `src/bridge`:
+
+- **Taken.** `7040da0` (1.0.120): a `web_search` call is held until a query
+  exists, emitted once per item id from `item.started` / `item.updated`, and
+  emitted on `item.completed` with `query ?? ''`, so the call no longer carries an
+  empty `query`. `76772ff` (1.0.131): an `mcp_tool_call` item that names a
+  `server` is reported as `mcp__<server>__<tool>` on `tool-call`, `nativeName`
+  and `tool-result`; an item without one keeps the bare tool name, as upstream
+  does. The `mapUsage` fix: `noCache` is `input − cacheRead − cacheWrite`, floored
+  at zero. The local `outputTokens` text/reasoning split and the
+  `cache_write_input_tokens` read are kept; both are richer than upstream's.
+- **Superseded.** `4d3c555` (failed native MCP calls surface as error tool
+  results): already implemented here. The `mcp_tool_call` branch of
+  `create-emit-stream-event.ts` sets `isError` on the `tool-result` from
+  `item.status === 'failed' || item.error != null`, and
+  `test/frames.test.ts` pins it. No patch number: nothing is carried over upstream.
+- **Deferred to [#38](https://github.com/amond-ai/harness/issues/38).** `d17ead7`,
+  the move to the Codex app-server, and what depends on it: `1bebfcf` (tools with
+  `toModelOutput()`) and `184b9d3` (image prompts), together with the
+  `native_tool` / `dynamic_tool_call` items and the step-tracker early finish.
+- **Skipped.** Everything else: host wiring, build config, dependency pins, and
+  the AI Gateway code (see below).
 
 ## File-by-file mapping
 
