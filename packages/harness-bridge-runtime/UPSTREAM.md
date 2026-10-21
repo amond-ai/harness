@@ -5,12 +5,19 @@ than depended on: it must run inside the sandbox image against a pinned CLI, and
 the patches below are not upstream yet.
 
 - **Repository**: [vercel/ai](https://github.com/vercel/ai)
-- **Commit**: `eb77f09e3c06c28e860d92e0de941b143c2eecec`
-- **Tag**: `@ai-sdk/harness-claude-code@1.0.142` (the same commit carries
-  `@ai-sdk/harness@1.0.138`)
-- **Packages taken from**: `@ai-sdk/harness@1.0.138` (re-vendored from
-  `1.0.87`)
+- **Commit**: `bb40cf03c5b68a4acee867d4fef9a65f71703c47`
+- **Tag**: `@ai-sdk/harness@1.0.158` (the same commit carries
+  `@ai-sdk/harness-claude-code@1.0.162` and `@ai-sdk/harness-codex@1.0.160`)
+- **Packages taken from**: `@ai-sdk/harness@1.0.158` (re-vendored from
+  `1.0.138`, and before that `1.0.87`)
 - **License**: Apache-2.0
+
+The runtime matches `@ai-sdk/harness@1.0.158` except for one deferred export. Between
+`1.0.138` and `1.0.158` upstream changed a single export in `src/bridge/index.ts`:
+`convertHarnessToolModelOutput` (`1bebfcf`, 1.0.151). It is not taken, because
+nothing calls it until the adapters support tools with `toModelOutput()`; taking
+it alone would add dead code. The other changesets in that range touched only
+`agent/`, `v1/` and `utils/`, none of which this package vendors.
 
 ## File-by-file mapping
 
