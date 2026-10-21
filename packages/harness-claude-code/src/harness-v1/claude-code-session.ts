@@ -238,7 +238,7 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
     sessionId: input.sessionId,
     isResume: input.isResume,
 
-    async doPromptTurn({ prompt, instructions, abortSignal, emit }) {
+    async doPromptTurn({ prompt, instructions, model, abortSignal, emit }) {
       usable()
       const text = promptText(prompt, input.harnessId)
       const resume = resumeThunk(input, session)
@@ -246,6 +246,7 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
         prompt: text,
         permissionMode: input.permissionMode,
         ...(instructions === undefined ? {} : { instructions }),
+        ...(model === undefined ? {} : { model }),
         attempt: input.state.attempt,
         cwd: input.workDir,
         env: input.env,

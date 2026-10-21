@@ -55,6 +55,11 @@ export interface SdkStartInput {
    * kept and this rides after it. Absent on a turn the caller gave none.
    */
   instructions?: string
+  /**
+   * The model this turn runs on, when the caller named one for it. Absent on a turn that did not,
+   * which leaves the choice to the Agent SDK's default.
+   */
+  model?: string
   /** The deployment's per-run ceilings, when it set any; the driver reads them off its config. */
   limits?: { maxBudgetUsd?: number, maxTurns?: number }
   startedAtMs: number
@@ -253,7 +258,8 @@ async function awaitStartAck(channel: TurnChannel, processId: string): Promise<v
  *
  * `instructions` follows the same absent-key discipline as everything above: a turn given no
  * posture says nothing about one, rather than sending `undefined` for a field the host's schema
- * declares optional.
+ * declares optional. `model` follows it, and an empty string counts as none: the host's schema
+ * takes any string, and an empty model name would reach the SDK as one rather than as unset.
  */
 function startFrame(input: SdkHandOffInput, resume: string | undefined): Record<string, unknown> {
   return {
@@ -265,6 +271,7 @@ function startFrame(input: SdkHandOffInput, resume: string | undefined): Record<
     approvalPolicy: 'deny',
     emitDeltas: false,
     ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
+    ...(input.model === undefined || input.model === '' ? {} : { model: input.model }),
     // The host's grace for `query.interrupt()` to produce a `result`, set to this side's own
     // interrupt settle so the two ladders agree: the host escalates at the moment the Worker
     // stops expecting a `finish`, rather than 15 s after it (the host's own default is 30 s).

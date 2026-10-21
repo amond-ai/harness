@@ -2,7 +2,8 @@ import type { ProcessLogEvent, SandboxProcessHandle } from '@amond-ai/sandbox'
 import { SandboxNoExitRecordError } from '@amond-ai/sandbox'
 import { describe, expect, it, vi } from 'vitest'
 import { KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
-import { BRIDGE_READY_TIMEOUT_MS, startTurnHost, TurnHostBootError } from './sdk-turn-start'
+import { createFakeTurnHost } from '../harness-v1/turn-host.fixtures'
+import { BRIDGE_READY_TIMEOUT_MS, handTurnToHost, startTurnHost, TurnHostBootError } from './sdk-turn-start'
 
 /**
  * A host process that has already ended, with the stderr it left and nothing on stdout — what a
@@ -388,5 +389,35 @@ describe('a turn host that never announced readiness', () => {
 
     expect((failure as Error).message).toBe('never reached')
     expect(failure).not.toBeInstanceOf(TurnHostBootError)
+  })
+})
+
+describe('the start frame\'s model', () => {
+  async function startsFor(model: string | undefined): Promise<Record<string, unknown>[]> {
+    const host = createFakeTurnHost({ frames: () => [] })
+    await handTurnToHost({
+      processId: 'host-1',
+      connect: async () => await host.openSocket(''),
+      prompt: 'do the thing',
+      permissionMode: 'bypassPermissions',
+      settingSources: ['project'],
+      model,
+      startedAtMs: 1_000,
+      port: 39_100,
+      token: 'tok',
+      stateDir: '/workspace/.turn-host/run-1/1',
+    })
+    return host.starts
+  }
+
+  it('is sent when the turn names one', async () => {
+    expect(await startsFor('claude-x')).toMatchObject([{ model: 'claude-x' }])
+  })
+
+  it('leaves no key when the turn names none, or an empty one', async () => {
+    for (const model of [undefined, '']) {
+      const [start] = await startsFor(model)
+      expect(start).not.toHaveProperty('model')
+    }
   })
 })
