@@ -41,8 +41,8 @@
     ]
   },
   "catalog": {
-    "@ai-sdk/harness": "1.0.87",
-    "@ai-sdk/provider-utils": "5.0.30",
+    "@ai-sdk/harness": "1.0.158",
+    "@ai-sdk/provider-utils": "5.0.64",
     "@cloudflare/sandbox": "0.13.0-next.724.1",
     "@daytona/sdk": "^0.211.2",
     "@pleaseai/eslint-config": "^0.0.4",
