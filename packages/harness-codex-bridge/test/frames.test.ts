@@ -359,6 +359,31 @@ it('emits one paired call for a command Codex sent without an id', async () => {
   client.close()
 })
 
+it('treats a null item id as a missing one', async () => {
+  // Parsed from wire JSON: `CodexItem.id` admits no `null`, but nothing on the wire stops one.
+  const codex = createFakeCodex([
+    threadStarted(),
+    JSON.parse(
+      '{"type":"item.started","item":{"id":null,"type":"command_execution","command":"ls","status":"in_progress"}}',
+    ),
+    JSON.parse(
+      '{"type":"item.completed","item":{"id":null,"type":"command_execution","command":"ls","exit_code":0,"status":"completed"}}',
+    ),
+    turnCompleted(),
+  ])
+  host = await startHost({ codex: codex.factory })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'list the files' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const calls = client.frames.filter(frame => frame.type === 'tool-call')
+  const results = client.frames.filter(frame => frame.type === 'tool-result')
+  expect(calls).toHaveLength(1)
+  expect(results.map(result => result.toolCallId)).toEqual([calls[0]?.toolCallId])
+  client.close()
+})
+
 it('emits one paired call for an MCP tool call Codex sent without an id', async () => {
   const codex = createFakeCodex([
     threadStarted(),
