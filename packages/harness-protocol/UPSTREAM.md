@@ -6,21 +6,22 @@ which has no business inside a sandbox image, and the turn host that runs there
 needs the same schemas the Worker client does.
 
 - **Repository**: [vercel/ai](https://github.com/vercel/ai)
-- **Commit**: `eb77f09e3c06c28e860d92e0de941b143c2eecec`
-- **Tag**: `@ai-sdk/harness-claude-code@1.0.142` (the same commit carries
-  `@ai-sdk/harness@1.0.138`)
-- **Packages taken from**: `@ai-sdk/harness-claude-code@1.0.142`,
-  `@ai-sdk/harness@1.0.138` (re-vendored from `1.0.90` / `1.0.87`),
-  `@ai-sdk/harness-codex@1.0.111`
+- **Commit**: `bb40cf03c5b68a4acee867d4fef9a65f71703c47`
+- **Tag**: `@ai-sdk/harness@1.0.158` (the same commit carries
+  `@ai-sdk/harness-claude-code@1.0.162` and `@ai-sdk/harness-codex@1.0.160`)
+- **Packages taken from**: `@ai-sdk/harness-claude-code@1.0.162`,
+  `@ai-sdk/harness@1.0.158`, `@ai-sdk/harness-codex@1.0.160` (re-vendored from
+  `1.0.142` / `1.0.138` / `1.0.111`, and before that `1.0.90` / `1.0.87`)
 - **License**: Apache-2.0 (all three packages)
 
-`@ai-sdk/harness-codex@1.0.111` was taken from the published package rather than
-from a commit. That is safe for the one file vendored from it: it imports four
-schemas from `@ai-sdk/harness` and adds a `start` extension, and every one of
-those four exists in the `1.0.138` copy under `harness-v1/`. The re-vendor
-changed two of them only by addition — the outbound union gained the
-`tool-input-*` parts, which the Codex bridge never emits, and the inbound
-`tool-result` an optional `toolResult`.
+`@ai-sdk/harness-codex@1.0.160` is covered by the same commit, so all three halves
+now come from one tree. Neither adapter file took a change in this re-vendor.
+Between `1.0.142` and `1.0.162`, `claude-code-bridge-protocol.ts` only gained the
+deferred `prompt` field (see Deferred below). Between `1.0.111` and `1.0.160`,
+`codex-bridge-protocol.ts` gained the same field and a rewording of the
+`resumeThreadId` comment for the app-server's `thread/resume`, which belongs to
+`d17ead7` (deferred with the Codex bridge's app-server move). Both files are
+therefore still their earlier content.
 
 ## File-by-file mapping
 
@@ -58,23 +59,33 @@ one namespace would leave a consumer picking by luck. Claude's extension is the
 neither.
 
 `@ai-sdk/provider` is therefore a devDependency at the version the root
-catalog's `@ai-sdk/harness@1.0.87` pins (`4.0.8`), and `@ai-sdk/provider-utils`
-one at the version that same release pins (`5.0.30`, through the root catalog,
-which `harness-bridge-runtime`'s `ToolResultPart` import shares), so this
-package shares one copy of each with the harness packages. The root catalog's
-`@ai-sdk/harness` was not bumped with the re-vendor; the files vendored at
-`1.0.138` type-check against both. The imports are type-only, so they are
-erased at compile time and reach neither the turn host's bundle nor the sandbox
-image.
+catalog's `@ai-sdk/harness` pins, and `@ai-sdk/provider-utils` one at the version
+that same release pins (through the root catalog, which `harness-bridge-runtime`'s
+`ToolResultPart` import shares), so this package shares one copy of each with the
+harness packages. The `1.0.158` re-vendor is accompanied by a pin bump (PR #39)
+that moves the catalog's `@ai-sdk/harness` to `1.0.158`, `@ai-sdk/provider-utils`
+to `5.0.64` and `@ai-sdk/provider` to `4.0.31`; before it, the catalog was still on
+`@ai-sdk/harness@1.0.87` with `5.0.30` / `4.0.8`, and the files vendored at `1.0.138`
+type-checked against both. The imports are type-only, so they are erased at
+compile time and reach neither the turn host's bundle nor the sandbox image.
 
 What the `1.0.138` / `1.0.142` re-vendor brought in: the `tool-input-start`,
 `tool-input-delta` and `tool-input-end` parts and their entries in both
-unions, `stepToolCallCount` on `tool-call`, the inbound `tool-result`'s
+unions, `stepToolCallCount` on `tool-call` (removed again at `1.0.158`, see
+below), the inbound `tool-result`'s
 structured `toolResult`, the questions-tool schema, and the `start` fields
 `agentProgressSummaries`, `forwardSubagentText` and `resumeSessionId` — the
 last an alias of this package's own `resume` that the turn host resolves. The
 questions-tool file is a shared half, so the root and both adapter entries
 export it.
+
+The `1.0.158` re-vendor took `6c65131` (1.0.151) as-is: `stepToolCallCount` is
+gone from the `tool-call` type and schema, and the `finish-step` comment now says
+adapters also emit it while waiting on host input. It is not a numbered patch,
+because nothing local differs from upstream. The schema is a plain `z.object`, so a
+`tool-call` frame from a stale sender that still carries the field parses, with the
+field stripped. The `harness-v1-prompt-control.ts` doc hunk and the other
+`1.0.139` to `1.0.157` changesets do not touch a file mapped here.
 
 ## Patches carried on top of upstream
 
@@ -154,3 +165,20 @@ declares `thinking` without `.optional()`, so its schema refuses every `start`
 that omits it. `src/protocol.ts` reuses `.shape.thinking` and makes it optional
 rather than restating the union. Codex's vendored `start` needs no such patch —
 every field it adds is already `.optional()`.
+
+## Upstream behaviour deliberately dropped
+
+- **The `CallWarningRegistry` augmentation (`4c6979c`, 1.0.140).**
+  `harness-v1-call-warning.ts` upstream ends with `declare module 'ai' { interface
+  CallWarningRegistry { harnessV1: HarnessV1CallWarning } }`, so the AI SDK's
+  `CallWarning` accepts the harness warning shapes. This package must not depend
+  on `ai`, and a `declare module 'ai'` block fails to compile without it, so the
+  augmentation is omitted. The accompanying doc-comment rewording is omitted too:
+  it describes that augmentation.
+
+## Deferred
+
+- **`prompt: harnessPromptContentSchema` in the Claude and Codex `start` schemas**
+  (`dc1d7a6`, `ca2a9f7`, `184b9d3`). This is image-prompt support. It needs the
+  adapters to accept and forward non-text prompt content, so it waits for that work
+  and will land as protocol patch 8.
