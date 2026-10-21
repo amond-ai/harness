@@ -23,20 +23,20 @@ const harnessSandbox = createHarnessSandboxProvider({
 `env.Sandbox` is the Durable Object namespace bound to `@cloudflare/sandbox`'s `Sandbox` class in
 your `wrangler.jsonc`.
 
-## A naming layer, not a mapping one
+## What the provider decides
 
 The contract's shapes are structural copies of `@cloudflare/sandbox`'s, so `getSandbox(...)`'s
 return value satisfies `SandboxSession` as it is. `session(id)` returns that client unchanged, and
-the provider is checked with `satisfies SandboxProvider`: if upstream diverges, the build fails
-rather than the first replay in production.
+`satisfies SandboxProvider` checks the provider at build time. If upstream diverges, the build
+fails instead of the first replay in production.
 
-What the package does decide is what each call site would otherwise inline:
+The package decides only what each call site would otherwise write inline:
 
 | Decision | Answer |
 | --- | --- |
 | Namespace | The one passed to `createCloudflareProvider`. |
-| Boot options | `SANDBOX_OPTIONS` from `@amond-ai/harness-transport-cloudflare`, so an id resolves to the same container here and in the transport's `ws` stand-in. Not configurable, because the stand-in is reached by a wrangler `alias` and cannot be configured either. |
-| Port endpoint | A `localhost` URL tagged with `SANDBOX_ID_PARAM`. A Cloudflare sandbox's ports are private, so `@amond-ai/harness-transport-cloudflare` routes a tagged URL through `Sandbox.wsConnect` instead of dialing it. Costs no I/O. |
+| Boot options | `SANDBOX_OPTIONS` from `@amond-ai/harness-transport-cloudflare`, so an id resolves to the same container here and in the transport's `ws` stand-in. You cannot override them, because a wrangler `alias` loads the stand-in and it cannot take configuration either. |
+| Port endpoint | A `localhost` URL tagged with `SANDBOX_ID_PARAM`. A Cloudflare sandbox's ports are private, so `@amond-ai/harness-transport-cloudflare` routes a tagged URL through `Sandbox.wsConnect` instead of dialing it. Building the URL does no I/O. |
 
 ## What it does not supply
 
@@ -47,4 +47,4 @@ container's egress with `Sandbox.outboundByHost`; see
 
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE).
+Apache-2.0. See [LICENSE](./LICENSE).
