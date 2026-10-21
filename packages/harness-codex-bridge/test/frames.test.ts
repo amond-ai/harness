@@ -359,22 +359,29 @@ it('emits one paired call for a command Codex sent without an id', async () => {
   client.close()
 })
 
-it('treats a null item id as a missing one', async () => {
+it.each([
+  [
+    'command',
+    '{"type":"item.started","item":{"id":null,"type":"command_execution","command":"ls","status":"in_progress"}}',
+    '{"type":"item.completed","item":{"id":null,"type":"command_execution","command":"ls","exit_code":0,"status":"completed"}}',
+  ],
+  [
+    'web search',
+    '{"type":"item.started","item":{"id":null,"type":"web_search","query":"codex sdk"}}',
+    '{"type":"item.completed","item":{"id":null,"type":"web_search","query":"codex sdk"}}',
+  ],
+])('treats a null id on a %s as a missing one', async (_kind, started, completed) => {
   // Parsed from wire JSON: `CodexItem.id` admits no `null`, but nothing on the wire stops one.
   const codex = createFakeCodex([
     threadStarted(),
-    JSON.parse(
-      '{"type":"item.started","item":{"id":null,"type":"command_execution","command":"ls","status":"in_progress"}}',
-    ),
-    JSON.parse(
-      '{"type":"item.completed","item":{"id":null,"type":"command_execution","command":"ls","exit_code":0,"status":"completed"}}',
-    ),
+    JSON.parse(started),
+    JSON.parse(completed),
     turnCompleted(),
   ])
   host = await startHost({ codex: codex.factory })
   const client = await connect(host)
 
-  client.send({ type: 'start', prompt: 'list the files' })
+  client.send({ type: 'start', prompt: 'do the thing' })
   await client.waitFor(frame => frame.type === 'finish')
 
   const calls = client.frames.filter(frame => frame.type === 'tool-call')
