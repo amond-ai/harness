@@ -51,6 +51,7 @@ one more way this is not a sandbox. Pass `env` to narrow it.
   <sandboxId>/                  the working directory, when the provider owns it
   .state/
     <sandboxId>/
+      .nonce                    what this sandbox's wrappers are recognised by
       <processId>.out           stdout, as the wrapper redirected it
       <processId>.err           stderr
       <processId>.pid           the command's own pid, for aiming a signal
@@ -97,13 +98,18 @@ have started. Three things make that work, and each is a decision rather than a 
    and nothing is left to observe the exit, so a turn that finished perfectly comes back as
    `SandboxNoExitRecordError`. The wrapper records `$?` from inside the tree.
 2. **Liveness is verified, never inferred from the record.** Pids are reused, so the pid alone
-   is not an answer. What identifies a process is the wrapper's own marker in its command line;
-   the kernel's start time is the fallback for a host that cannot report one. That ordering is
+   is not an answer. What identifies a process is the wrapper's own marker in its command line
+   — which carries a nonce minted once per sandbox and kept in its state directory, because
+   every other part of that marker is public and `destroy()` signals the process group of
+   whatever recovery claims; the kernel's start time is the fallback for a host that cannot
+   report one. That ordering is
    deliberate — `ps -o lstart` resolves to a whole second on both supported platforms, so a pid
    recycled inside that second compares equal, and there is no portable finer clock (`/proc` is
    Linux-only). A row whose command line is unreadable falls back to the time rather than to a
    verdict: truncated argv is not evidence of a stranger, and calling a live turn dead is the
-   expensive mistake.
+   expensive mistake. macOS `ps` prints `(bash)` for a live wrapper whose arguments it
+   momentarily failed to read, so that stand-in counts as unreadable, and recovery reads such a
+   row again before passing over it.
    A process this check cannot confirm is never signalled. `kill` reports the non-delivery and
    leaves the caller's bounded wait to escalate, as `SandboxProcessHandle.kill` requires.
 3. **A process is over when its *group* is empty**, not when the wrapper exited. A command that
@@ -117,6 +123,22 @@ and — only on a timeout — ends what the command left running in the wrapper'
 Without that last step the deadline would bound nothing: `sh -c 'sleep 300 & wait'` answers
 SIGTERM with exit 143 while its child keeps running, and a process group that is not empty is a
 process this backend correctly reports as still alive.
+
+The nonce authenticates against coincidence, not against a local attacker: it is in the
+wrapper's command line, so anything on the machine that can run `ps` can read it and reproduce
+it. That is the same bar the rest of this package holds — a command here runs unconfined with
+the orchestrator's environment — and what it closes is the case that was actually reachable, a
+process that reproduces the marker without trying to. Delete `.nonce` and recovery claims
+nothing at all: an orphan that could once have been ended is lost, which is the cheaper of the
+two mistakes available at that point. A process that still has its record is not called dead on
+that evidence either: a row shaped like its own wrapper but carrying the wrong nonce reads as
+unknown, so `destroy()` refuses rather than signalling it or deleting the state.
+
+**Upgrading from a release without the nonce.** Wrappers that an earlier release spawned carry no
+nonce, so this release does not recognise them. A turn whose record survives the upgrade falls
+back to its kernel start time where one was pinned, and otherwise reads as unknown. It is neither
+killed nor cleaned up. A turn whose record is already gone cannot be recovered at all. Let running
+turns finish, or stop them, before you upgrade.
 
 One limit worth knowing before you rely on recovery: a process found through the process table
 rather than through its record carries the argv **as the process table renders it**, and `ps`
@@ -143,7 +165,9 @@ URL that provably cannot be dialed.
 
 Process groups, signal numbers and `ps` all mean something specific here, and Windows has no
 equivalent for any of the three. macOS and Linux are supported; the real-machine suite
-(`src/local.real.test.ts`) skips itself elsewhere rather than pretending.
+(`src/local.real.test.ts`) skips itself elsewhere rather than pretending. The filesystem under
+`stateRoot` must support hard links, because `.nonce` is published with `link(2)`; on one that does
+not (exFAT, some SMB and FUSE mounts) the first `exec` fails rather than running without a nonce.
 
 `src/node-host.ts` is the only *shipped* module that imports a `node:` builtin, and it uses
 specifiers rather than any one engine's API, so it runs on Node, Bun and Deno alike. Everything

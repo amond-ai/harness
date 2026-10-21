@@ -26,6 +26,33 @@ describe('parsePsRow', () => {
   })
 })
 
+describe('parsePsRow on arguments ps could not read', () => {
+  it('reads macOS\'s parenthesised stand-in as no command line rather than a stranger\'s', () => {
+    expect(parsePsRow('87281 Wed Oct 21 10:30:49 2026     (bash)', { parenthesisedStandIn: true })).toEqual({
+      pid: 87281,
+      startedAt: 'Wed Oct 21 10:30:49 2026',
+      command: '',
+    })
+  })
+
+  it('keeps a Linux-style parenthesised argv readable when the stand-in mapping is off', () => {
+    expect(parsePsRow('1234 Wed Oct 21 10:30:49 2026 (sd-pam)')?.command).toBe('(sd-pam)')
+  })
+
+  it('reads a stand-in up to the kernel\'s 16-character name, spaces included, and no longer', () => {
+    const macos = { parenthesisedStandIn: true }
+    expect(parsePsRow('9 Fri Sep 12 21:33:01 2026 (github-monitor-c)', macos)?.command).toBe('')
+    expect(parsePsRow('9 Fri Sep 12 21:33:01 2026 (Google Chrome He)', macos)?.command).toBe('')
+    expect(parsePsRow('9 Fri Sep 12 21:33:01 2026 (abcdefghijklmnopq)', macos)?.command).toBe('(abcdefghijklmnopq)')
+    expect(parsePsRow('9 Fri Sep 12 21:33:01 2026 (a worker titled itself)', macos)?.command)
+      .toBe('(a worker titled itself)')
+  })
+
+  it('keeps a command line that merely contains parentheses', () => {
+    expect(parsePsRow('9 Fri Sep 12 21:33:01 2026 (bash) -c x', { parenthesisedStandIn: true })?.command).toBe('(bash) -c x')
+  })
+})
+
 describe('parseStartedAt', () => {
   it('normalises the one value a per-pid read returns', () => {
     expect(parseStartedAt('  Fri Sep 12 21:33:01 2026\n')).toBe('Fri Sep 12 21:33:01 2026')

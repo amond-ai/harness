@@ -78,9 +78,31 @@ export interface LocalHost {
    * An absent file reads as empty rather than throwing: a journal is created by the wrapper's
    * first write, so "the process has produced no stderr yet" and "there is no such process"
    * arrive here identically and only the caller can tell them apart.
+   *
+   * A path that exists but is not a regular file (a FIFO, a directory, a device) rejects rather
+   * than being read, and must do so without blocking on it: a directory with `EISDIR`, any
+   * other kind with `EINVAL`.
    */
   readSlice: (path: string, offset: number, length?: number) => Promise<LocalSlice>
   writeFile: (path: string, data: Uint8Array) => Promise<void>
+  /**
+   * Publish a file only if nothing is there yet. `false` when something already was.
+   *
+   * Implementations must make the file appear at `path` with its complete contents or not at
+   * all: a caller that loses the race reads the winner's file straight away, so it must never be
+   * observable empty or partially written. The Node host writes a sibling and hard-links it
+   * into place; `link(2)` refuses to replace, so exactly one caller wins.
+   *
+   * Apart from {@link LocalHost.writeFile} because the answer is the point rather than the
+   * write: the sandbox's wrapper nonce has to be minted once and then *agreed on*, and two
+   * orchestrators opening the same sandbox at the same moment both reach this call. A
+   * read-then-write would have the second one overwrite a value the first has already spawned
+   * wrappers carrying, which recovery would afterwards refuse to claim as its own — every
+   * process of the first orchestrator's, silently unrecoverable. Exclusive creation makes the
+   * loser of that race read the winner's value instead, which is the only outcome where both
+   * of them are still talking about the same sandbox.
+   */
+  createFile: (path: string, data: Uint8Array) => Promise<boolean>
   /** Create the directory and every parent. Succeeds when it is already there. */
   mkdir: (path: string) => Promise<void>
   /** Entry names, or `[]` when the directory does not exist. */

@@ -123,6 +123,7 @@ export function createLocalProvider(options: LocalProviderOptions): SandboxProvi
         paths: sandboxPaths(options, sandboxId),
         env: options.env,
         newProcessId: options.newProcessId,
+        newNonce: options.newNonce,
         now: options.now,
         monotonicNowMs: options.monotonicNowMs,
         pollIntervalMs: options.pollIntervalMs,

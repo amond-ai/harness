@@ -13,7 +13,31 @@ import type { LocalProcessRow } from './local-surface'
 /** `<pid> <5 lstart tokens> <the rest, verbatim>`. */
 const ROW = /^\s*(\d+)\s+(\S+(?:\s+\S+){4})\s+(\S.*)$/
 
-export function parsePsRow(line: string): LocalProcessRow | undefined {
+/**
+ * macOS `ps`'s `(<comm>)` in place of arguments it could not read — see {@link readableCommand}.
+ *
+ * `<comm>` is the kernel's process name, cut to `MAXCOMLEN` (16) characters and free to hold
+ * spaces (`(github-monitor-c)`, `(Google Chrome He)`), so the cap is the one thing that tells it
+ * apart from a parenthesised argv. A narrower character class would miss real stand-ins and
+ * bring back the misread this exists to stop.
+ */
+const UNREAD_ARGS = /^\(.{1,16}\)$/
+
+/**
+ * What differs between the platforms' `ps`, decided by the caller so this file never has to
+ * ask which platform it is on.
+ */
+export interface PsParseOptions {
+  /**
+   * Read a `(<comm>)` command as macOS `ps`'s stand-in for arguments it could not read. Off by
+   * default: on Linux a parenthesised command is a real argv (systemd's `(sd-pam)`), and
+   * reading it as unreadable would send it through pointless rereads and make a reused pid
+   * answer "unknown" instead of "gone".
+   */
+  parenthesisedStandIn?: boolean
+}
+
+export function parsePsRow(line: string, options: PsParseOptions = {}): LocalProcessRow | undefined {
   const match = ROW.exec(line)
   if (!match) {
     return undefined
@@ -22,7 +46,21 @@ export function parsePsRow(line: string): LocalProcessRow | undefined {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     return undefined
   }
-  return { pid, startedAt: match[2]!.replace(/\s+/g, ' '), command: match[3]! }
+  return { pid, startedAt: match[2]!.replace(/\s+/g, ' '), command: options.parenthesisedStandIn ? readableCommand(match[3]!) : match[3]! }
+}
+
+/**
+ * A command line, or `''` where `ps` printed its stand-in for one it could not read.
+ *
+ * macOS `ps` renders a process whose arguments it failed to read as `(<comm>)`, and the failure
+ * is not reserved for zombies: an idle `/bin/sh -c` wrapper with a live command under it came
+ * back as `(bash)` on roughly one read in a hundred (measured 2026-10-21, more often under
+ * load). Taken at face value that is a stranger's command line, so recovery passes over a live
+ * wrapper and liveness can call one gone. `''` is the registry's word for "unreadable", which it
+ * answers with the start time rather than with a verdict.
+ */
+function readableCommand(command: string): string {
+  return UNREAD_ARGS.test(command) ? '' : command
 }
 
 /**
@@ -32,10 +70,10 @@ export function parsePsRow(line: string): LocalProcessRow | undefined {
  * which being unrecognisable is not a reason to fail a discovery call that was asking about
  * something else entirely.
  */
-export function parsePsTable(output: string): LocalProcessRow[] {
+export function parsePsTable(output: string, options: PsParseOptions = {}): LocalProcessRow[] {
   const rows: LocalProcessRow[] = []
   for (const line of output.split('\n')) {
-    const row = parsePsRow(line)
+    const row = parsePsRow(line, options)
     if (row) {
       rows.push(row)
     }

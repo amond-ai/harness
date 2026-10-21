@@ -27,6 +27,8 @@ export const SANDBOX_ID = 'run-42'
 export const WORK = `${ROOT}/${SANDBOX_ID}`
 export const STATE = `${ROOT}/.state/${SANDBOX_ID}`
 export const AT = '2026-09-12T13:00:00.000Z'
+/** The wrapper nonce {@link sessionOver} mints, fixed so a command line can be written by hand. */
+export const NONCE = 'sandbox-nonce'
 
 export const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
 export const decode = (data: Uint8Array): string => new TextDecoder().decode(data)
@@ -106,6 +108,15 @@ export function fakeHost(options: { nextPid?: number } = {}): FakeHost {
       },
       writeFile: async (path: string, data: Uint8Array) => {
         files.set(path, data)
+      },
+      createFile: async (path: string, data: Uint8Array) => {
+        // Modelled rather than aliased to `writeFile`: the registry's nonce depends on the
+        // refusal, so a fake that always wrote would let a race the real host loses pass here.
+        if (files.has(path)) {
+          return false
+        }
+        files.set(path, data)
+        return true
       },
       mkdir: async (path: string) => {
         // Every ancestor, not just the leaf: the real `LocalHost.mkdir` is `mkdir -p`, and a
@@ -194,6 +205,7 @@ export function sessionOver(fake: FakeHost, overrides: Partial<LocalSessionOptio
     paths: { work: WORK, state: STATE, owned: true },
     env: { PATH: '/usr/bin' },
     newProcessId: () => `p${String(++minted)}`,
+    newNonce: () => NONCE,
     now: () => AT,
     pollIntervalMs: 0,
     followIntervalMs: 0,

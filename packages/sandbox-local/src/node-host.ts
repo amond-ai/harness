@@ -14,7 +14,9 @@
 import type { LocalHost, LocalProcessRow, LocalSlice, LocalSpawned, LocalSpawnSpec } from './local-surface'
 import { Buffer } from 'node:buffer'
 import { execFile as execFileCallback, spawn } from 'node:child_process'
-import { mkdir, open, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { constants as fsConstants } from 'node:fs'
+import { link, mkdir, open, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import process from 'node:process'
 import { promisify } from 'node:util'
 import { WRAPPER_SHELL } from './journal'
@@ -31,6 +33,17 @@ const EMPTY = new Uint8Array()
  * `-ww` renders a wrapper's command line in full, and this backend's argv carries prompts.
  */
 const PS_MAX_BUFFER = 16 * 1024 * 1024
+
+/**
+ * Extra reads given to a process-table row whose arguments `ps` could not read.
+ *
+ * Bounded because zombies render the same way and never become readable. Each attempt is one
+ * `ps -p` for every such row at once, so the bound is on forks per listing, not per row. An
+ * attempt that makes none of them readable ends the rereads early: macOS prints hardened and
+ * other-user processes as `(comm)` for good, so those rows would otherwise cost every listing
+ * the full bound.
+ */
+const UNREADABLE_REREADS = 2
 
 /**
  * Whether a syscall failed because the path names nothing.
@@ -57,10 +70,24 @@ async function sizeOf(path: string): Promise<number | undefined> {
   }
 }
 
+/**
+ * Read a slice of a regular file.
+ *
+ * Anything else is refused: a directory with `EISDIR`, as a plain read of one fails, and any
+ * other kind (a FIFO, a device) with `EINVAL`. A sandbox's own commands can write to the state
+ * directory, so a journal or the nonce file can be replaced by a FIFO; a plain `open(path, 'r')`
+ * on a FIFO with no writer blocks before any size limit or error handling applies, and every
+ * caller of this read — listing, recovery, status, exec, destroy — would hang with it. The open
+ * is therefore non-blocking (a no-op for regular files), and the kind is checked on the opened
+ * descriptor rather than on the path, so a replacement between a check and the open cannot slip
+ * through. That order means a replacement pointing at a terminal is opened before it is refused,
+ * so the open also passes `O_NOCTTY`: without it, an orchestrator that leads a session with no
+ * controlling terminal would take that terminal as its own.
+ */
 async function readSlice(path: string, offset: number, length?: number): Promise<LocalSlice> {
   let handle
   try {
-    handle = await open(path, 'r')
+    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | fsConstants.O_NOCTTY)
   }
   catch (error) {
     if (isMissing(error)) {
@@ -71,7 +98,14 @@ async function readSlice(path: string, offset: number, length?: number): Promise
     throw error
   }
   try {
-    const total = (await handle.stat()).size
+    const info = await handle.stat()
+    if (info.isDirectory()) {
+      throw Object.assign(new Error(`'${path}' is a directory`), { code: 'EISDIR' })
+    }
+    if (!info.isFile()) {
+      throw Object.assign(new Error(`'${path}' is not a regular file`), { code: 'EINVAL' })
+    }
+    const total = info.size
     const available = Math.max(0, total - offset)
     const want = length === undefined ? available : Math.min(length, available)
     if (want === 0) {
@@ -125,6 +159,9 @@ function signal(pid: number, sent: number): boolean {
   }
 }
 
+/** Only macOS `ps` prints `(<comm>)` for arguments it could not read; elsewhere it is a real argv. */
+const PS_OPTIONS = { parenthesisedStandIn: process.platform === 'darwin' }
+
 async function processes(): Promise<LocalProcessRow[]> {
   try {
     // `-ww` so a long wrapper script is not truncated to the terminal width: the command line
@@ -132,11 +169,59 @@ async function processes(): Promise<LocalProcessRow[]> {
     const { stdout } = await execFile('ps', ['-A', '-ww', '-o', 'pid=,lstart=,args='], {
       maxBuffer: PS_MAX_BUFFER,
     })
-    return parsePsTable(stdout)
+    return await rereadUnreadable(parsePsTable(stdout, PS_OPTIONS))
   }
   catch {
     // Recovery is a best-effort second opinion, asked for only when a record is already
     // missing. A `ps` that will not run leaves the caller exactly where it was.
+    return []
+  }
+}
+
+/**
+ * Ask again about the rows whose arguments `ps` could not read, up to
+ * {@link UNREADABLE_REREADS} times, stopping as soon as an attempt reads none of them.
+ *
+ * Recovery has no other look at a process whose record is gone, so one missed read is a live
+ * wrapper left out of the listing — and out of what `destroy()` ends. The miss is transient on
+ * macOS (see `ps-table.ts`), so a second read usually has the arguments. A pid that has gone or
+ * changed hands in between keeps the original row: its unreadable command line claims nothing.
+ *
+ * One `ps -p` per attempt for all of them together, not one per row: the misses come in bursts
+ * under load, which is the worst moment to fork a `ps` for each.
+ */
+async function rereadUnreadable(rows: LocalProcessRow[]): Promise<LocalProcessRow[]> {
+  const byPid = new Map(rows.map(row => [row.pid, row]))
+  for (let attempt = 0; attempt < UNREADABLE_REREADS; attempt++) {
+    const unreadable = [...byPid.values()].filter(row => row.command === '').map(row => row.pid)
+    if (unreadable.length === 0) {
+      break
+    }
+    let resolved = false
+    for (const again of await rowsOf(unreadable)) {
+      if (again.startedAt === byPid.get(again.pid)?.startedAt) {
+        byPid.set(again.pid, again)
+        resolved ||= again.command !== ''
+      }
+    }
+    if (!resolved) {
+      break
+    }
+  }
+  return rows.map(row => byPid.get(row.pid) ?? row)
+}
+
+/** The rows `ps` has for these pids now; one that has gone is simply absent. */
+async function rowsOf(pids: readonly number[]): Promise<LocalProcessRow[]> {
+  try {
+    const { stdout } = await execFile('ps', ['-p', pids.join(','), '-ww', '-o', 'pid=,lstart=,args='], {
+      maxBuffer: PS_MAX_BUFFER,
+    })
+    return parsePsTable(stdout, PS_OPTIONS)
+  }
+  catch {
+    // Non-zero when none of the pids is left, or when `ps` will not run: either way there is
+    // nothing better to replace the unreadable rows with.
     return []
   }
 }
@@ -152,7 +237,7 @@ async function identify(pid: number): Promise<LocalProcessRow | undefined> {
     const { stdout } = await execFile('ps', ['-p', String(pid), '-ww', '-o', 'pid=,lstart=,args='], {
       maxBuffer: PS_MAX_BUFFER,
     })
-    return parsePsRow(stdout.split('\n')[0] ?? '')
+    return parsePsRow(stdout.split('\n')[0] ?? '', PS_OPTIONS)
   }
   catch {
     // `ps` exits non-zero when the pid is gone, which is indistinguishable here from `ps` being
@@ -197,6 +282,38 @@ export function nodeLocalHost(): LocalHost {
     exists: async (path: string) => await sizeOf(path) !== undefined,
     readSlice,
     writeFile: async (path: string, data: Uint8Array) => writeFile(path, data),
+    createFile: async (path: string, data: Uint8Array) => {
+      // The contents are written in full to a sibling nobody looks for, and only then linked into
+      // place. `link(2)` fails with EEXIST rather than replacing, so exactly one caller publishes
+      // and the destination only ever appears with its complete contents: a loser (or a crash
+      // between the write and the link) never exposes an empty or partial file at `path`.
+      // The sibling shares the directory because a hard link cannot cross filesystems, and its
+      // name neither ends in `.meta.json` nor equals the nonce path, so listing ignores it.
+      const slash = path.lastIndexOf('/')
+      const staging = `${path.slice(0, slash + 1)}.staging-${randomUUID()}.tmp`
+      //
+      // The write sits inside the `try` so a failure partway through it (ENOSPC, a quota) still
+      // unlinks the partial sibling: without that, every failed attempt on a full disk would leave
+      // another uniquely named file behind, leaking exactly when storage is scarcest.
+      let linking = false
+      try {
+        await writeFile(staging, data, { flag: 'wx' })
+        linking = true
+        await link(staging, path)
+        return true
+      }
+      catch (error) {
+        // EEXIST means "someone else published the nonce" only for `link`. The same code from the
+        // `wx` write is a collision on a fresh random name, which is a fault, not a lost race.
+        if (linking && (error as { code?: string }).code === 'EEXIST') {
+          return false
+        }
+        throw error
+      }
+      finally {
+        await unlink(staging).catch(() => {})
+      }
+    },
     mkdir: async (path: string) => {
       await mkdir(path, { recursive: true })
     },
