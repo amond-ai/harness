@@ -209,23 +209,27 @@ describe('the turn host\'s outbound union', () => {
     }).success).toBe(true)
   })
 
-  it('accepts the tool-input parts and a counted tool call, in both unions', () => {
+  it('accepts the tool-input parts, and a tool call without the retired step count, in both unions', () => {
     for (const frame of [
       { type: 'tool-input-start', id: 'toolu_1', toolName: 'bash', providerExecuted: true },
       { type: 'tool-input-delta', id: 'toolu_1', delta: '{"command":' },
       { type: 'tool-input-end', id: 'toolu_1' },
-      { type: 'tool-call', toolCallId: 'toolu_1', toolName: 'bash', input: '{}', stepToolCallCount: 2 },
+      { type: 'tool-call', toolCallId: 'toolu_1', toolName: 'bash', input: '{}' },
     ]) {
       expect(harnessV1BridgeOutboundMessageSchema.safeParse(frame).success).toBe(true)
       expect(turnHostOutboundMessageSchema.safeParse(frame).success).toBe(true)
     }
-    expect(turnHostOutboundMessageSchema.safeParse({
+    // Retired upstream in 1.0.151: the field is no longer part of the schema,
+    // so a stale sender's value is dropped rather than carried or refused.
+    const parsed = turnHostOutboundMessageSchema.safeParse({
       type: 'tool-call',
       toolCallId: 'toolu_1',
       toolName: 'bash',
       input: '{}',
-      stepToolCallCount: 0,
-    }).success).toBe(false)
+      stepToolCallCount: 2,
+    })
+    expect(parsed.success).toBe(true)
+    expect(parsed.data).not.toHaveProperty('stepToolCallCount')
   })
 
   it('still accepts every frame the upstream union carries', () => {

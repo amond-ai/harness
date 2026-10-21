@@ -68,7 +68,7 @@ it('reports the journal, the stop and the mapped usage on finish', async () => {
   expect(finish.totalUsage).toEqual({
     // Cache writes and reasoning tokens are reported, not flattened away: a
     // reasoning-heavy turn would otherwise read as all visible text.
-    inputTokens: { total: 10, noCache: 6, cacheRead: 4, cacheWrite: 3 },
+    inputTokens: { total: 10, noCache: 3, cacheRead: 4, cacheWrite: 3 },
     outputTokens: { total: 7, text: 2, reasoning: 5 },
   })
   client.close()
@@ -242,6 +242,88 @@ it('keeps a failed mcp tool call distinct from a successful one', async () => {
     result: { error: 'the server refused' },
     isError: true,
   })
+  client.close()
+})
+
+it('prefixes the mcp server onto the tool name when the item names one', async () => {
+  const codex = createFakeCodex([
+    threadStarted(),
+    {
+      type: 'item.started',
+      item: { id: 'item-mcp-1', type: 'mcp_tool_call', server: 'docs', tool: 'lookup', arguments: {} },
+    },
+    {
+      type: 'item.completed',
+      item: {
+        id: 'item-mcp-1',
+        type: 'mcp_tool_call',
+        server: 'docs',
+        tool: 'lookup',
+        status: 'completed',
+        result: { structured_content: { found: true } },
+      },
+    },
+    turnCompleted(),
+  ])
+  host = await startHost({ codex: codex.factory })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'look it up' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  expect(client.frames.find(frame => frame.type === 'tool-call')).toMatchObject({
+    toolName: 'mcp__docs__lookup',
+    nativeName: 'mcp__docs__lookup',
+  })
+  expect(client.frames.find(frame => frame.type === 'tool-result')).toMatchObject({
+    toolName: 'mcp__docs__lookup',
+  })
+  client.close()
+})
+
+it('holds a web search call until its query is known, and emits it once', async () => {
+  const codex = createFakeCodex([
+    threadStarted(),
+    { type: 'item.started', item: { id: 'item-ws-1', type: 'web_search', query: '' } },
+    { type: 'item.updated', item: { id: 'item-ws-1', type: 'web_search', query: 'codex sdk' } },
+    { type: 'item.updated', item: { id: 'item-ws-1', type: 'web_search', query: 'codex sdk' } },
+    { type: 'item.completed', item: { id: 'item-ws-1', type: 'web_search', query: 'codex sdk' } },
+    { type: 'item.started', item: { id: 'item-ws-2', type: 'web_search' } },
+    { type: 'item.completed', item: { id: 'item-ws-2', type: 'web_search' } },
+    turnCompleted(),
+  ])
+  host = await startHost({ codex: codex.factory })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'search' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const calls = client.frames.filter(frame => frame.type === 'tool-call')
+  expect(calls.map(call => [call.toolCallId, call.input])).toEqual([
+    ['item-ws-1', JSON.stringify({ query: 'codex sdk' })],
+    ['item-ws-2', JSON.stringify({ query: '' })],
+  ])
+  client.close()
+})
+
+it('emits one paired call for a web search Codex sent without an id', async () => {
+  const codex = createFakeCodex([
+    threadStarted(),
+    { type: 'item.started', item: { type: 'web_search', query: 'codex sdk' } },
+    { type: 'item.updated', item: { type: 'web_search', query: 'codex sdk' } },
+    { type: 'item.completed', item: { type: 'web_search', query: 'codex sdk' } },
+    turnCompleted(),
+  ])
+  host = await startHost({ codex: codex.factory })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'search' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const calls = client.frames.filter(frame => frame.type === 'tool-call')
+  const results = client.frames.filter(frame => frame.type === 'tool-result')
+  expect(calls.map(call => call.input)).toEqual([JSON.stringify({ query: 'codex sdk' })])
+  expect(results.map(result => result.toolCallId)).toEqual([calls[0]?.toolCallId])
   client.close()
 })
 

@@ -1,4 +1,6 @@
-import type { Frame, Host } from './harness'
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { QueryFn } from '../src/turn-driver'
+import type { FakeQuery, Frame, Host } from './harness'
 import { afterEach, expect, it, vi } from 'vitest'
 import {
   connect,
@@ -216,4 +218,111 @@ it('keeps the input open for the result of a woken turn the interrupt aborts', a
   expect(ending).toMatchObject({ type: 'finish', stopped: 'interrupted', interruptedBy: 'watchdog' })
   // The aborted turn's result was read: its running total, not the one before the wake.
   expect(ending.harnessMetadata).toEqual({ 'claude-code': { costUsd: 0.04, sessionId: 'sess-1' } })
+})
+
+/** The query, wrapped to read the id of the initial message the driver sends it. */
+function withInitialMessageId(query: FakeQuery): { fn: QueryFn, initialMessageId: Promise<string> } {
+  let resolve: (id: string) => void = () => {}
+  const initialMessageId = new Promise<string>((r) => {
+    resolve = r
+  })
+  const fn: QueryFn = (params) => {
+    // A fresh iterator's first message is the initial prompt; reading it leaves the queue alone.
+    const input = (params.prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]()
+    void input.next().then(message => resolve(String(message.value?.uuid)))
+    return query.fn(params)
+  }
+  return { fn, initialMessageId }
+}
+
+it('skips a result that answers no message the bridge sent, and ends on the one that does', async () => {
+  const query = createFakeQuery([
+    initMessage(),
+    // A resumed session's background task woke a turn before the CLI read the new prompt.
+    followUpResult({ result: '', total_cost_usd: 0.01 }),
+    {
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'answering the prompt' }] },
+      parent_tool_use_id: null,
+      session_id: 'sess-1',
+    },
+    resultMessage({ result: 'answered the prompt', total_cost_usd: 0.02 }),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'document the feature' })
+  const finish = await client.waitFor(frame => frame.type === 'finish')
+
+  const assistant = client.frames.findIndex(frame => frame.type === 'raw'
+    && (frame.rawValue as { type: string }).type === 'assistant')
+  expect(assistant).toBeGreaterThan(-1)
+  expect(assistant).toBeLessThan(client.frames.indexOf(finish))
+  expect(finish.stopped).toBe('completed')
+  expect(finish.harnessMetadata).toEqual({ 'claude-code': { costUsd: 0.02, sessionId: 'sess-1' } })
+})
+
+it.each([
+  ['an is_error success', followUpResult({ is_error: true, result: 'the background task failed' })],
+  ['an error subtype', followUpResult({ subtype: 'error_during_execution', errors: ['the background task failed'] })],
+])('does not fail the turn on %s result that answers no message the bridge sent', async (_, stray) => {
+  const query = createFakeQuery([
+    initMessage(),
+    stray,
+    resultMessage({ result: 'answered the prompt', total_cost_usd: 0.02 }),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'document the feature' })
+  const finish = await client.waitFor(frame => frame.type === 'finish')
+
+  expect(client.frames.some(frame => frame.type === 'error')).toBe(false)
+  expect(finish.stopped).toBe('completed')
+  expect(finish.harnessMetadata).toEqual({ 'claude-code': { costUsd: 0.02, sessionId: 'sess-1' } })
+})
+
+it('does not end the turn on an error latched by a turn whose result it skipped', async () => {
+  const query = createFakeQuery([
+    initMessage(),
+    {
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'the background task hit a limit' }] },
+      error: 'rate_limit',
+      parent_tool_use_id: null,
+      session_id: 'sess-1',
+    },
+    followUpResult({ result: '' }),
+    // An empty result is what a structured_output answer leaves behind.
+    resultMessage({ result: '', total_cost_usd: 0.02 }),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'document the feature' })
+  const finish = await client.waitFor(frame => frame.type === 'finish')
+
+  expect(client.frames.some(frame => frame.type === 'error')).toBe(false)
+  expect(finish.stopped).toBe('completed')
+})
+
+it('still ends the woken turn of a CLI that echoes the ids it was sent', async () => {
+  const fake = createFakeQuery([initMessage()])
+  const query = withInitialMessageId(fake)
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'document the feature' })
+  const initialMessageId = await query.initialMessageId
+  fake.push(backgroundTasks([{ task_id: 'task-1' }]))
+  // Echoing the initial message's id marks the CLI as one that names what a result answers.
+  fake.push(resultMessage({ user_message_uuid: initialMessageId, total_cost_usd: 0.01 }))
+  fake.push(backgroundTasks([]))
+  fake.push(taskNotification('task-1'))
+  // Answers the `task-notification`, so it names no sent id: the background wait still takes it.
+  fake.push(followUpResult({ result: 'opened the pull request', total_cost_usd: 0.03 }))
+  const finish = await client.waitFor(frame => frame.type === 'finish')
+
+  expect(finish.stopped).toBe('completed')
+  expect(finish.harnessMetadata).toEqual({ 'claude-code': { costUsd: 0.03, sessionId: 'sess-1' } })
 })

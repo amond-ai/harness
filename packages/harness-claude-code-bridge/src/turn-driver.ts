@@ -84,6 +84,7 @@ const NATIVE_TOOL_KINDS: Readonly<
   TaskGet: 'readonly',
   TaskList: 'readonly',
   TaskOutput: 'readonly',
+  ListAgents: 'readonly',
   ListMcpResources: 'readonly',
   ReadMcpResource: 'readonly',
   Write: 'edit',
@@ -603,12 +604,19 @@ async function runTurn({
    * (the `message_stop` that carries a response's usage): a client's live
    * mirror appends every `raw` it receives, and the transcript it rebuilds
    * from the journal must hold the same lines.
+   *
+   * Nor is a `finish-step`: it is a step's structure, not liveness. The
+   * response's `message_stop` closes a tool step whose results arrived while
+   * it streamed, and a transcript rebuilt from the journal without that
+   * `finish-step` would hold a step that never ends.
    */
   let derivedFromStreamEvent = false
   const emit: Emit = msg =>
     turn.emit(
       msg as BridgeEvent,
-      derivedFromStreamEvent && msg.type !== 'raw' ? { journal: false } : undefined,
+      derivedFromStreamEvent && msg.type !== 'raw' && msg.type !== 'finish-step'
+        ? { journal: false }
+        : undefined,
     )
 
   /*
@@ -724,7 +732,20 @@ async function runTurn({
   // Compaction observation: merge Claude's `compact_boundary` message and
   // `PostCompact` hook (which arrive in either order) into one `compaction`
   // event. See `createCompactionLatch`.
-  const compaction = createCompactionLatch(event => emit(event))
+  const compaction = createCompactionLatch((event) => {
+    const hasOpenStep = streamEventState.stepOpen
+    emit(event)
+    // The harness translates compaction into synthetic step content. When
+    // Claude reports it outside a model step, close that synthetic step here;
+    // otherwise the existing model step will close it with its own usage.
+    if (!hasOpenStep) {
+      emitFinishStep({
+        state: streamEventState,
+        emit,
+        usage: undefined,
+      })
+    }
+  })
 
   // `stream-start` is emitted lazily on the first SDK message (below) so it can
   // carry the model the CLI resolved to, reported on the `system`/`init` message.
@@ -1179,15 +1200,6 @@ async function runTurn({
         }
       }
 
-      if (type === 'result') {
-        const result = msg as ClaudeMessage & {
-          terminal_reason?: string
-          deferred_tool_use?: Record<string, unknown>
-        }
-        terminalReason = result.terminal_reason
-        deferredToolUse = result.deferred_tool_use
-      }
-
       if (type === 'system' && msg.subtype === 'background_tasks_changed') {
         liveBackgroundTasks = countActiveBackgroundTasks(msg)
       }
@@ -1236,6 +1248,32 @@ async function runTurn({
       }
 
       if (type === 'result') {
+        /*
+         * A result that answers no message this input sent is not the turn's: it is
+         * skipped before its ending, error or usage can count for the turn. It only
+         * closes the step it streamed, and drops the error that turn latched. Except
+         * while the turn waits on background work (patch 35): the turn the CLI wakes
+         * when that work settles answers a `task-notification`, not a sent message, and
+         * its result is the one that ends the turn.
+         */
+        const answersSentMessage = queryInput.answersSentMessage(msg)
+        if (!awaitingBackground && !answersSentMessage) {
+          if (streamEventState.stepOpen) {
+            emitFinishStep({
+              state: streamEventState,
+              emit,
+              usage: streamEventState.pendingStepUsage,
+            })
+          }
+          streamEventState.observedTerminalError = undefined
+          continue
+        }
+        const result = msg as ClaudeMessage & {
+          terminal_reason?: string
+          deferred_tool_use?: Record<string, unknown>
+        }
+        terminalReason = result.terminal_reason
+        deferredToolUse = result.deferred_tool_use
         if (msg.subtype === 'success') {
           /*
            * `success` does not mean the turn succeeded: the CLI flags a
@@ -1483,12 +1521,30 @@ function createQueryInput({
   close: (error?: unknown) => void
   handleLifecycle: (message: ClaudeMessage) => void
   hasActiveUserMessages: () => boolean
+  answersSentMessage: (result: ClaudeMessage) => boolean
   observeResult: () => void
   readonly hasObservedResult: boolean
 } {
   let closed = false
   let observedResult = false
   const submittedMessages = new Map<string, Experimental_BridgeUserMessage>()
+  /*
+   * The ids of every message this input sent, so a `result` can be matched to
+   * the message it answers. Once the CLI has echoed one of them it is known to
+   * echo them, and a result naming none answers nothing this input sent.
+   */
+  const initialMessageId = randomUUID()
+  const sentMessageIds = new Set<string>([initialMessageId])
+  let cliEchoesMessageIds = false
+  const noteEcho = (ids: readonly unknown[]): boolean => {
+    const echoed = ids.some(
+      id => typeof id === 'string' && sentMessageIds.has(id),
+    )
+    if (echoed) {
+      cliEchoesMessageIds = true
+    }
+    return echoed
+  }
   const close = (error?: unknown): void => {
     if (closed) {
       return
@@ -1535,6 +1591,14 @@ function createQueryInput({
       if (lifecycle.command_uuid == null || lifecycle.state == null) {
         return
       }
+      noteEcho([lifecycle.command_uuid])
+      // An initial message the CLI dropped gets no result: count it as answered.
+      if (
+        lifecycle.command_uuid === initialMessageId
+        && (lifecycle.state === 'cancelled' || lifecycle.state === 'discarded')
+      ) {
+        observedResult = true
+      }
       const submitted = submittedMessages.get(lifecycle.command_uuid)
       if (submitted == null) {
         return
@@ -1552,6 +1616,24 @@ function createQueryInput({
     },
     hasActiveUserMessages: () =>
       submittedMessages.size > 0 || userMessages.pendingCount > 0,
+    /*
+     * Whether a `result` answers a message this input sent. A resumed session
+     * can write the result of a background task's `task-notification` turn
+     * before the CLI reads the new prompt; that result names none of the sent
+     * ids, and taken as the turn's own it ends the turn on empty text.
+     */
+    answersSentMessage: (result) => {
+      const { user_message_uuid, user_message_uuids, origin } = result as {
+        user_message_uuid?: unknown
+        user_message_uuids?: unknown
+        origin?: { kind?: string }
+      }
+      const echoed = noteEcho([
+        user_message_uuid,
+        ...(Array.isArray(user_message_uuids) ? user_message_uuids : []),
+      ])
+      return echoed || (!cliEchoesMessageIds && origin?.kind !== 'task-notification')
+    },
     observeResult: () => {
       observedResult = true
     },
@@ -1574,7 +1656,7 @@ function createQueryInput({
               return {
                 value: toUserMessage({
                   text: initialUserMessage,
-                  messageId: randomUUID(),
+                  messageId: initialMessageId,
                 }),
                 done: false,
               }
@@ -1590,6 +1672,7 @@ function createQueryInput({
               nextMessage.value.messageId,
               nextMessage.value,
             )
+            sentMessageIds.add(nextMessage.value.messageId)
             return {
               value: toUserMessage({
                 text: nextMessage.value.text,
