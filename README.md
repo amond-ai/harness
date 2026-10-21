@@ -104,7 +104,7 @@ const driver = turnDriver(provider, {
   sandboxId,
   runId,
   config,
-  openSocket: url => openSocket({ url }),
+  openSocket: (url, headers) => openSocket({ url, headers }),
   claudeArgv: turn => ['claude', '-p', turn.prompt, '--output-format', 'stream-json'],
   settingSources: ['user', 'project'],
 })
