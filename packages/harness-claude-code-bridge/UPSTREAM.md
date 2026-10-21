@@ -5,12 +5,13 @@ depended on: it must run inside the sandbox image against a pinned CLI, and the
 patches below are not upstream yet.
 
 - **Repository**: [vercel/ai](https://github.com/vercel/ai)
-- **Commit**: `eb77f09e3c06c28e860d92e0de941b143c2eecec`
-- **Tag**: `@ai-sdk/harness-claude-code@1.0.142` (the same commit carries
-  `@ai-sdk/harness@1.0.138`)
-- **Packages taken from**: `@ai-sdk/harness-claude-code@1.0.142`,
-  `@ai-sdk/harness@1.0.138` (re-vendored from `1.0.90` / `1.0.87`; patches
-  26–34 below are the adaptations that re-vendor made)
+- **Commit**: `bb40cf03c5b68a4acee867d4fef9a65f71703c47`
+- **Tag**: `@ai-sdk/harness-claude-code@1.0.162` (the same commit carries
+  `@ai-sdk/harness@1.0.158`)
+- **Packages taken from**: `@ai-sdk/harness-claude-code@1.0.162`,
+  `@ai-sdk/harness@1.0.158` (re-vendored from `1.0.142` / `1.0.138`, and
+  before that from `1.0.90` / `1.0.87`; patches 26–34 below are the
+  adaptations the 1.0.142 re-vendor made)
 - **License**: Apache-2.0 (both packages)
 
 ## File-by-file mapping
@@ -176,6 +177,13 @@ Each is a separate commit in this repository and is intended to go upstream.
     it receives, so the transcript rebuilt from the journal must carry the
     same lines. The driver's live-only flag applies only to derived non-raw
     frames and never to a `raw`.
+    Since the 1.0.162 re-vendor (upstream 0291550) the same `message_stop`
+    also closes a tool step whose results arrived while the response still
+    streamed, so that `finish-step` is built from a `stream_event` too. It is
+    journaled, an exception to patch 5's live-only rule like the `raw`: a
+    `finish-step` is a step's structure, not liveness, and a journal-rebuilt
+    transcript without it would hold a step that never ends. The live-only
+    flag therefore skips `raw` and `finish-step`.
 
 28. `fix(turn-host): fail a turn whose success result the CLI flagged as an
     error` — upstream's `is_error` check, applied only when the ending would
@@ -295,7 +303,8 @@ disposing the query with `return()` on every ending, and forwarding
     turn can now carry several results, `total_cost_usd` is taken from the latest
     one rather than summed, because the SDK reports it as a running total.
     Upstream fixed the same sum in vercel/ai `a470e0dee` (#21896), unreleased at
-    1.0.142.
+    1.0.142 and shipped in 1.0.143, so that part of this patch is now
+    upstream's behaviour too.
     An interrupt that lands while the turn already waits, before the CLI
     wakes a turn for the settled work, gets no `result`: on CLI 2.1.289 the
     idle CLI only stops the background work and resolves `interrupt()`. So
@@ -304,6 +313,38 @@ disposing the query with `return()` on every ending, and forwarding
     `interruptedBy`, instead of escalating to a run-phase error and `exit(1)`.
     A main-thread message ends that idle span. An interrupt during the woken
     turn aborts it, and its `result` closes the input as usual.
+    Since the 1.0.162 re-vendor, upstream's 12d249f guard skips a `result`
+    that answers no message the bridge sent, before `observeResult()`: one
+    that echoes none of the sent ids from a CLI known to echo them, or one
+    with the `task-notification` origin. A cancelled or discarded initial
+    message counts as answered. Taken as-is the guard would skip this patch's
+    woken-turn result, which answers a `task-notification`, so the woken turn
+    would never end. Here it yields while the turn waits on background work,
+    and a result it skips changes neither the wait nor the live task count.
+    This amendment takes no number of its own.
+
+The 1.0.162 re-vendor took five upstream changes:
+
+- 18c2658 (1.0.149): `rate_limit_event` joins the raw-only early return in
+  `create-emit-stream-event.ts`. Its raw frame is already the top-of-mapper
+  one (patch 26), so it is not emitted twice.
+- 0887035 (1.0.150): a compaction reported outside a model step closes its
+  own synthetic step with a `finish-step`.
+- 40c10e0 (1.0.153): `ListAgents` is a `readonly` native tool, not an edit by
+  default.
+- 12d249f (1.0.143): `answersSentMessage()` skips a `result` that answers no
+  message the bridge sent, re-applied under patch 35.
+- 0291550 (1.0.155): a tool step waits for its response's `message_stop`
+  before it finishes, re-applied under patches 27 and 5.
+
+Two upstream changes were already covered: a470e0d (the `total_cost_usd`
+running total) by patch 35, and 714f3fc (host-tool calls rejected by MCP input
+validation) by patch 3, which dropped host tools. Deferred: 6c65131 (parallel
+and sequential tool approvals, for a separate change), 1bebfcf
+(`toModelOutput()`, with `@ai-sdk/harness`'s `convertHarnessToolModelOutput`),
+the image prompts dc1d7a6 and ca2a9f7, and the SDK bump c357e52. Skipped:
+bda96e8, which restarts recovered turns on the host side and is not vendored
+here.
 
 ## Upstream behaviour deliberately dropped
 

@@ -80,6 +80,13 @@ export interface ClaudeStreamEventState {
   pendingStepDeltaUsage: Record<string, unknown> | undefined
   pendingStepUsage: Record<string, unknown> | undefined
   pendingResponseUsage: Record<string, unknown> | undefined
+  /*
+   * Between a response's `message_start` and its `message_stop`. A tool step
+   * stays open while it is set: the CLI can run a tool, and report its
+   * result, before the response that called it has finished streaming, and
+   * the step's usage is only whole once it has.
+   */
+  responseOpen: boolean
   stepOpen: boolean
   externalMcpToolUseIds: Set<string>
   structuredOutputToolUseIds: Set<string>
@@ -101,6 +108,7 @@ export function createClaudeStreamEventState(): ClaudeStreamEventState {
     pendingStepDeltaUsage: undefined,
     pendingStepUsage: undefined,
     pendingResponseUsage: undefined,
+    responseOpen: false,
     stepOpen: false,
     externalMcpToolUseIds: new Set(),
     structuredOutputToolUseIds: new Set(),
@@ -233,12 +241,14 @@ export function createEmitStreamEvent({
     }
 
     /*
-     * Task lifecycle and tool progress are for correlation and nested
-     * rendering only: the `raw` frame above carried them, and they map to no
-     * stream part. Upstream emits that `raw` here; this host already did.
+     * Task lifecycle, tool progress and rate-limit events are for correlation
+     * and nested rendering only: the `raw` frame above carried them, and they
+     * map to no stream part. Upstream emits that `raw` here; this host already
+     * did.
      */
     if (
       type === 'tool_progress'
+      || type === 'rate_limit_event'
       || (type === 'system'
         && msg.subtype != null
         && RAW_TASK_MESSAGE_SUBTYPES.has(msg.subtype))
@@ -442,6 +452,7 @@ function closeStepIfReady({
 }): void {
   if (
     !state.stepOpen
+    || state.responseOpen
     || state.pendingStepToolUseIds.size > 0
     || state.partialBlocks.size > 0
   ) {
@@ -490,6 +501,7 @@ function handleStreamEvent({
 
   if (event.type === 'message_start') {
     state.pendingResponseUsage = toUsageRecord(event.message?.usage)
+    state.responseOpen = true
     return
   }
 
@@ -515,6 +527,10 @@ function handleStreamEvent({
    * no complete SDK message reports per response. It is transcript, not
    * liveness — the driver journals it like every `raw` — so the live mirror
    * and the transcript rebuilt from the journal hold the same lines.
+   *
+   * The response's end can also close a tool step whose results arrived
+   * while it still streamed. That `finish-step` is journaled too: the driver
+   * keeps a step's structure in the transcript, whatever message ended it.
    */
   if (event.type === 'message_stop') {
     send({
@@ -525,6 +541,8 @@ function handleStreamEvent({
       },
     })
     state.pendingResponseUsage = undefined
+    state.responseOpen = false
+    closeStepIfReady({ state, emit: send })
     return
   }
 

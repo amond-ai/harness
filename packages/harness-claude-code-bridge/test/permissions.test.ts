@@ -46,6 +46,23 @@ it('marks an approval-gated external MCP call dynamic, as the stream does', asyn
   await client.waitFor(frame => frame.type === 'tool-approval-request')
 })
 
+it('runs ListAgents as a read under allow-reads, without asking', async () => {
+  const options = await startAndCaptureOptions({
+    permissionMode: 'allow-reads',
+    approvalPolicy: 'deny',
+  })
+  const call = (toolName: string, toolUseID: string): Promise<unknown> | undefined =>
+    options.canUseTool?.(
+      toolName,
+      {},
+      { signal: new AbortController().signal, toolUseID } as never,
+    )
+
+  expect(await call('ListAgents', 'call-1')).toMatchObject({ behavior: 'allow' })
+  // An unlisted tool is still treated as an edit.
+  expect(await call('SomeUnknownTool', 'call-2')).toMatchObject({ behavior: 'deny' })
+})
+
 it('forwards every SDK permission mode unchanged, auto included', async () => {
   for (const mode of sdkPermissionModeSchema.options) {
     const options = await startAndCaptureOptions({ permissionMode: mode })

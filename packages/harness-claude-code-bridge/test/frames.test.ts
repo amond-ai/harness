@@ -258,6 +258,97 @@ it('does not let a streamed usage that reports 0 input tokens erase the complete
   client.close()
 })
 
+it('closes a tool step at the response\'s message_stop, journaled, when its result arrived mid-response', async () => {
+  const query = createFakeQuery([
+    initMessage(),
+    { type: 'stream_event', event: { type: 'message_start', message: { usage: { input_tokens: 10, output_tokens: 1 } } } },
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }],
+        usage: { input_tokens: 10, output_tokens: 1 },
+      },
+    },
+    // The CLI ran the tool before the response that called it finished streaming.
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'a.txt' }] } },
+    { type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 40 } } },
+    { type: 'stream_event', event: { type: 'message_stop' } },
+    resultMessage(),
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  const finish = await client.waitFor(frame => frame.type === 'finish')
+
+  const steps = client.frames.filter(frame => frame.type === 'finish-step')
+  expect(steps).toHaveLength(1)
+  const stop = client.frames.findIndex(frame => frame.type === 'raw'
+    && (frame.rawValue as { event?: { type?: string } }).event?.type === 'message_stop')
+  expect(client.frames.indexOf(steps[0]!)).toBeGreaterThan(stop)
+  // Closed once the response's whole usage was in, not at the tool result.
+  expect(steps[0]!.usage).toMatchObject({ outputTokens: { total: 40 } })
+
+  // Built from a `stream_event`, yet structure: the journal, and the transcript a client
+  // rebuilds by replaying it, hold the same `finish-step` the live socket saw.
+  expect((await host.readJournal()).filter(frame => frame.type === 'finish-step')).toEqual(steps)
+  const replayed = await connect(host)
+  replayed.send({ type: 'resume', lastSeenEventId: 0 })
+  await replayed.waitFor(frame => frame.type === 'finish' && frame.seq === finish.seq)
+  expect(replayed.frames.filter(frame => frame.type === 'finish-step')).toEqual(steps)
+  replayed.close()
+  client.close()
+})
+
+it('forwards a rate_limit_event raw exactly once and maps nothing from it', async () => {
+  const rateLimit = {
+    type: 'rate_limit_event',
+    rate_limit_info: { status: 'allowed_warning', rateLimitType: 'five_hour' },
+    session_id: 'sess-1',
+  }
+  const query = createFakeQuery([initMessage(), rateLimit, resultMessage()])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const raws = client.frames.filter(frame => frame.type === 'raw')
+  expect(raws.map(frame => frame.rawValue)).toEqual([initMessage(), rateLimit, resultMessage()])
+  // Between its raw and the result's, nothing was derived from it.
+  const index = client.frames.indexOf(raws[1]!)
+  expect(client.frames[index + 1]).toBe(raws[2])
+  client.close()
+})
+
+it('closes the synthetic step of a compaction reported outside a model step', async () => {
+  const query = createFakeQuery([
+    initMessage(),
+    { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 900 } },
+  ])
+  host = await startHost({ query: query.fn })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'do the thing' })
+  await client.waitFor(frame => frame.type === 'raw'
+    && (frame.rawValue as { subtype?: string }).subtype === 'compact_boundary')
+  const postCompact = query.options?.hooks?.PostCompact?.[0]?.hooks?.[0]
+  await postCompact?.(
+    { compact_summary: 'the summary' } as never,
+    undefined,
+    { signal: new AbortController().signal },
+  )
+  const compaction = await client.waitFor(frame => frame.type === 'compaction')
+  query.push(resultMessage())
+  await client.waitFor(frame => frame.type === 'finish')
+
+  expect(compaction).toMatchObject({ trigger: 'manual', summary: 'the summary', tokensBefore: 900 })
+  const steps = client.frames.filter(frame => frame.type === 'finish-step')
+  expect(steps).toHaveLength(1)
+  expect(client.frames.indexOf(steps[0]!)).toBe(client.frames.indexOf(compaction) + 1)
+  client.close()
+})
+
 it('keeps a tool result\'s non-text content and an MCP scalar as sent, and skips string content', async () => {
   const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0K' } }
   const query = createFakeQuery([
