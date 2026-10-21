@@ -5,7 +5,7 @@
 // structurally instead of re-exported, and why this is a peer of the AI SDK's sandbox
 // session rather than an extension of it.
 
-export { SandboxNoExitRecordError, SandboxWaitTimeoutError } from './types'
+export { SandboxCapabilityUnsupportedError, SandboxNoExitRecordError, SandboxWaitTimeoutError } from './types'
 
 export type {
   ProcessExit,
@@ -20,6 +20,7 @@ export type {
   SandboxFileEncoding,
   SandboxFiles,
   SandboxFileStream,
+  SandboxNetworkPolicy,
   SandboxPortEndpoint,
   SandboxPortEndpointOptions,
   SandboxProcessHandle,

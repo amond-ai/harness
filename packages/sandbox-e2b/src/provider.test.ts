@@ -1,5 +1,6 @@
 import type { E2bSandboxLike } from './e2b-session'
 import type { E2bSandboxApi } from './provider'
+import { SandboxCapabilityUnsupportedError } from '@amond-ai/sandbox'
 import { describe, expect, it } from 'vitest'
 import { encode, fakeSandbox, ROOT } from './e2b-session.fixtures'
 import { createE2bProvider } from './provider'
@@ -24,6 +25,8 @@ function stubSandbox(sandboxId: string, killed: string[] = []): E2bSandboxLike {
     },
     getHost: port => `${String(port)}-${sandboxId}.e2b.app`,
     setTimeout: async () => {},
+    getInfo: async () => ({}),
+    updateNetwork: async () => {},
     kill: async () => {
       killed.push(sandboxId)
       return true
@@ -370,6 +373,36 @@ describe('createE2bProvider', () => {
       url: 'wss://3001-sbx-existing.e2b.app/',
       headers: { 'e2b-traffic-access-token': 'tok-1' },
     })
+  })
+
+  it('applies a network policy to the sandbox e2b holds for the id', async () => {
+    const { api, calls } = fakeApi({ 'run-42': 'sbx-existing' })
+    const updates: unknown[] = []
+    const connect = api.connect
+    api.connect = async sandboxId => ({
+      ...await connect(sandboxId),
+      updateNetwork: async (update) => {
+        updates.push(update)
+      },
+    })
+    await createE2bProvider({ api }).setNetworkPolicy?.('run-42', { mode: 'deny-all' })
+
+    expect(calls.connected).toEqual(['sbx-existing'])
+    expect(updates).toEqual([{ allowInternetAccess: false }])
+  })
+
+  /** Refused on the mapping alone: creating a sandbox only to refuse the policy on it is waste. */
+  it('refuses a policy e2b cannot express without acquiring a sandbox', async () => {
+    const { api, calls } = fakeApi()
+    const set = createE2bProvider({ api }).setNetworkPolicy?.('run-42', {
+      mode: 'custom',
+      allowedHosts: ['api.anthropic.com'],
+      deniedCIDRs: ['169.254.169.254/32'],
+    })
+
+    await expect(set).rejects.toBeInstanceOf(SandboxCapabilityUnsupportedError)
+    expect(calls.listed).toEqual([])
+    expect(calls.created).toEqual([])
   })
 
   it('forwards the follow polling intervals to the sessions it opens', async () => {

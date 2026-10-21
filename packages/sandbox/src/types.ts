@@ -282,6 +282,39 @@ export interface SandboxPortEndpointOptions {
   protocol?: 'http' | 'https' | 'ws' | 'wss'
 }
 
+/**
+ * The outbound network a sandbox may reach.
+ *
+ * In `'custom'`, the reachable set is `allowedHosts` plus `allowedCIDRs`, and `deniedCIDRs`
+ * takes precedence over both.
+ */
+export type SandboxNetworkPolicy
+  = | { mode: 'allow-all' }
+    | { mode: 'deny-all' }
+    | {
+      mode: 'custom'
+      allowedHosts: readonly string[]
+      allowedCIDRs?: readonly string[]
+      deniedCIDRs?: readonly string[]
+    }
+    | {
+      mode: 'custom'
+      allowedHosts?: readonly string[]
+      allowedCIDRs: readonly string[]
+      deniedCIDRs?: readonly string[]
+    }
+
+/** Thrown instead of approximating a request the backend cannot carry out exactly. */
+export class SandboxCapabilityUnsupportedError extends Error {
+  readonly backend: string
+
+  constructor(backend: string, message: string) {
+    super(message)
+    this.name = 'SandboxCapabilityUnsupportedError'
+    this.backend = backend
+  }
+}
+
 export interface SandboxSession extends SandboxFiles {
   exec: (command: SandboxCommand, options?: SandboxExecOptions) => Promise<SandboxProcessHandle>
   getProcess: (id: string) => Promise<SandboxProcessHandle | null>
@@ -339,4 +372,11 @@ export interface SandboxProvider {
     port: number,
     options?: SandboxPortEndpointOptions,
   ) => Promise<SandboxPortEndpoint>
+  /**
+   * Replace the outbound network policy of the sandbox named by `sandboxId`.
+   *
+   * Optional: absent means the backend has no egress control. Throws
+   * {@link SandboxCapabilityUnsupportedError} for a policy it cannot express exactly.
+   */
+  setNetworkPolicy?: (sandboxId: string, policy: SandboxNetworkPolicy) => Promise<void>
 }

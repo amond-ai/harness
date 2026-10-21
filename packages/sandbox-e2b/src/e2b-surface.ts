@@ -84,5 +84,17 @@ export interface E2bSandboxLike {
   readonly trafficAccessToken?: string
   /** Re-applies the sandbox's lifetime, restarting e2b's countdown from now. */
   setTimeout: (timeoutMs: number) => Promise<void>
+  getInfo: () => Promise<{ network?: { egressProxy?: unknown, rules?: Record<string, unknown> } }>
+  /**
+   * Replaces the sandbox's egress configuration *whole* — e2b clears every field the update
+   * leaves out, an egress proxy and per-host rules included.
+   */
+  updateNetwork: (network: E2bNetworkUpdate) => Promise<void>
   kill: () => Promise<boolean>
+}
+
+export interface E2bNetworkUpdate {
+  allowOut?: string[]
+  denyOut?: string[]
+  allowInternetAccess?: boolean
 }

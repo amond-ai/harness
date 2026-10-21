@@ -29,6 +29,7 @@
  * makes five calls creates one sandbox.
  */
 import type {
+  SandboxNetworkPolicy,
   SandboxPortEndpoint,
   SandboxPortEndpointOptions,
   SandboxProvider,
@@ -36,6 +37,7 @@ import type {
 } from '@amond-ai/sandbox'
 import type { E2bSandboxLike, E2bSessionOptions } from './e2b-session'
 import { createE2bSession } from './e2b-session'
+import { applyE2bNetworkUpdate, toE2bNetworkUpdate } from './network-policy'
 
 /** The `Sandbox` statics this provider needs, structural so tests can stand in for them. */
 export interface E2bSandboxApi {
@@ -250,6 +252,10 @@ export function createE2bProvider(options: E2bProviderOptions): SandboxProvider 
       return trafficAccessToken === undefined
         ? { url }
         : { url, headers: { [TRAFFIC_ACCESS_TOKEN_HEADER]: trafficAccessToken } }
+    },
+    setNetworkPolicy: async (sandboxId: string, policy: SandboxNetworkPolicy): Promise<void> => {
+      const update = toE2bNetworkUpdate(policy)
+      await applyE2bNetworkUpdate(await acquire(sandboxId), update)
     },
   }
 }
