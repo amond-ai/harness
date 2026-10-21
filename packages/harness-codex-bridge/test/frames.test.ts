@@ -306,6 +306,27 @@ it('holds a web search call until its query is known, and emits it once', async 
   client.close()
 })
 
+it('emits one paired call for a web search Codex sent without an id', async () => {
+  const codex = createFakeCodex([
+    threadStarted(),
+    { type: 'item.started', item: { type: 'web_search', query: 'codex sdk' } },
+    { type: 'item.updated', item: { type: 'web_search', query: 'codex sdk' } },
+    { type: 'item.completed', item: { type: 'web_search', query: 'codex sdk' } },
+    turnCompleted(),
+  ])
+  host = await startHost({ codex: codex.factory })
+  const client = await connect(host)
+
+  client.send({ type: 'start', prompt: 'search' })
+  await client.waitFor(frame => frame.type === 'finish')
+
+  const calls = client.frames.filter(frame => frame.type === 'tool-call')
+  const results = client.frames.filter(frame => frame.type === 'tool-result')
+  expect(calls.map(call => call.input)).toEqual([JSON.stringify({ query: 'codex sdk' })])
+  expect(results.map(result => result.toolCallId)).toEqual([calls[0]?.toolCallId])
+  client.close()
+})
+
 it('reports an error item as a warning rather than an ending', async () => {
   const codex = createFakeCodex([
     threadStarted(),

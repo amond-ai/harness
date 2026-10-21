@@ -266,10 +266,12 @@ export function createEmitStreamEvent({
        * Codex can start a search before it knows the query and fill it in on
        * a later update, so the call waits for one. `completed` emits it with
        * whatever it has, so a search that never named a query still gets a
-       * call to pair the result with.
+       * call to pair the result with. A search Codex sent without an id waits
+       * for `completed` too: its fallback id is a fresh UUID per event, so a
+       * call emitted earlier would never pair with its result.
        */
       if (event.type === 'item.started' || event.type === 'item.updated') {
-        if (query !== undefined) {
+        if (query !== undefined && item.id !== undefined) {
           emitWebSearchToolCall({ id, query, nativeName, emittedWebSearchToolCalls, send })
         }
       }

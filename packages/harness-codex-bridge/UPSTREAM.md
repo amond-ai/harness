@@ -5,30 +5,32 @@ on: it must run inside the sandbox image against a pinned SDK, and the patches
 below are not upstream yet.
 
 - **Repository**: [vercel/ai](https://github.com/vercel/ai)
+- **Commit**: `bb40cf03c5b68a4acee867d4fef9a65f71703c47`
+- **Tag**: `@ai-sdk/harness-codex@1.0.160` (the same commit carries
+  `@ai-sdk/harness@1.0.158` and `@ai-sdk/harness-claude-code@1.0.162`)
 - **Packages taken from**: `@ai-sdk/harness-codex@1.0.160` (re-vendored from
   `1.0.113`), `@ai-sdk/harness@1.0.87`
 - **License**: Apache-2.0 (both packages)
 
-`@ai-sdk/harness-codex@1.0.113` is a later release than the `@ai-sdk/harness@1.0.87`
-this host was first composed on, and it was taken from the published package
-rather than from a commit. The sibling packages record the same split for the same
-reason: the Codex half of upstream moves on its own. The shared halves both
-adapters compose on — the copy under `harness-protocol/src/harness-v1/` and
-`harness-bridge-runtime` — have since been re-vendored at `@ai-sdk/harness@1.0.138`
-(see their own `UPSTREAM.md`); the protocol schema changes are additive, while
-the runtime also changes turn-lifecycle behavior (a `start` during an aborted
-turn's teardown waits for it, and is refused if the teardown outlasts the grace).
-`harness-protocol` pins `codex-bridge-protocol.ts` at `1.0.111`; that file is
-byte-identical in `1.0.113`, so the `start` this host parses is the one it
-vendored.
+`@ai-sdk/harness-codex@1.0.160` comes from the same commit as the
+`@ai-sdk/harness@1.0.158` that the shared halves both adapters compose on — the
+copy under `harness-protocol/src/harness-v1/` and `harness-bridge-runtime` — are
+vendored at (see their own `UPSTREAM.md`). The earlier `1.0.113` base was taken
+from the published package rather than from a commit, and was already a later
+release than the `@ai-sdk/harness@1.0.87` this host was first composed on: the
+Codex half of upstream moves on its own. `harness-protocol` still pins
+`codex-bridge-protocol.ts` at `1.0.111`. Up to `1.0.160` that file gained only the
+deferred `prompt` field and a comment for the app-server's `thread/resume`, so the
+`start` this host parses is the one it vendored.
 
 The `1.0.113` → `1.0.160` re-vendor was a selective port, not a wholesale copy
 of `src/bridge`:
 
 - **Taken.** `7040da0` (1.0.120): a `web_search` call is held until a query
-  exists, emitted once per item id from `item.started` / `item.updated`, and
-  emitted on `item.completed` with `query ?? ''`, so the call no longer carries an
-  empty `query`. `76772ff` (1.0.131): an `mcp_tool_call` item that names a
+  exists, then emitted once per item id from `item.started` / `item.updated`. A
+  search that never names a query is emitted at `item.completed` with
+  `query: ''`, so its result still has a call to pair with. Patch 37 below holds
+  a search without an id until `item.completed` as well. `76772ff` (1.0.131): an `mcp_tool_call` item that names a
   `server` is reported as `mcp__<server>__<tool>` on `tool-call`, `nativeName`
   and `tool-result`; an item without one keeps the bare tool name, as upstream
   does. The `mapUsage` fix: `noCache` is `input − cacheRead − cacheWrite`, floored
@@ -127,6 +129,13 @@ five entries long and unrelated to this one.
     queue is now drained as it fills, so the
     `user-message-response { accepted: false }` arrives while the turn is still
     running.
+37. `fix(codex-host): emit one paired call for a web search without an id` —
+    upstream's `7040da0` emits a `web_search` call from `item.started` /
+    `item.updated` once the query is known, keyed by the item id. An item Codex
+    sent without an id falls back to a fresh UUID per event, so that early call
+    never matched its completion: the completion emitted a second call, and the
+    first stayed without a result. Such a search now emits its call only at
+    `item.completed`, with the result.
 
 ## Upstream behaviour deliberately dropped
 

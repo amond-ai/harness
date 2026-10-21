@@ -9,9 +9,11 @@ needs the same schemas the Worker client does.
 - **Commit**: `bb40cf03c5b68a4acee867d4fef9a65f71703c47`
 - **Tag**: `@ai-sdk/harness@1.0.158` (the same commit carries
   `@ai-sdk/harness-claude-code@1.0.162` and `@ai-sdk/harness-codex@1.0.160`)
-- **Packages taken from**: `@ai-sdk/harness-claude-code@1.0.162`,
-  `@ai-sdk/harness@1.0.158`, `@ai-sdk/harness-codex@1.0.160` (re-vendored from
-  `1.0.142` / `1.0.138` / `1.0.111`, and before that `1.0.90` / `1.0.87`)
+- **Packages taken from**:
+  - `@ai-sdk/harness-claude-code@1.0.162`, re-vendored from `1.0.142` (before
+    that `1.0.90`)
+  - `@ai-sdk/harness@1.0.158`, re-vendored from `1.0.138` (before that `1.0.87`)
+  - `@ai-sdk/harness-codex@1.0.160`, re-vendored from `1.0.111`
 - **License**: Apache-2.0 (all three packages)
 
 `@ai-sdk/harness-codex@1.0.160` is covered by the same commit, so all three halves

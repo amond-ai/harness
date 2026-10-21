@@ -12,7 +12,8 @@ the patches below are not upstream yet.
   `1.0.138`, and before that `1.0.87`)
 - **License**: Apache-2.0
 
-The runtime matches `@ai-sdk/harness@1.0.158` except for one deferred export. Between
+Apart from the patches below, the runtime matches `@ai-sdk/harness@1.0.158`, with
+one export deferred. Between
 `1.0.138` and `1.0.158` upstream changed a single export in `src/bridge/index.ts`:
 `convertHarnessToolModelOutput` (`1bebfcf`, 1.0.151). It is not taken, because
 nothing calls it until the adapters support tools with `toModelOutput()`; taking
