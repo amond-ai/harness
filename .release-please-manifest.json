@@ -8,6 +8,7 @@
   "packages/harness-transport-cloudflare": "0.1.0",
   "packages/harness-transport": "0.1.0",
   "packages/redact": "0.1.0",
+  "packages/sandbox-cloudflare": "0.1.0",
   "packages/sandbox-daytona": "0.1.0",
   "packages/sandbox-e2b": "0.1.0",
   "packages/sandbox-local": "0.1.0",

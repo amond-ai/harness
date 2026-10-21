@@ -1,0 +1,67 @@
+{
+  "name": "@amond-ai/sandbox-cloudflare",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "A Cloudflare Sandbox backend for @amond-ai/sandbox — a naming layer over getSandbox, whose client already satisfies the contract with no mapping",
+  "author": "Passion Factory Corp.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/amond-ai/harness/tree/main/packages/sandbox-cloudflare#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amond-ai/harness.git",
+    "directory": "packages/sandbox-cloudflare"
+  },
+  "bugs": {
+    "url": "https://github.com/amond-ai/harness/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "agent",
+    "sandbox",
+    "cloudflare",
+    "workers",
+    "provider"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "NOTICE",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts --dts",
+    "check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "bun --bun vitest run"
+  },
+  "dependencies": {
+    "@amond-ai/harness-transport-cloudflare": "workspace:*",
+    "@amond-ai/sandbox": "workspace:*",
+    "@cloudflare/sandbox": "catalog:"
+  },
+  "devDependencies": {
+    "@ai-sdk/harness": "catalog:",
+    "@amond-ai/harness-sandbox": "workspace:*",
+    "@cloudflare/workers-types": "catalog:workers-v5",
+    "@pleaseai/eslint-config": "catalog:",
+    "bun-types": "catalog:",
+    "eslint": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
