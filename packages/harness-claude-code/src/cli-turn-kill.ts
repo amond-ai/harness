@@ -79,10 +79,7 @@ export async function killTurn(sandbox: SandboxSession, processId: string): Prom
       // default kill still sweeps them before the re-check. Everything else leaves
       // liveness unknown and must escalate, as the
       // pre-phase-0 code did unconditionally: the contract's two error classes are explicitly
-      // not an exhaustive union (`packages/sandbox/src/types.ts`), and the default
-      // Cloudflare backend rejects with `@cloudflare/sandbox`'s own `ProcessWaitTimeoutError`,
-      // which is neither of them — gating on `SandboxWaitTimeoutError` left every production
-      // interrupt at SIGINT, never terminating a wedged turn.
+      // not an exhaustive union (`packages/sandbox/src/types.ts`).
       if (cause instanceof SandboxNoExitRecordError) {
         logKillSettle(processId, cause)
         await sweepSurvivors(process, processId)

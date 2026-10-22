@@ -32,7 +32,7 @@ injection points below, and the package's own test suite runs in-process.
 | Injection | Where | Why it is not decided here |
 |---|---|---|
 | `SandboxProvider` | `turnDriver(provider, …)` | Which container, on which backend — and it is resolved *per use*, never held across a step. |
-| `openSocket(url, headers?)` | `TurnDriverRun.openSocket` | How a bridge endpoint is dialed: the standard `WebSocket` on most runtimes, `@amond-ai/harness-transport-cloudflare` where the port is private and reachable only through `wsConnect`. Send `headers` with the upgrade — a restricted port (e2b's traffic access token) refuses a dial without them. |
+| `openSocket(url, headers?)` | `TurnDriverRun.openSocket` | How a bridge endpoint is dialed: the standard `WebSocket` on most runtimes, `@amond-ai/harness-transport-cloudflare` where the port is private and reachable only through the sandbox's Durable Object. Send `headers` with the upgrade — a restricted port (e2b's traffic access token) refuses a dial without them. |
 | `claudeArgv(turn)` | `TurnDriverRun.claudeArgv` | What a `claude` turn is invoked with — flags, plugins, settings sources — is the deployment's policy. `cli` only. |
 | `settingSources` | `TurnDriverRun.settingSources` | The same list, as the `sdk` host's `start` frame carries it. |
 | `LiveMirror` | `TurnAwaitSpec.mirror` / `TurnRoundSpec.mirror` | Where the turn's bytes are published (R2, a file, nothing) and how they are masked. |
@@ -103,7 +103,7 @@ whole set depends only on itself plus external (catalog) dependencies:
 
 Nothing in the set may depend on `apps/*`, `@pleaseai/agent-core`, `@pleaseai/sandbox-bridge`,
 `@pleaseai/dashboard-schema` or `@pleaseai/session-store`. `src/closure.test.ts` asserts it on
-every run. External dependencies are unconstrained — `harness-transport-cloudflare` keeps
+every run. External dependencies are unconstrained — `sandbox-cloudflare` keeps
 `@cloudflare/sandbox` and `sandbox-e2b` keeps `e2b`, both of which travel with their manifests.
 Runtime coupling is constrained, though: only `harness-transport-cloudflare`,
 `sandbox-cloudflare`, `harness-bridge-runtime`, `harness-claude-code-bridge` and
@@ -118,4 +118,4 @@ Everything Pleaseworks-specific stays in `apps/cf-orchestrator` and arrives thro
 injection points above: the `software-factory` plugin id and the rest of the `claude` flags
 (`claudeArgv`), `TURN_SETTING_SOURCES` (`settingSources`), the wrangler `Env` and its parsing
 (`TurnDriverConfig`), the R2 bucket and the transcript masking policy (`LiveMirror`), and
-`@cloudflare/sandbox` itself (`openSocket`).
+the Cloudflare sandbox binding itself (`openSocket`).

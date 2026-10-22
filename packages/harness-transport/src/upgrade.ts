@@ -1,8 +1,8 @@
 /**
  * Turning an upgrade response into the socket the adapter drives.
  *
- * Shared because there are now two ways to reach a bridge — `Sandbox.wsConnect` for a
- * Cloudflare sandbox, `fetch` for a backend that answers with a routable URL — and both end
+ * Shared because there are now two ways to reach a bridge — the sandbox Durable Object's
+ * `fetch` for a Cloudflare sandbox, `fetch` for a backend that answers with a routable URL — and both end
  * the same way: check the status, take the socket off the response, accept it, wrap it. The
  * checks are the part worth keeping in one place; each of them turns a silent hang into an
  * error that names its cause, and a second copy is a second chance to drop one.

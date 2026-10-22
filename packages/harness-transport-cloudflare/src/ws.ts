@@ -2,8 +2,8 @@
  * The alias target: `ws`, as far as the Worker bundle is concerned.
  *
  * Point wrangler's `alias` at this module and `@ai-sdk/harness-claude-code` opens its bridge
- * over a Cloudflare Sandbox — or over workerd's own `fetch` — instead of a TCP socket it
- * cannot create:
+ * through a sandbox's Durable Object — or over workerd's own `fetch` — instead of a TCP socket
+ * it cannot create:
  *
  * ```jsonc
  * { "alias": { "ws": "@amond-ai/harness-transport-cloudflare/ws" } }
@@ -22,7 +22,7 @@ import { openSandbox } from './sandbox'
 import { createWebSocketClass } from './ws-compat'
 
 /**
- * Which binding holds the sandbox namespace.
+ * Which binding holds the sandbox namespace — the one bound to `HarnessSandbox`.
  *
  * An aliased module is reached by import and never called, so it cannot be handed
  * configuration — this is read from the Worker's own vars instead, defaulting to the name the
@@ -50,7 +50,7 @@ function sandboxNamespace(): unknown {
 export const WebSocket: new (url: string, init?: { headers?: Record<string, string> }) => WsClient
   = createWebSocketClass({
     openSocket: async (sandboxId, endpoint) => {
-      const sandbox = openSandbox(sandboxNamespace() as never, sandboxId)
+      const sandbox = openSandbox(sandboxNamespace() as DurableObjectNamespace, sandboxId)
       return createBridgeSocketOpener(sandbox)(endpoint)
     },
     dialDirect: createDirectSocketOpener((url, init) => fetch(url, init)),

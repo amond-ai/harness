@@ -26,7 +26,7 @@
  *
  * External dependencies are otherwise unconstrained on purpose: they are declared through the root
  * catalog and travel with a `package.json`, so `@cloudflare/sandbox` under
- * `harness-transport-cloudflare` costs the split nothing.
+ * `sandbox-cloudflare` costs the split nothing.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'

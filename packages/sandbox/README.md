@@ -33,24 +33,27 @@ interface SandboxProcessHandle {
 
 ## Why the shapes are copies, not imports
 
-They are structural copies of Cloudflare's, deliberately. Importing them would put the
-vendor dependency back in every consumer — the thing this package exists to remove — while
-inventing different ones would mean writing and maintaining a mapping layer for the backend
-that already has the right semantics.
+They began as structural copies of `@cloudflare/sandbox` 0.x's, deliberately. Importing them
+would put the vendor dependency back in every consumer — the thing this package exists to
+remove. Under 0.x the copy also meant `getSandbox(...)`'s client satisfied `SandboxSession` with
+zero mapping.
 
-The copy costs nothing and buys both: `getSandbox(...)`'s return value satisfies
-`SandboxSession` with **zero mapping**, so [`@amond-ai/sandbox-cloudflare`](../sandbox-cloudflare) is a
-naming layer that returns the client unchanged, and its `satisfies SandboxProvider` fails at
-build time if upstream ever diverges — rather than at the first replay in production.
+`@cloudflare/sandbox` 1.0 removed that client — the `Sandbox` class, `getSandbox`, its process
+table and its log replay — and left the application to write its own Durable Object. So
+Cloudflare is now a mapped backend like e2b and Daytona:
+[`@amond-ai/sandbox-cloudflare`](../sandbox-cloudflare) ships that Durable Object and a session that
+maps it onto this contract. The shapes did not change; they are this contract's own.
 
 ## What a backend must supply
 
 **Process durability.** `getProcess` + `logs({ replay: true })` are the load-bearing pair: the
-run workflow reads a turn's transcript **after** the process exits. The Cloudflare container
-retains that natively. A backend where it does not — e2b drops a process from
-`commands.list()` the moment it exits and `commands.connect(pid)` then throws — has to
-reproduce the durability itself. See [`@amond-ai/sandbox-e2b`](../sandbox-e2b) for what that
-costs, and research note 027 for the measurements.
+run workflow reads a turn's transcript **after** the process exits. A backend whose platform
+does not retain that has to reproduce the durability itself. Cloudflare stopped retaining it in
+`@cloudflare/sandbox` 1.0, so the Cloudflare backend keeps each process's output and exit code in
+files inside the container, following Cloudflare's background-process pattern. e2b drops a
+process from `commands.list()` the moment it exits and `commands.connect(pid)` then throws; see
+[`@amond-ai/sandbox-e2b`](../sandbox-e2b) for what that costs, and research note 027 for the
+measurements.
 
 **A wait that ends before the process does must reject.** `waitForExit` resolving a synthetic
 exit for an expired wait is not a lesser version of throwing — it is the opposite claim. Every
@@ -62,7 +65,8 @@ contract's spelling of that rejection.
 **A credential path for repository access** — which the contract does **not** express, and
 which a reader of the two obligations above would wrongly conclude is not owed. On Cloudflare
 it is supplied out of band: `apps/cf-orchestrator/src/index.ts` sets `Sandbox.outboundByHost`
-so the container's egress to github.com is intercepted *in the Worker* and the git credential
+(a `@cloudflare/sandbox` 0.x API; under 1.0 its place is `setupContainer()` on a
+`HarnessSandbox` subclass) so the container's egress to github.com is intercepted *in the Worker* and the git credential
 injected there, outside the container (`run/git-credentials.ts` — nothing authenticating ever
 reaches the container's filesystem, environment, or argv). An e2b microVM's egress never
 traverses the Worker, so **the e2b backend does not supply this yet**: a run against a private
@@ -75,7 +79,7 @@ exists to avoid.
 
 | Backend | Package | Notes |
 | --- | --- | --- |
-| `cloudflare` | [`@amond-ai/sandbox-cloudflare`](../sandbox-cloudflare) | Wraps `getSandbox` — no mapping |
+| `cloudflare` | [`@amond-ai/sandbox-cloudflare`](../sandbox-cloudflare) | Ships the Durable Object; per-process files in the container, Cloudflare's background-process pattern |
 | `e2b` | [`@amond-ai/sandbox-e2b`](../sandbox-e2b) | Journals transcripts and exit status to the sandbox filesystem |
 
 `SANDBOX_BACKEND` selects between them; see `apps/cf-orchestrator/src/run/sandbox-provider.ts`.
