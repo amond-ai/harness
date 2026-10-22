@@ -23,6 +23,7 @@ describe('files', () => {
     const { session } = fakeSandbox()
 
     await expect(session().readFile('/workspace/missing')).rejects.toThrow(/ENOENT/)
+    await expect(session().readFile('/workspace/missing', { encoding: 'none' })).rejects.toThrow(/ENOENT/)
   })
 
   it('creates the parent directory before writing', async () => {
@@ -48,7 +49,7 @@ describe('files', () => {
 
     await expect(s.mkdir('/workspace/x/y')).rejects.toThrow(/ENOENT/)
     await s.mkdir('/workspace/x/y', { recursive: true })
-    expect(container.fs.dirs.has('/workspace/x/y')).toBe(true)
+    expect(['/workspace', '/workspace/x', '/workspace/x/y'].every(dir => container.fs.dirs.has(dir))).toBe(true)
   })
 
   it('answers exists false only for ENOENT, starting the container to ask', async () => {

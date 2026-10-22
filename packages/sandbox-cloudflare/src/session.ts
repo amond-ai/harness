@@ -54,6 +54,24 @@ export function exitOf(code: number, timedOut: boolean): ProcessExit {
   return { code, timedOut }
 }
 
+/** Resolve after `ms`, or as soon as `signal` aborts. */
+function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted === true) {
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    function onAbort(): void {
+      clearTimeout(timer)
+      resolve()
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 export function createCloudflareSession(
   sandbox: HarnessSandboxRpc,
   options: CloudflareSessionOptions = {},
@@ -82,12 +100,27 @@ export function createCloudflareSession(
     return { ...base, state: 'error', error: NO_EXIT_RECORD, endedAt: now() }
   }
 
+  /**
+   * The abort reaches both the status read and the delay between reads, so a caller that gives
+   * up is not held by an RPC still pending against the container.
+   */
   async function waitForExit(id: string, waitOptions?: { timeout?: number, signal?: AbortSignal }): Promise<ProcessExit> {
     const startedAt = elapsedMs()
     const timeout = waitOptions?.timeout
+    const signal = waitOptions?.signal
     const deadline = timeout === undefined ? undefined : startedAt + timeout
     while (true) {
-      const state = (await sandbox.processStatus(id))?.state
+      let report: ProcessReport | undefined
+      try {
+        report = await abortable(sandbox.processStatus(id), signal)
+      }
+      catch (cause) {
+        if (signal?.aborted === true) {
+          throw new SandboxWaitTimeoutError(id, timeout ?? elapsedMs() - startedAt)
+        }
+        throw cause
+      }
+      const state = report?.state
       if (state?.state === 'exited') {
         return exitOf(state.code, state.timedOut)
       }
@@ -95,11 +128,12 @@ export function createCloudflareSession(
         throw new SandboxNoExitRecordError(id)
       }
       const at = elapsedMs()
-      if (waitOptions?.signal?.aborted === true || (deadline !== undefined && at >= deadline)) {
+      if (signal?.aborted === true || (deadline !== undefined && at >= deadline)) {
         throw new SandboxWaitTimeoutError(id, timeout ?? at - startedAt)
       }
       const remaining = deadline === undefined ? pollMs : Math.min(pollMs, deadline - at)
-      await new Promise(resolve => setTimeout(resolve, Math.max(0, remaining)))
+      // An abort during the delay ends it early; the next read then rejects at once.
+      await sleep(Math.max(0, remaining), signal)
     }
   }
 
@@ -139,25 +173,27 @@ export function createCloudflareSession(
         const state = (await silenced(sandbox.processStatus(id), readOptions, undefined))?.state
         return state?.state === 'exited' ? state.code : undefined
       },
-      // Read to EOF in bounded replies: a follow's final drain reads once, so a slice that
-      // stopped at READ_LIMIT would drop whatever the process wrote after it.
+      // Up to the end the file had when the read began, in bounded replies: a follow's final
+      // drain reads once, so stopping at READ_LIMIT would drop output, while chasing a log that
+      // grows faster than it is read would never return. Later bytes are the next poll's.
       readSliceFrom: async (path, offset, readOptions) => {
+        const end = await silenced(sandbox.processLogSize(id, file(path)), readOptions, offset)
         const chunks: Uint8Array[] = []
         let at = offset
-        for (;;) {
+        while (at < end) {
           const chunk = await silenced(
-            sandbox.readProcessLog(id, file(path), at, READ_LIMIT),
+            sandbox.readProcessLog(id, file(path), at, Math.min(READ_LIMIT, end - at)),
             readOptions,
             new Uint8Array(),
           )
-          chunks.push(chunk)
-          at += chunk.length
-          if (chunk.length < READ_LIMIT) {
+          if (chunk.length === 0) {
             break
           }
+          chunks.push(chunk)
+          at += chunk.length
         }
-        if (chunks.length === 1) {
-          return { data: chunks[0]!, total: at }
+        if (chunks.length <= 1) {
+          return { data: chunks[0] ?? new Uint8Array(), total: at }
         }
         const data = new Uint8Array(at - offset)
         let filled = 0

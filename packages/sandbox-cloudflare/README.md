@@ -77,9 +77,9 @@ export class Sandbox extends HarnessSandbox<Env> {
 Read Cloudflare's [migration guide](https://developers.cloudflare.com/sandbox/sdk/migrate/) first.
 The steps below are what changes for a Worker that used this package on `@cloudflare/sandbox` 0.x.
 
-1. **Export the new class.** Replace `export { Sandbox } from '@cloudflare/sandbox'` with
-   `export { HarnessSandbox } from '@amond-ai/sandbox-cloudflare'`. To keep the binding and its
-   storage, keep the class name: `export { HarnessSandbox as Sandbox } from '@amond-ai/sandbox-cloudflare'`.
+1. **Export the new class under the old name.** Replace `export { Sandbox } from '@cloudflare/sandbox'`
+   with `export { HarnessSandbox as Sandbox } from '@amond-ai/sandbox-cloudflare'`. Keeping the
+   class name keeps the `Sandbox` binding, its storage, and the `class_name: "Sandbox"` below.
 2. **Change the `containers` entry** for that class:
 
    ```jsonc

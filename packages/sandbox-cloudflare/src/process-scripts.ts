@@ -20,27 +20,81 @@ const TIMEOUT_GRACE_SECONDS = 5
 export const PREPARE = `root=$1; dir=$2
 mkdir -p "$root" && mkdir "$dir" && printf '%s' "$3" >"$dir/meta.json"`
 
-/** `$1` is the directory, `$2` the timeout in seconds or empty, and the rest is the argv. */
-export const RUN = `dir=$1; seconds=$2; shift 2
+/**
+ * `start_of PID` prints the process's start time (field 22 of `/proc/PID/stat`, read past the
+ * parenthesised name, whose own spaces would shift the fields). `group_alive PGID` succeeds while
+ * the group has a member that is not a zombie: PID 1 in a sandbox image is often `sleep`, which
+ * reaps nothing, so a `kill -0 -- -PGID` would count the dead forever.
+ */
+const PROC = `start_of() {
+  read -r line 2>/dev/null <"/proc/$1/stat" || return 1
+  set -- \${line##*) }
+  shift 19
+  echo "$1"
+}
+group_alive() {
+  g=$1
+  for s in /proc/[0-9]*/stat; do
+    read -r line 2>/dev/null <"$s" || continue
+    set -- \${line##*) }
+    [ "$3" = "$g" ] && [ "$1" != Z ] && return 0
+  done
+  return 1
+}`
+
+/**
+ * Whether the `pid` file in `$1` names a process this container started, leaving its fields in
+ * `$pid`, `$boot` and `$start`. The start time catches a pid reused within one boot; a leader
+ * that has exited no longer has a `/proc` entry to compare, and its pid cannot be reused while
+ * its group still holds it as a pgid. A two-field file from before the start time was recorded
+ * is checked by boot id alone, as it was then.
+ */
+const CURRENT = `${PROC}
+current() {
+  read -r pid boot start 2>/dev/null <"$1/pid" &&
+    [ "$boot" = "$(cat /proc/sys/kernel/random/boot_id)" ] &&
+    { [ -z "$start" ] || [ ! -e "/proc/$pid/stat" ] || [ "$(start_of "$pid")" = "$start" ]; }
+}`
+
+/**
+ * `$1` is the directory, `$2` the timeout in seconds or empty, `$3` the number of `NAME=VALUE`
+ * pairs that follow, and the rest is the argv. The pairs are exported only in the shell that
+ * `exec`s the command, so the supervisor keeps the container's own environment.
+ *
+ * The exit is published once the whole group is gone, not when its leader exits: ProcessStatus
+ * describes the supervised group, so a command that detached a child is `running` — and
+ * reachable by KILL — until that child ends too. The status recorded is still the leader's.
+ *
+ * The watchdog waits for the pid file however short the timeout, and re-checks that the exit is
+ * unpublished and the group alive before it marks `timed-out`, so a command that ended at the
+ * deadline is not reported as timed out.
+ */
+export const RUN = `${PROC}
+dir=$1; seconds=$2; shift 2
 if [ -n "$seconds" ]; then
   (
     sleep "$seconds"
+    until read -r pid boot start 2>/dev/null <"$dir/pid"; do
+      [ -e "$dir/exit-code" ] && exit 0
+      sleep 0.1
+    done
     [ -e "$dir/exit-code" ] && exit 0
-    read -r pid boot <"$dir/pid" || exit 0
+    group_alive "$pid" || exit 0
     : >"$dir/timed-out"
     kill -s TERM -- "-$pid"
     sleep ${TIMEOUT_GRACE_SECONDS}
     [ -e "$dir/exit-code" ] || kill -s KILL -- "-$pid"
   ) >/dev/null 2>&1 &
 fi
-setsid sh -c 'echo "$$ $(cat /proc/sys/kernel/random/boot_id)" >"$0/pid"; exec "$@"' \\
-  "$dir" "$@" >"$dir/stdout.log" 2>"$dir/stderr.log"
-echo "$?" >"$dir/exit-code.tmp" && mv "$dir/exit-code.tmp" "$dir/exit-code"`
-
-const CURRENT = `current() {
-  read -r pid boot 2>/dev/null <"$1/pid" &&
-    [ "$boot" = "$(cat /proc/sys/kernel/random/boot_id)" ]
-}`
+setsid sh -c 'd=$0; n=$1; shift
+echo "$$ $(cat /proc/sys/kernel/random/boot_id) $(cut -d" " -f22 /proc/$$/stat)" >"$d/pid"
+while [ "$n" -gt 0 ]; do export "$1"; shift; n=$((n - 1)); done
+exec "$@"' "$dir" "$@" >"$dir/stdout.log" 2>"$dir/stderr.log"
+status=$?
+if read -r pid boot start 2>/dev/null <"$dir/pid"; then
+  while group_alive "$pid"; do sleep 0.2; done
+fi
+echo "$status" >"$dir/exit-code.tmp" && mv "$dir/exit-code.tmp" "$dir/exit-code"`
 
 /** STATUS, then the timeout marker, then `meta.json` — three lines per process. */
 const REPORT = `${CURRENT}
@@ -50,7 +104,7 @@ report() {
   if [ ! -d "$dir" ]; then echo missing
   elif [ -e "$dir/exit-code" ]; then echo "exited $(code "$dir")"
   elif [ ! -e "$dir/pid" ]; then echo starting
-  elif current "$dir" && kill -0 "$pid" 2>/dev/null; then echo "running $pid"
+  elif current "$dir" && { kill -0 "$pid" 2>/dev/null || group_alive "$pid"; }; then echo "running $pid"
   elif [ -e "$dir/exit-code" ]; then echo "exited $(code "$dir")"
   else echo lost
   fi

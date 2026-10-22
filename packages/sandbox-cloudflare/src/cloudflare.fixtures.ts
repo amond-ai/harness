@@ -33,6 +33,10 @@ export interface FakeContainer {
   execs: { argv: string[], options?: ContainerExecOptions }[]
   kills: { dir: string, signal: string }[]
   runPhase: FakeProcess['phase']
+  /** Called after every log read, so a test can grow a log while it is being read. */
+  afterRead?: () => void
+  /** The `process:<id>` process holding a status read open, until the test resolves it. */
+  holdStatus?: Promise<void>
   start: ReturnType<typeof vi.fn>
   destroy: ReturnType<typeof vi.fn>
   setInactivityTimeout: ReturnType<typeof vi.fn>
@@ -82,8 +86,12 @@ export function fakeContainer(): FakeContainer {
     start: vi.fn(() => {
       container.running = true
     }),
+    // A destroyed container takes its processes and disk with it.
     destroy: vi.fn(async () => {
       container.running = false
+      container.processes.clear()
+      container.fs.files.clear()
+      container.fs.dirs = new Set(['/'])
     }),
     setInactivityTimeout: vi.fn(async () => {}),
     getTcpPort: vi.fn(),
@@ -116,6 +124,7 @@ export function fakeContainer(): FakeContainer {
           return reply()
         }
         case STATUS:
+          await container.holdStatus
           return reply(reportLines(container.processes.get(args[0]!)))
         case LIST:
           return reply([...container.processes]
@@ -124,7 +133,9 @@ export function fakeContainer(): FakeContainer {
         case READ_SLICE: {
           const [file = '', offset = '0', limit = '0'] = args
           const log = logOf(container, file) ?? new Uint8Array()
-          return reply(log.slice(Number(offset), Number(offset) + Number(limit)))
+          const slice = log.slice(Number(offset), Number(offset) + Number(limit))
+          container.afterRead?.()
+          return reply(slice)
         }
         case SIZE:
           return reply(`${String(logOf(container, args[0]!)?.length ?? 0)}\n`)
@@ -171,14 +182,19 @@ export function fakeStorage(): FakeStorage & DurableObjectStorage {
   }) as unknown as FakeStorage & DurableObjectStorage
 }
 
-export function fakeSandbox(container = fakeContainer()) {
+export function fakeSandbox(
+  container = fakeContainer(),
+  Sandbox: new (ctx: DurableObjectState, env: unknown) => HarnessSandbox = HarnessSandbox,
+) {
   const storage = fakeStorage()
+  // What the constructor blocked concurrency on, for a test to await as the runtime would.
+  let ready: Promise<unknown> = Promise.resolve()
   const ctx = {
     container,
     storage,
-    blockConcurrencyWhile: async <T>(work: () => Promise<T>) => work(),
+    blockConcurrencyWhile: async <T>(work: () => Promise<T>) => (ready = work()),
   } as unknown as DurableObjectState
-  const sandbox = new HarnessSandbox(ctx, {})
+  const sandbox = new Sandbox(ctx, {})
   let minted = 0
   const session = (options?: CloudflareSessionOptions): SandboxSession =>
     createCloudflareSession(sandbox as HarnessSandboxRpc, {
@@ -189,7 +205,7 @@ export function fakeSandbox(container = fakeContainer()) {
       livenessIntervalMs: 0,
       ...options,
     })
-  return { container, storage, sandbox, session }
+  return { container, storage, sandbox, session, ready }
 }
 
 export function processOf(container: FakeContainer, id: string): FakeProcess {

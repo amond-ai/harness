@@ -46,6 +46,7 @@ const ALARM_INTERVAL_MS = 60_000
 const PROCESS_KEY_PREFIX = 'process:'
 const PID_WAIT_MS = 5_000
 const PID_POLL_MS = 100
+const ENV_NAME = /^[A-Z_]\w*$/i
 
 const LOG_FILES: ReadonlySet<string> = new Set<ProcessLogFile>(['stdout.log', 'stderr.log'])
 
@@ -63,11 +64,14 @@ export class HarnessSandbox<Env = unknown> extends DurableObject<Env> implements
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-    const container = ctx.container
-    // The timeout does not survive a restart of this object, so one that finds the container
-    // already running sets it again before serving anything.
-    if (container?.running === true) {
-      void ctx.blockConcurrencyWhile(() => container.setInactivityTimeout(this.inactivityTimeoutMs()))
+    // Neither the inactivity timeout nor `setupContainer` survives a restart of this object, so
+    // one that finds the container already running sets both up again before serving anything —
+    // `fetch` and the discovery reads never call `ensureRunning` themselves. A failed setup has
+    // already stopped the container; it is logged rather than thrown, which would reset the object.
+    if (ctx.container?.running === true) {
+      void ctx.blockConcurrencyWhile(() => this.ensureRunning().catch((error: unknown) => {
+        console.error('HarnessSandbox restart setup failed', error)
+      }))
     }
   }
 
@@ -163,6 +167,11 @@ export class HarnessSandbox<Env = unknown> extends DurableObject<Env> implements
     if (command.length === 0) {
       throw new Error('cannot start an empty argv: there is no command to run')
     }
+    const env = Object.entries(options?.env ?? {})
+    const badName = env.find(([name]) => !ENV_NAME.test(name))
+    if (badName !== undefined) {
+      throw new Error(`invalid environment variable name '${badName[0]}': expected [A-Za-z_][A-Za-z0-9_]*`)
+    }
     await this.ensureRunning()
     const container = this.container
     const meta: ProcessMeta = { id, command: [...command], cwd: options?.cwd, startedAt: new Date().toISOString() }
@@ -173,9 +182,12 @@ export class HarnessSandbox<Env = unknown> extends DurableObject<Env> implements
     const seconds = options?.timeout === undefined ? '' : String(Math.max(0, options.timeout) / 1000)
     try {
       // Ignoring the output is what lets the process outlive this request.
-      await container.exec(['sh', '-c', RUN, 'sh', dir, seconds, ...command], {
+      // The caller's env goes to the command alone, as `NAME=VALUE` arguments RUN exports just
+      // before `exec`: on the exec options it would reach the supervising shell too, and a `PATH`
+      // override could leave it unable to find `setsid`, `sleep` or `mv`.
+      const pairs = env.map(([name, value]) => `${name}=${value}`)
+      await container.exec(['sh', '-c', RUN, 'sh', dir, seconds, String(pairs.length), ...pairs, ...command], {
         cwd: options?.cwd,
-        env: options?.env,
         stdout: 'ignore',
         stderr: 'ignore',
       })

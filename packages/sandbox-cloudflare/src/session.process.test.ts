@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AT, endProcess, fakeSandbox, processOf } from './cloudflare.fixtures'
-import { PROCESS_ROOT, RUN } from './process-scripts'
+import { PROCESS_ROOT, RUN, STATUS } from './process-scripts'
 
 vi.mock('cloudflare:workers', async () => (await import('./fake-workers')).workersModule)
 vi.mock('@cloudflare/sandbox', async () => (await import('./fake-workers')).sandboxModule)
@@ -25,8 +25,22 @@ describe('exec', () => {
       state: 'running',
     })
     const run = container.execs.find(({ argv }) => argv[2] === RUN)!
-    expect(run.argv.slice(4)).toEqual([`${PROCESS_ROOT}/run-1`, '', 'claude', '-p', 'hi'])
-    expect(run.options).toMatchObject({ cwd: '/workspace', env: { CI: '1' }, stdout: 'ignore', stderr: 'ignore' })
+    expect(run.argv.slice(4)).toEqual([`${PROCESS_ROOT}/run-1`, '', '1', 'CI=1', 'claude', '-p', 'hi'])
+    expect(run.options).toEqual({ cwd: '/workspace', stdout: 'ignore', stderr: 'ignore' })
+  })
+
+  it('rejects an environment variable name the shell could not export, before starting anything', async () => {
+    const { container, session } = fakeSandbox()
+
+    await expect(session().exec(['claude'], { env: { 'A=B': '1' } })).rejects.toThrow(/invalid environment variable name 'A=B'/)
+    expect(container.start).not.toHaveBeenCalled()
+  })
+
+  it('publishes the exit only once the whole process group is gone', () => {
+    const wait = RUN.indexOf('while group_alive "$pid"')
+    expect(wait).toBeGreaterThan(-1)
+    expect(RUN.indexOf('>"$dir/exit-code.tmp"')).toBeGreaterThan(wait)
+    expect(STATUS).toMatch(/kill -0 "\$pid" 2>\/dev\/null \|\| group_alive "\$pid"; \}; then echo "running \$pid"/)
   })
 
   it('arms the alarm that keeps the container alive while the process runs', async () => {

@@ -39,6 +39,18 @@ describe('waitForExit', () => {
 
     await expect(handle.waitForExit()).rejects.toBeInstanceOf(SandboxNoExitRecordError)
   })
+
+  it('rejects promptly on abort while a status read is still pending', async () => {
+    const { container, session } = fakeSandbox()
+    const handle = await session().exec(['claude'])
+    container.holdStatus = new Promise(() => {})
+    const controller = new AbortController()
+
+    const waiting = handle.waitForExit({ signal: controller.signal })
+    controller.abort()
+
+    await expect(waiting).rejects.toBeInstanceOf(SandboxWaitTimeoutError)
+  })
 })
 
 describe('logs', () => {
@@ -77,6 +89,22 @@ describe('logs', () => {
     const events = await drain(await handle.logs({ since: '0:0' }))
     expect(events.map(text).join('')).toBe(big)
     expect(events.at(-1)?.cursor).toBe(`${big.length}:0`)
+  })
+
+  it('reads only to the end the log had when the read began, however fast it grows', async () => {
+    const { container, session } = fakeSandbox()
+    const handle = await session().exec(['claude'])
+    const chunk = 'x'.repeat(1024 * 1024)
+    writeLog(container, 'run-1', 'stdout', chunk)
+    let grown = 0
+    container.afterRead = () => {
+      if (grown++ < 3) {
+        writeLog(container, 'run-1', 'stdout', chunk)
+      }
+    }
+
+    const [first] = await drain(await handle.logs({ since: '0:0' }))
+    expect(first?.cursor).toBe(`${chunk.length}:0`)
   })
 
   it('follows the live log until the process exits and ends with a terminal event', async () => {

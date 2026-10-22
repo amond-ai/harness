@@ -1,6 +1,7 @@
 import { SANDBOX_PORT_HEADER } from '@amond-ai/harness-transport-cloudflare'
 import { describe, expect, it, vi } from 'vitest'
 import { endProcess, fakeContainer, fakeSandbox } from './cloudflare.fixtures'
+import { HarnessSandbox } from './durable-object'
 
 vi.mock('cloudflare:workers', async () => (await import('./fake-workers')).workersModule)
 vi.mock('@cloudflare/sandbox', async () => (await import('./fake-workers')).sandboxModule)
@@ -60,6 +61,30 @@ describe('container lifecycle', () => {
     fakeSandbox(container)
 
     expect(container.setInactivityTimeout).toHaveBeenCalledWith(5 * 60 * 1000)
+  })
+
+  it('runs setupContainer again before fetch forwards when a restarted object finds its container running', async () => {
+    const calls: string[] = []
+    class Recording extends HarnessSandbox {
+      protected override async setupContainer(_container: Container, fresh: boolean): Promise<void> {
+        calls.push(`setup fresh=${String(fresh)}`)
+      }
+    }
+    const container = fakeContainer()
+    container.running = true
+    container.getTcpPort.mockReturnValue({
+      fetch: async () => {
+        calls.push('forward')
+        return new Response('ok')
+      },
+    })
+    const { sandbox, ready } = fakeSandbox(container, Recording)
+
+    await ready
+    await sandbox.fetch(bridgeRequest('3001'))
+
+    expect(calls).toEqual(['setup fresh=false', 'forward'])
+    expect(container.start).not.toHaveBeenCalled()
   })
 
   it('refuses to start without a sandbox image rather than starting something else', async () => {
