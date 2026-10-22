@@ -54,6 +54,19 @@ export function exitOf(code: number, timedOut: boolean): ProcessExit {
   return { code, timedOut }
 }
 
+/** `signal`, aborted also once `ms` elapse when given; `clear` stops that timer. */
+function boundedBy(signal: AbortSignal | undefined, ms: number | undefined): { signal?: AbortSignal, clear: () => void } {
+  if (ms === undefined) {
+    return { signal, clear: () => {} }
+  }
+  const deadline = new AbortController()
+  const timer = setTimeout(() => deadline.abort(), Math.max(0, ms))
+  return {
+    signal: signal === undefined ? deadline.signal : AbortSignal.any([signal, deadline.signal]),
+    clear: () => clearTimeout(timer),
+  }
+}
+
 /** Resolve after `ms`, or as soon as `signal` aborts. */
 function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
   if (signal?.aborted === true) {
@@ -101,8 +114,9 @@ export function createCloudflareSession(
   }
 
   /**
-   * The abort reaches both the status read and the delay between reads, so a caller that gives
-   * up is not held by an RPC still pending against the container.
+   * The abort and the deadline both reach the status read, and the abort the delay between reads,
+   * so a caller that gives up is not held by an RPC still pending against the container. A wait
+   * with neither stays unbounded, as the contract asks.
    */
   async function waitForExit(id: string, waitOptions?: { timeout?: number, signal?: AbortSignal }): Promise<ProcessExit> {
     const startedAt = elapsedMs()
@@ -111,14 +125,18 @@ export function createCloudflareSession(
     const deadline = timeout === undefined ? undefined : startedAt + timeout
     while (true) {
       let report: ProcessReport | undefined
+      const bound = boundedBy(signal, deadline === undefined ? undefined : deadline - elapsedMs())
       try {
-        report = await abortable(sandbox.processStatus(id), signal)
+        report = await abortable(sandbox.processStatus(id), bound.signal)
       }
       catch (cause) {
-        if (signal?.aborted === true) {
+        if (bound.signal?.aborted === true) {
           throw new SandboxWaitTimeoutError(id, timeout ?? elapsedMs() - startedAt)
         }
         throw cause
+      }
+      finally {
+        bound.clear()
       }
       const state = report?.state
       if (state?.state === 'exited') {

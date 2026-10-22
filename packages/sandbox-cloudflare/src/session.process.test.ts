@@ -41,7 +41,7 @@ describe('exec', () => {
     const wait = RUN.indexOf('while group_alive "$pid"')
     expect(wait).toBeGreaterThan(-1)
     expect(RUN.indexOf('>"$dir/exit-code.tmp"')).toBeGreaterThan(wait)
-    expect(STATUS).toMatch(/kill -0 "\$pid" 2>\/dev\/null \|\| group_alive "\$pid"; \}; then echo "running \$pid"/)
+    expect(STATUS).toContain('{ alive "$pid" || group_alive "$pid" || supervised "$dir"; }; then echo "running $pid"')
   })
 
   it('arms the alarm that keeps the container alive while the process runs', async () => {

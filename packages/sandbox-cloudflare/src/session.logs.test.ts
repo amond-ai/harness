@@ -40,6 +40,14 @@ describe('waitForExit', () => {
     await expect(handle.waitForExit()).rejects.toBeInstanceOf(SandboxNoExitRecordError)
   })
 
+  it('rejects at its deadline while a status read is still pending', async () => {
+    const { container, session } = fakeSandbox()
+    const handle = await session().exec(['claude'])
+    container.holdStatus = new Promise(() => {})
+
+    await expect(handle.waitForExit({ timeout: 50 })).rejects.toBeInstanceOf(SandboxWaitTimeoutError)
+  })
+
   it('rejects promptly on abort while a status read is still pending', async () => {
     const { container, session } = fakeSandbox()
     const handle = await session().exec(['claude'])
