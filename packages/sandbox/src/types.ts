@@ -1,15 +1,6 @@
 /**
  * The sandbox surface the orchestrator actually runs against.
  *
- * These types are *structural copies* of the `@cloudflare/sandbox` shapes, not imports of
- * them, and that is the whole point of the package. Importing them would make every future
- * backend — e2b, Daytona, a local container — depend on the Cloudflare SDK to describe a
- * process it never runs there. Copying them keeps the contract free of any one vendor while
- * staying structurally assignable from the Cloudflare types, so `@cloudflare/sandbox`'s own
- * `ISandbox` satisfies {@link SandboxSession} with no mapping layer at all (see
- * `sandbox-cloudflare.ts`). A non-Cloudflare backend pays the mapping cost; the incumbent
- * pays nothing.
- *
  * The surface is deliberately the *used* one, not the full one. `ISandbox` carries ~20
  * methods and `SandboxProcess` nine; the orchestrator calls ten of them between the two.
  * Everything omitted here — `writeFile`, `mkdir`, `createTerminal`, `waitForPort`,
@@ -95,8 +86,7 @@ export interface ProcessLogsOptions {
  *
  * So a resolved {@link ProcessExit} always describes a process that actually exited, and
  * `timedOut` on it means the *process* was killed by its own timeout — not that the caller
- * gave up. `@cloudflare/sandbox` already behaves this way (`ProcessWaitTimeoutError`); a
- * rejection carrying {@link SandboxWaitTimeoutError} is this contract's spelling of it, so
+ * gave up. A rejection carrying {@link SandboxWaitTimeoutError} is how an expired wait ends, so
  * a caller can tell an expired wait from an arbitrary transport failure.
  *
  * `timeout` is what makes a wait expirable, and a backend may not invent one:
@@ -135,8 +125,7 @@ export interface WaitForExitOptions {
  *
  * **They are not an exhaustive union, and a caller must keep a fallback branch.** A backend
  * SHOULD raise these where they apply, but a wait can reject for reasons neither type covers —
- * `@cloudflare/sandbox` throws its own `ProcessWaitTimeoutError`, which is a genuine timeout
- * this contract has no view of, and any transport can fail. Code that treats the two as the
+ * any transport can fail. Code that treats the two as the
  * whole space mislabels the third kind rather than reporting it.
  */
 export class SandboxWaitTimeoutError extends Error {
@@ -186,7 +175,8 @@ export interface SandboxProcessHandle {
   waitForExit: (options?: WaitForExitOptions) => Promise<ProcessExit>
   /**
    * Signal the process. Without `signal` the backend sends whatever it terminates with
-   * (`@cloudflare/sandbox`: SIGTERM; the e2b backend: a SIGKILL walk of the tree). `2` (SIGINT)
+   * (the Cloudflare backend: SIGTERM to the process group; the e2b backend: a SIGKILL walk of
+   * the tree). `2` (SIGINT)
    * asks the process to finish on its own terms instead: the `claude` CLI answers it by ending
    * the turn and printing its `result`, which SIGTERM never yields. A backend that cannot
    * deliver a named signal must neither do nothing silently nor substitute a harsher one — a
@@ -234,12 +224,7 @@ export interface SandboxFileContent {
  *
  * Split out because it arrived for one caller — the AI SDK harness session, whose
  * `SandboxSession` requires full file I/O — and the contract's own note says to widen only
- * when a caller appears. It is declared in *Cloudflare's* shape (positional path,
- * encoding-selected overloads) rather than the harness's (options objects, three read
- * variants), which keeps the property this package is built on: `@cloudflare/sandbox`'s
- * client satisfies the contract with no mapping layer, and a non-Cloudflare backend pays
- * the mapping cost. The harness's own shape is a further translation, and it belongs in the
- * harness provider — written once, over the contract, for every backend at once.
+ * when a caller appears.
  */
 export interface SandboxFiles {
   /** Rejects when the path does not exist; callers wanting absence-as-value pair it with `exists`. */
@@ -265,8 +250,9 @@ export interface SandboxFiles {
  * **The URL is not promised to be publicly routable.** It is promised to be dialable by the
  * runtime the orchestrator runs in, which is both weaker and more useful. e2b answers with a
  * real public host (`https://<port>-<id>.e2b.app`); a Cloudflare sandbox has no such address
- * a Worker should use, because its bridge port is private and the Worker reaches it by asking
- * the Durable Object to open the socket (`wsConnect`) rather than by resolving a name. So the
+ * a Worker should use, because its bridge port is private and the Worker reaches it by sending
+ * the upgrade to the sandbox's Durable Object, which forwards it into the container, rather
+ * than by resolving a name. So the
  * Cloudflare backend answers with a URL tagged for its own transport, which
  * `@amond-ai/harness-transport-cloudflare` recognises and dials through the binding, while an
  * untagged URL is dialed directly. Which of the two a backend mints is the backend's
@@ -355,13 +341,11 @@ export interface SandboxProvider {
   /**
    * How to reach `port` inside the sandbox named by `sandboxId`.
    *
-   * On the *provider* rather than the session, and deliberately. `SandboxSession` is
-   * satisfied by `@cloudflare/sandbox`'s own client with no mapping layer at all — that is
-   * the property this whole package is built on — and one added method would end it, because
-   * the vendor object has no `portEndpoint` and never will: the tagging described on
-   * {@link SandboxPortEndpoint} is this repo's protocol, not Cloudflare's. A provider, by
-   * contrast, is written here for every backend, so it is where a shape nobody upstream
-   * implements belongs.
+   * On the *provider* rather than the session, and deliberately. The tagging described on
+   * {@link SandboxPortEndpoint} is this repo's protocol, not any vendor's, and a port address
+   * is a property of where the sandbox runs rather than of the process client a session wraps.
+   * A provider is written here for every
+   * backend, so it is where a shape nobody upstream implements belongs.
    *
    * Required rather than optional: a backend that cannot say where its ports are cannot run
    * the harness at all, and finding that out at the first connect — inside a workflow step —

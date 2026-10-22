@@ -5,8 +5,8 @@
  * run in a Worker at all: workerd resolves ws's `browser` export condition to a stub that
  * throws, and forcing its node entry dies at construction because workerd's `node:http`
  * `ClientRequest` does not implement `options.createConnection` (measured — see
- * `apps/cf-orchestrator/test/workerd-spike/`). Cloudflare hands out a perfectly good socket
- * from `Sandbox.wsConnect`; it just speaks `addEventListener`, while the adapter and
+ * `apps/cf-orchestrator/test/workerd-spike/`). Workerd hands out a perfectly good socket on an
+ * upgrade response; it just speaks `addEventListener`, while the adapter and
  * `@ai-sdk/harness`'s own `SandboxChannel` speak `.on()`. This is that translation, and
  * nothing more.
  *
@@ -290,7 +290,7 @@ interface OpenAnnouncer {
 /**
  * `open` never arrives, so it is delivered here.
  *
- * A socket from `wsConnect` is already open by the time `accept()` returns — the event fired,
+ * A socket from an upgrade response is already open by the time `accept()` returns — the event fired,
  * if it ever did, before this shim existed. The adapter waits for it: its `onOpen` is what
  * sets `opened`, starts the `bridge-hello` timer and resolves the connect promise, so a shim
  * that stayed faithful to "no event, no call" would hang every connection until

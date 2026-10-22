@@ -251,12 +251,11 @@ async function watchTurn(input: WatchTurnInput): Promise<AttemptResult> {
  * for a process that may still be burning a sandbox. Two readings, as in
  * `materializationExit`. `SandboxNoExitRecordError` proves the turn is already gone
  * without having recorded `$?` — an ordinary failed attempt the loop may safely retry.
- * Anything else stopped the wait for a reason it did not name, including the Cloudflare
- * backend's own `ProcessWaitTimeoutError`; liveness is then unknown, so the process is killed
- * and the attempt reported as a timeout whose `killConfirmed` decides whether another attempt
- * may start. An unbounded wait cannot raise `SandboxWaitTimeoutError`, so it needs no branch
- * of its own — it lands in the unknown one, which is exactly where an impossible reading
- * belongs.
+ * Anything else stopped the wait for a reason it did not name — a transport failure; liveness is then unknown,
+ * so the process is killed and the attempt reported as a timeout whose `killConfirmed` decides
+ * whether another attempt may start. An unbounded wait cannot raise `SandboxWaitTimeoutError`,
+ * so it needs no branch of its own — it lands in the unknown one, which is exactly where an
+ * impossible reading belongs.
  */
 async function abandonedWaitResult(
   sandbox: SandboxSession,

@@ -27,7 +27,7 @@ header-capable opener — the workerd `fetch` upgrade in `@amond-ai/harness-tran
 Node's `ws` package.
 
 That is also why the Cloudflare opener is a separate package rather than a branch in this one: a
-Cloudflare Sandbox port is private, reachable only through `Sandbox.wsConnect(request, port)`, so
-it dials a `Request` and needs `@cloudflare/sandbox`. Nothing in *this* package's `src` imports
+Cloudflare sandbox port is private, reachable only by sending the upgrade `Request` to the
+sandbox's Durable Object, which forwards it into the container. Nothing in *this* package's `src` imports
 `cloudflare:`, `node:` or `bun:`, and `closure.test.ts` in `@amond-ai/harness-claude-code` keeps it
 that way.

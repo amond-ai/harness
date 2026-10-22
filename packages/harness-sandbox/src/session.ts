@@ -5,9 +5,7 @@
  * here rather than pushed onto a backend:
  *
  * - **Ports and network policy are asked of the provider, not the session.** The contract
- *   puts `portEndpoint` and `setNetworkPolicy` on `SandboxProvider` on purpose —
- *   `SandboxSession` is satisfied by `@cloudflare/sandbox`'s own client with no mapping layer,
- *   and one added method would end that. So this session closes over the provider and its id.
+ *   puts `portEndpoint` and `setNetworkPolicy` on `SandboxProvider`, so this session closes over the provider and its id.
  * - **`stop` and `destroy` are the same call.** The contract has one `destroy()`. The harness
  *   requires both to be idempotent and to survive an already-stopped sandbox, so a *successful*
  *   teardown is latched and concurrent callers share the one in flight. A failed one is not:
