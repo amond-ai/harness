@@ -1,14 +1,9 @@
 /**
- * Kept out of the package root because `@cloudflare/sandbox` imports `cloudflare:workers`,
- * which resolves only inside a Worker build.
+ * The one place a sandbox id becomes a Durable Object, so every caller lands on the same one.
  */
-import type { Sandbox } from '@cloudflare/sandbox'
-import { getSandbox } from '@cloudflare/sandbox'
-import { SANDBOX_OPTIONS } from './ws-compat'
-
-export function openSandbox(
-  namespace: DurableObjectNamespace<Sandbox>,
+export function openSandbox<T extends Rpc.DurableObjectBranded | undefined>(
+  namespace: DurableObjectNamespace<T>,
   sandboxId: string,
-): ReturnType<typeof getSandbox<Sandbox>> {
-  return getSandbox(namespace, sandboxId, SANDBOX_OPTIONS)
+): DurableObjectStub<T> {
+  return namespace.getByName(sandboxId.toLowerCase())
 }

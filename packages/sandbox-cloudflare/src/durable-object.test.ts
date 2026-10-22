@@ -1,0 +1,94 @@
+import { SANDBOX_PORT_HEADER } from '@amond-ai/harness-transport-cloudflare'
+import { describe, expect, it, vi } from 'vitest'
+import { endProcess, fakeContainer, fakeSandbox } from './cloudflare.fixtures'
+
+vi.mock('cloudflare:workers', async () => (await import('./fake-workers')).workersModule)
+vi.mock('@cloudflare/sandbox', async () => (await import('./fake-workers')).sandboxModule)
+
+function bridgeRequest(port: string | null): Request {
+  const headers = new Headers({ 'x-trace': 'kept' })
+  if (port !== null) {
+    headers.set(SANDBOX_PORT_HEADER, port)
+  }
+  return new Request('http://localhost:3001/bridge?agent_bridge_token=t0ken', { headers })
+}
+
+describe('fetch', () => {
+  it('forwards to the named port with the port header stripped and the query kept', async () => {
+    const container = fakeContainer()
+    container.running = true
+    const forwarded: Request[] = []
+    container.getTcpPort.mockReturnValue({
+      fetch: async (request: Request) => {
+        forwarded.push(request)
+        return new Response('from the container')
+      },
+    })
+    const { sandbox } = fakeSandbox(container)
+
+    const response = await sandbox.fetch(bridgeRequest('3001'))
+
+    expect(await response.text()).toBe('from the container')
+    expect(container.getTcpPort).toHaveBeenCalledWith(3001)
+    expect(forwarded[0]!.headers.has(SANDBOX_PORT_HEADER)).toBe(false)
+    expect(forwarded[0]!.headers.get('x-trace')).toBe('kept')
+    expect(new URL(forwarded[0]!.url).searchParams.get('agent_bridge_token')).toBe('t0ken')
+  })
+
+  it('answers 503 without starting a container when none runs', async () => {
+    const { container, sandbox } = fakeSandbox()
+
+    expect((await sandbox.fetch(bridgeRequest('3001'))).status).toBe(503)
+    expect(container.start).not.toHaveBeenCalled()
+  })
+
+  it('answers 503 when nothing listens on the port, and 400 without a port', async () => {
+    const container = fakeContainer()
+    container.running = true
+    container.getTcpPort.mockReturnValue({ fetch: async () => Promise.reject(new Error('refused')) })
+    const { sandbox } = fakeSandbox(container)
+
+    expect((await sandbox.fetch(bridgeRequest('3001'))).status).toBe(503)
+    expect((await sandbox.fetch(bridgeRequest(null))).status).toBe(400)
+  })
+})
+
+describe('container lifecycle', () => {
+  it('re-sets the inactivity timeout when a restarted object finds its container running', () => {
+    const container = fakeContainer()
+    container.running = true
+    fakeSandbox(container)
+
+    expect(container.setInactivityTimeout).toHaveBeenCalledWith(5 * 60 * 1000)
+  })
+
+  it('refuses to start without a sandbox image rather than starting something else', async () => {
+    const container = fakeContainer()
+    container.images = {}
+    const { session } = fakeSandbox(container)
+
+    await expect(session().exec(['claude'])).rejects.toThrow(/images\.sandbox/)
+    expect(container.start).not.toHaveBeenCalled()
+  })
+})
+
+describe('alarm', () => {
+  it('re-arms while a process runs and forgets one that has ended', async () => {
+    const { container, storage, sandbox, session } = fakeSandbox()
+    const s = session()
+    await s.exec(['claude'])
+    await s.exec(['git'])
+    endProcess(container, 'run-2', 0)
+    storage.alarm = null
+
+    await sandbox.alarm()
+
+    expect([...storage.data.keys()]).toEqual(['process:run-1'])
+    expect(storage.alarm).not.toBeNull()
+    endProcess(container, 'run-1', 0)
+    storage.alarm = null
+    await sandbox.alarm()
+    expect(storage.data.size).toBe(0)
+    expect(storage.alarm).toBeNull()
+  })
+})

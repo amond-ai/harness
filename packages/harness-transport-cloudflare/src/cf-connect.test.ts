@@ -1,13 +1,13 @@
-import type { WsConnectSandbox } from './cf-connect'
+import type { SandboxFetcher } from './cf-connect'
 import { describe, expect, it } from 'vitest'
-import { createBridgeSocketOpener } from './cf-connect'
+import { createBridgeSocketOpener, SANDBOX_PORT_HEADER } from './cf-connect'
 
-function fakeSandbox(reply: (request: Request, port: number) => Response) {
+function fakeSandbox(reply: (request: Request) => Response) {
   const calls: { request: Request, port: number }[] = []
-  const sandbox: WsConnectSandbox = {
-    wsConnect: (request, port) => {
-      calls.push({ request, port })
-      return Promise.resolve(reply(request, port))
+  const sandbox: SandboxFetcher = {
+    fetch: (request) => {
+      calls.push({ request, port: Number(request.headers.get(SANDBOX_PORT_HEADER)) })
+      return Promise.resolve(reply(request))
     },
   }
   return { sandbox, calls }
@@ -29,11 +29,19 @@ function upgraded() {
 const BRIDGE = 'ws://sandbox.invalid:3001/bridge?agent_bridge_token=t0ken'
 
 describe('createBridgeSocketOpener', () => {
-  it('dials the port from the endpoint URL', async () => {
+  it('names the port from the endpoint URL in the header the Durable Object forwards on', async () => {
     const socket = upgraded()
     const { sandbox, calls } = fakeSandbox(() => socket.response)
     await createBridgeSocketOpener(sandbox)({ url: BRIDGE })
     expect(calls[0]?.port).toBe(3001)
+    expect(new URL(calls[0]!.request.url).port).toBe('3001')
+  })
+
+  it('sets the port header rather than appending to one the endpoint carried', async () => {
+    const socket = upgraded()
+    const { sandbox, calls } = fakeSandbox(() => socket.response)
+    await createBridgeSocketOpener(sandbox)({ url: BRIDGE, headers: { 'x-sandbox-port': '22' } })
+    expect(calls[0]!.request.headers.get(SANDBOX_PORT_HEADER)).toBe('3001')
   })
 
   it('preserves the bridge token, which travels in the query string', async () => {

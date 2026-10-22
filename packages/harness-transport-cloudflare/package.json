@@ -2,7 +2,7 @@
   "name": "@amond-ai/harness-transport-cloudflare",
   "type": "module",
   "version": "0.1.0",
-  "description": "Opens the harness bridge socket from workerd — through a Cloudflare Sandbox binding or straight over `fetch` — so the adapter never reaches for `ws`",
+  "description": "Opens the harness bridge socket from workerd — through a sandbox's Durable Object or straight over `fetch` — so the adapter never reaches for `ws`",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/amond-ai/harness/tree/main/packages/harness-transport-cloudflare#readme",
@@ -59,8 +59,7 @@
     "test:coverage": "bun --bun vitest run --coverage"
   },
   "dependencies": {
-    "@amond-ai/harness-transport": "workspace:*",
-    "@cloudflare/sandbox": "catalog:"
+    "@amond-ai/harness-transport": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:workers-v5",
