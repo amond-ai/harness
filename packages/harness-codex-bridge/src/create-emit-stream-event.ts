@@ -145,6 +145,8 @@ export function createEmitStreamEvent({
     }
     const item = event.item
     const id = item.id ?? randomUUID()
+    // The same test as the fallback above, so a `null` id is held like a missing one.
+    const hasWireId = item.id != null
     const observeStep = (): void => {
       /*
        * `item.id`, not the `id` above: for an item Codex sent without one that
@@ -201,7 +203,7 @@ export function createEmitStreamEvent({
 
     if (item.type === 'command_execution') {
       const nativeName = 'shell'
-      if (event.type === 'item.started') {
+      const sendCall = (): void => {
         send({
           type: 'tool-call',
           toolCallId: id,
@@ -211,7 +213,21 @@ export function createEmitStreamEvent({
           providerExecuted: true,
         })
       }
+      /*
+       * A command Codex sent without an id gets a fresh fallback id per event,
+       * so a call emitted at `item.started` would never pair with its result.
+       * It waits for `item.completed`, which carries the command too, and is
+       * emitted there with the result (patch 38).
+       */
+      if (event.type === 'item.started') {
+        if (hasWireId) {
+          sendCall()
+        }
+      }
       else if (event.type === 'item.completed') {
+        if (!hasWireId) {
+          sendCall()
+        }
         send({
           type: 'tool-result',
           toolCallId: id,
@@ -232,7 +248,7 @@ export function createEmitStreamEvent({
 
     if (item.type === 'mcp_tool_call') {
       const toolName = getMcpToolName(item)
-      if (event.type === 'item.started') {
+      const sendCall = (): void => {
         send({
           type: 'tool-call',
           toolCallId: id,
@@ -243,7 +259,16 @@ export function createEmitStreamEvent({
           dynamic: true,
         })
       }
+      // Held until `item.completed` without an id, as a command is above.
+      if (event.type === 'item.started') {
+        if (hasWireId) {
+          sendCall()
+        }
+      }
       else if (event.type === 'item.completed') {
+        if (!hasWireId) {
+          sendCall()
+        }
         send({
           type: 'tool-result',
           toolCallId: id,
@@ -271,7 +296,7 @@ export function createEmitStreamEvent({
        * call emitted earlier would never pair with its result.
        */
       if (event.type === 'item.started' || event.type === 'item.updated') {
-        if (query !== undefined && item.id !== undefined) {
+        if (query !== undefined && hasWireId) {
           emitWebSearchToolCall({ id, query, nativeName, emittedWebSearchToolCalls, send })
         }
       }

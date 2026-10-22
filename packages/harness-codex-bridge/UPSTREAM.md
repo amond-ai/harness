@@ -136,6 +136,18 @@ five entries long and unrelated to this one.
     never matched its completion: the completion emitted a second call, and the
     first stayed without a result. Such a search now emits its call only at
     `item.completed`, with the result.
+38. `fix(codex-host): pair the call and result of an id-less command or MCP call`
+    — upstream emits a `command_execution` or `mcp_tool_call` call at
+    `item.started` and its result at `item.completed`, both keyed by
+    `item.id ?? randomUUID()`. Without an id, the two got different fresh
+    UUIDs, leaving a call with no result and a result with no call. Such an
+    item now emits its call at `item.completed`, from the completed item's
+    `command` or `arguments`, with the result under the same id, as patch 37
+    does for a search. "Without an id" means `null` as well as absent, the
+    same test as the `??` fallback; patch 37's guard now uses it too. The
+    Codex CLI (0.160.1) gives every item an `item_<n>`
+    id and reuses it from start to completion, so this guards the optional
+    wire shape the bridge reads rather than a case seen in practice.
 
 ## Upstream behaviour deliberately dropped
 
