@@ -14,8 +14,8 @@ describe('exec', () => {
     expect(fake.spawned).toEqual([{
       script: journalledScript(['claude', '-p'], PATHS, NONCE),
       cwd: WORK,
-      // The base environment is layered under the caller's, not replaced by it: the `cli`
-      // driver execs a `claude` the machine already has, and a spawn without PATH cannot.
+      // The base environment is layered under the caller's, not replaced by it: a turn execs the
+      // machine's own `node`, and a spawn without PATH cannot.
       env: { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'k' },
     }])
   })

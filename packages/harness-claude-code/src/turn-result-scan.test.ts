@@ -33,8 +33,8 @@ describe('createTurnResultScanner', () => {
   })
 
   /**
-   * The host appends its own output after the turn ended, and a `cli` turn's log ends in whatever
-   * the container wrote last. A scan that only remembered the final line would answer for that one.
+   * The host appends its own output after the turn ended, and a journal ends in whatever the
+   * container wrote last. A scan that only remembered the final line would answer for that one.
    */
   it('keeps the verdict when the stream carries more lines after the result', () => {
     const scanner = createTurnResultScanner()

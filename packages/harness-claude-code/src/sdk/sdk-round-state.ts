@@ -230,12 +230,10 @@ export function interruptedResult(timedOutBy: TurnTimeoutCause, killConfirmed: b
 /**
  * Whether the whole turn is over, as `live-mirror`'s `complete` stamp asks it.
  *
- * The same question `cli-turn-watch.ts` answers, with one deliberate difference. There, a
- * `failed` attempt carrying no exit code is *not* proof the process stopped — the reading came
- * from a wait that ended without one. Here it is: a `failed` outcome exists only because the
- * host sent `finish` or `error`, which is the host's own account of a turn that is over. The
- * one case that stays unproven is the same one — a timeout whose kill went unconfirmed, where
- * the process may still be writing more than the snapshot holds.
+ * A `failed` attempt carrying no exit code is still proof the process stopped: a `failed`
+ * outcome exists only because the host sent `finish` or `error`, which is the host's own account
+ * of a turn that is over. The one case that stays unproven is a timeout whose kill went
+ * unconfirmed, where the process may still be writing more than the snapshot holds.
  */
 export function roundEnded(outcome: AttemptResult | undefined): boolean {
   if (outcome === undefined) {

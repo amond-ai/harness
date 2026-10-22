@@ -9,7 +9,7 @@ import type { PumpContext } from './sdk-round'
  * where that wait ends in the kill ladder. The second is a refused stop and takes the kill ladder
  * at once (`stopRefused`). When to call each stays with the pump.
  */
-import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from '../cli-turn-kill'
+import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from '../turn-kill'
 import { interruptedResult } from './sdk-round-state'
 import { unreachableTimeout } from './sdk-round-verdict'
 

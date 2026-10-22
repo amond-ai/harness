@@ -2,7 +2,7 @@
   "name": "@amond-ai/harness-claude-code",
   "type": "module",
   "version": "0.1.0",
-  "description": "Starts, watches, attaches to and stops one Claude Code turn in a sandbox — the Worker-side seam both the `claude` CLI exec and the Agent SDK turn host sit behind",
+  "description": "Starts, watches, attaches to and stops one Claude Code turn in a sandbox — the Worker-side seam the Agent SDK turn host sits behind",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/amond-ai/harness/tree/main/packages/harness-claude-code#readme",

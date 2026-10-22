@@ -1,15 +1,11 @@
-export { cliTurnDriver } from './cli-turn-driver'
-export { INTERRUPT_SETTLE_TIMEOUT_MS, isLive, KILL_SETTLE_TIMEOUT_MS, killTurn } from './cli-turn-kill'
-export { awaitTurn } from './cli-turn-watch'
 /**
  * The turn seam: everything a Worker needs to start, watch, attach to and stop one Claude Code
  * turn inside a sandbox, and nothing that ties it to one deployment.
  *
  * What a consumer injects rather than finds here: a `SandboxProvider` (which container, on which
  * backend), an `openSocket` (dialing a bridge endpoint is the one thing that cannot run outside
- * workerd), a `claudeArgv` builder (what a `claude` turn is invoked with is policy), a
- * {@link LiveMirror} to put bytes into, and a {@link TurnDriverConfig} of thresholds. See
- * `README.md`.
+ * workerd), a {@link LiveMirror} to put bytes into, and a {@link TurnDriverConfig} of
+ * thresholds. See `README.md`.
  */
 export type { TurnDriverConfig } from './config'
 export type { CreateClaudeCodeOptions } from './harness-v1/create-claude-code'
@@ -28,8 +24,6 @@ export {
   claudeCodeTurnSessionSchema,
   defaultPermissionMode,
 } from './harness-v1/lifecycle-state'
-export type { LogSample } from './log-sample'
-export { LOG_READ_TIMEOUT_MS, readLogSample } from './log-sample'
 export type { LiveMirror } from './mirror'
 export { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS, LIVE_MIRROR_MAX_BYTES } from './mirror'
 export type { AttemptOutcome, HostLoss, HostLossProcess, HostLossSocket, HostReading, TurnTimeoutCause, TurnVerdict } from './outcome'
@@ -89,8 +83,6 @@ export type { SdkHandOffInput, SdkStartInput } from './sdk/sdk-turn-start'
 export { BRIDGE_READY_TIMEOUT_MS, handTurnToHost, startTurnHost, TurnHostBootError } from './sdk/sdk-turn-start'
 export type {
   AttemptResult,
-  ClaudeArgv,
-  TurnAwaitSpec,
   TurnDriver,
   TurnDriverRun,
   TurnHandle,
@@ -101,8 +93,7 @@ export type {
   TurnStartSpec,
 } from './turn-driver'
 export { turnDriver } from './turn-driver'
-export type { TurnDriverKind } from './turn-driver-kind'
-export { parseTurnDriver, TURN_DRIVERS } from './turn-driver-kind'
+export { INTERRUPT_SETTLE_TIMEOUT_MS, isLive, KILL_SETTLE_TIMEOUT_MS, killTurn } from './turn-kill'
 export { flushOnInterval } from './turn-mirror-flush'
 export type { TurnResult } from './turn-result'
 export {
@@ -117,12 +108,10 @@ export type { TurnResultScanner } from './turn-result-scan'
 export { createTurnResultScanner, withVerdict } from './turn-result-scan'
 export type { TurnBudgetInput, WatchdogDecision, WatchdogInput } from './watchdog'
 export {
-  AWAIT_EXIT_STEP_TIMEOUT,
   AWAIT_EXIT_STEP_TIMEOUT_MS,
   clampedTurnBudget,
   MAX_TURN_WALL_CLOCK_BUDGET_MS,
   maxAttachRounds,
-  nextSampleDelay,
   ROUND_STEP_TIMEOUT,
   ROUND_WINDOW_MS,
   TURN_BUDGET_MARGIN_MS,

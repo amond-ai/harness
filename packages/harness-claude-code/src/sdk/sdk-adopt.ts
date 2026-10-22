@@ -2,20 +2,17 @@
  * The `sdk` driver's idempotency guard: adopt the live turn host a partially observed earlier
  * start left running, or exec a new one.
  *
- * The same rule the `cli` driver's `liveTurnProcess` states, and the same reason — `exec` is not
- * idempotent, and `start-turn-N` is `NO_RETRIES` precisely because a replay that spawned a
- * second turn in one container would leave two agents editing one checkout.
+ * `exec` is not idempotent, and `start-turn-N` is `NO_RETRIES` precisely because a replay that
+ * spawned a second turn in one container would leave two agents editing one checkout.
  *
- * Separate from the cli guard rather than shared, because the two match on different things. The
- * cli argv carries the prompt, so an exact argv comparison is a comparison of the whole turn;
- * the host's argv carries only the workdir and the state dir, and the state dir is derived from
- * the run and the attempt — so it is the argv match *and* nothing else that identifies this
- * turn's host. That is sufficient and it is worth saying why: two attempts of one run have
+ * The match is on the host's argv, which carries only the workdir and the state dir, and the
+ * state dir is derived from the run and the attempt — so it is the argv match *and* nothing
+ * else that identifies this turn's host. That is sufficient and it is worth saying why: two attempts of one run have
  * different state dirs, and two runs have different run ids in theirs.
  */
 import type { ProcessStatus, SandboxProcessHandle, SandboxSession } from '@amond-ai/sandbox'
 import type { TurnStartSpec } from '../turn-driver'
-import { isLive } from '../cli-turn-kill'
+import { isLive } from '../turn-kill'
 
 export interface AdoptOrExecInput {
   session: SandboxSession

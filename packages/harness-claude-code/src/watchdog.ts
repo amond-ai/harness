@@ -1,11 +1,11 @@
 /**
  * The watchdog's extend-or-kill decision.
  *
- * The await-exit step races the process exit against a watchdog timer. When the timer
- * fires, the process has not exited — but "no exit" alone does not mean "wedged": a
- * `claude` turn can be quiet for a long stretch while it is genuinely working, and the
- * sandbox's process status cannot tell a wedged start from a live-but-silent one. So the
- * decision is made on *liveness*: the timestamp of the last observed process-log progress.
+ * A round judges the turn each time its watchdog timer fires. When the timer fires, the turn
+ * has not ended — but "no end" alone does not mean "wedged": a `claude` turn can be quiet for a
+ * long stretch while it is genuinely working, and the sandbox's process status cannot tell a
+ * wedged start from a live-but-silent one. So the decision is made on *liveness*: the timestamp
+ * of the last observed frame arrival.
  *
  * Activity inside the liveness window means the turn is alive, and the wait is extended
  * (AC-026 requires liveness, not exit-absence alone). Otherwise the run is only killed
@@ -22,13 +22,13 @@ import type { TurnTimeoutCause } from './outcome'
 export type WatchdogDecision = 'extend' | 'timeout'
 
 export interface WatchdogInput {
-  /** Epoch millis of the last observed process-log progress. */
+  /** Epoch millis of the last observed frame arrival. */
   lastLogActivityAt: number
   /** Epoch millis at which the watchdog timer fired. */
   now: number
   /** Silence, in millis, after which a turn with no liveness signal is declared wedged. */
   watchdogTimeoutMs: number
-  /** Recency, in millis, within which log progress still counts as a liveness signal. */
+  /** Recency, in millis, within which a frame arrival still counts as a liveness signal. */
   livenessWindowMs: number
 }
 
@@ -66,59 +66,28 @@ export function turnBudgetExhausted(input: TurnBudgetInput): boolean {
 }
 
 /**
- * How long the next liveness tick may sleep: the sampling interval, cut short by the turn's
- * wall-clock deadline.
- *
- * The budget is only ever judged *after* a tick resolves, so a sampling interval longer than the
- * remaining budget would leave the budget unread until the interval elapsed — and
- * `LIVENESS_SAMPLE_INTERVAL_MS` is a configurable value that may legitimately exceed it. Clamping
- * here keeps the deadline the thing that decides when the turn is next judged.
- *
- * A zero delay is a fine answer, not a degenerate one: the tick fires at once and that same pass
- * reads the budget as exhausted.
- */
-export function nextSampleDelay(input: {
-  intervalMs: number
-  startedAt: number
-  budgetMs: number
-  now: number
-}): number {
-  return Math.max(0, Math.min(input.intervalMs, input.startedAt + input.budgetMs - input.now))
-}
-
-/**
- * The `await-exit` step's own ceiling, as one number.
+ * The platform's ceiling on one workflow step, as one number.
  *
  * The platform aborts a step that outlives it, and that abort is the outcome AC-026 reserves for
- * the watchdog: no kill, no `reportComplete`, no `timedOutBy`. Every deadline the step judges is
+ * the watchdog: no kill, no `reportComplete`, no `timedOutBy`. Every deadline a step judges is
  * therefore expressed against this one value rather than beside it, so the two cannot drift into
  * a budget the step can no longer outlast.
  */
 export const AWAIT_EXIT_STEP_TIMEOUT_MS = 6 * 60 * 60 * 1000
 
-/**
- * The same ceiling in the spelling `WorkflowStepConfig.timeout` takes.
- *
- * A duration string rather than {@link AWAIT_EXIT_STEP_TIMEOUT_MS} itself, because the field also
- * accepts a bare number and the unit a bare number carries is not something to infer — getting it
- * wrong would silently move the step's real timeout. `watchdog.test.ts` pins this literal against
- * the number, so the pair is checked rather than merely written next to each other.
- */
-export const AWAIT_EXIT_STEP_TIMEOUT = '6 hours'
-
-/** What the step keeps for itself: the kill, the final log drain, and the closing flush. */
+/** What the step keeps for itself: the kill, the final journal read, and the closing flush. */
 export const TURN_BUDGET_MARGIN_MS = 60 * 60 * 1000
 
 /**
- * The most wall clock a turn may be given, one margin short of the step's own ceiling.
+ * The most wall clock a turn may be given, one margin short of a step's own ceiling.
  *
  * A configured `TURN_WALL_CLOCK_BUDGET_MS` at or above the step timeout would hand the verdict
  * back to the platform, which is exactly what {@link AWAIT_EXIT_STEP_TIMEOUT_MS} says must not
  * happen. Derived rather than written out, so raising the step's ceiling raises this with it.
  *
- * The margin is not slack: once the budget fires, the step still has to kill the process, drain
- * the log one last time and put the closing snapshot, and all of that has to finish inside the
- * step.
+ * The margin is not slack: once the budget fires, the step still has to kill the process, read
+ * the journal one last time and put the closing snapshot, and all of that has to finish inside
+ * the step.
  */
 export const MAX_TURN_WALL_CLOCK_BUDGET_MS = AWAIT_EXIT_STEP_TIMEOUT_MS - TURN_BUDGET_MARGIN_MS
 
@@ -148,11 +117,6 @@ export function clampedTurnBudget(configured: number): number {
  * The two watchdog thresholds arrive as scalars rather than as the whole `TurnDriverConfig`,
  * so the *unclamped* `config.turnWallClockBudgetMs` is not in reach beside the clamped `budgetMs`
  * — reaching for the wrong one would silently bypass {@link MAX_TURN_WALL_CLOCK_BUDGET_MS}.
- *
- * It lives here rather than beside one driver's loop because both drivers make the same
- * decision from different observations: the `cli` driver counts bytes off a log cursor, the
- * `sdk` driver counts frame arrivals off a socket, and D4 says the decision itself is unchanged
- * between them.
  */
 export function turnTimeoutCause(input: {
   startedAt: number
@@ -177,7 +141,7 @@ export function turnTimeoutCause(input: {
 }
 
 /**
- * How long one `sdk` attach round consumes frames before it returns and the next step re-attaches.
+ * How long one attach round consumes frames before it returns and the next step re-attaches.
  *
  * The round is what keeps a six-hour turn under the per-step CPU meter, and what makes an
  * eviction cheap: the next round re-attaches with the `since` it stored and the host's journal
@@ -196,7 +160,7 @@ export const ROUND_WINDOW_MS = 20 * 60 * 1000
  *
  * Half again the window, so a round that is draining its mirror or settling an interrupt when
  * the window ends is not aborted by the platform mid-decision — the same margin
- * {@link TURN_BUDGET_MARGIN_MS} keeps for the single-step driver, at the round's scale.
+ * {@link TURN_BUDGET_MARGIN_MS} keeps for the whole turn, at the round's scale.
  */
 export const ROUND_STEP_TIMEOUT = '30 minutes'
 

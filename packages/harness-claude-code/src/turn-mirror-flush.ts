@@ -1,10 +1,9 @@
 /**
- * The live transcript mirror's publishing cadence, shared by both drivers.
+ * The live transcript mirror's publishing cadence.
  *
- * Split out of `cli-turn-watch.ts` when the `sdk` driver arrived, because the two drivers watch
- * a turn very differently — a log cursor against a socket — and publish it identically: the
- * mirror re-puts a whole snapshot on a slow tick, and how slow that tick is is a property of R2
- * and of the isolate's memory, not of how the bytes were observed.
+ * Kept apart from the round that watches the turn: the mirror re-puts a whole snapshot on a slow
+ * tick, and how slow that tick is is a property of R2 and of the isolate's memory, not of how
+ * the bytes were observed.
  */
 import type { LiveMirror } from './mirror'
 import { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS } from './mirror'
@@ -15,8 +14,7 @@ import { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS } from './mirror'
  * R2 has no append, so every flush writes the whole snapshot and the interval is a cost, not a
  * cadence: five minutes is a handful of puts across a long turn. The worst case is losing one
  * interval of tail — the bytes appended since the last flush — and only if the workflow itself
- * dies, since every exit path of a wait — and every attach round — drains and flushes
- * before it returns.
+ * dies, since every exit path of an attach round drains and flushes before it returns.
  */
 const LIVE_MIRROR_FLUSH_INTERVAL_MS = 5 * 60 * 1000
 

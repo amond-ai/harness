@@ -17,14 +17,14 @@ export interface TurnDriverConfig {
    * Ceiling on one turn's spend in USD, and on how many agent turns it may take.
    *
    * Both absent by default — and absent means *no limit*. The `sdk` driver puts them on the
-   * `start` frame; the `cli` driver ignores both.
+   * `start` frame.
    */
   turnMaxBudgetUsd?: number
   turnMaxTurns?: number
   /**
    * The run's permission posture, as tool-name patterns (D6). Both empty by default — an empty
    * list is "this deployment names none", and the `sdk` driver then puts no such field on its
-   * `start` frame at all. The `cli` driver ignores both.
+   * `start` frame at all.
    */
   turnDeferTools: readonly string[]
   turnRefuseTools: readonly string[]

@@ -9,7 +9,7 @@ import type { PumpContext } from './sdk-round'
  * wait for a frame while the interrupt is only waiting on one of them, or the "no running turn"
  * grace is. Whether to send it, and what follows, stay with the pump.
  */
-import { INTERRUPT_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
+import { INTERRUPT_SETTLE_TIMEOUT_MS } from '../turn-kill'
 
 /**
  * How long a round entered over budget lets its resume settle before it sends the interrupt,

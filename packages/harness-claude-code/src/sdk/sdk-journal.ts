@@ -1,11 +1,10 @@
 /**
  * Reading a finished `sdk` turn's record back out of the sandbox.
  *
- * The settle path replays *the process log*, and under the `cli` driver that log is the turn:
- * `claude --output-format stream-json` writes the NDJSON straight to stdout. A turn host writes
- * nothing of the sort there — its stdout carries `bridge-ready` and whatever the SDK printed —
- * so a settle that read it would find no `result` message and record every `sdk` run as failed
- * ("claude produced no terminal result message"). The record is on disk instead, in the journal
+ * The settle path replays NDJSON, but a turn host's process log is not the turn: its stdout
+ * carries `bridge-ready` and whatever the SDK printed, so a settle that read it would find no
+ * `result` message and record every run as failed ("claude produced no terminal result
+ * message"). The record is on disk instead, in the journal
  * the host appends every outbound frame to, and this is the read that turns it back into the
  * same NDJSON every existing consumer already decodes.
  *
@@ -172,7 +171,7 @@ export interface JournalEnding {
  * answer when `tail -c` starts past the result.
  *
  * A read that fails is not an ending: it answers with the carried verdict and no terminal frame,
- * which is what leaves the two readings the cli path makes unchanged.
+ * which is what leaves the socket-side readings unchanged.
  */
 export async function readJournalEnding(
   session: SandboxSession,

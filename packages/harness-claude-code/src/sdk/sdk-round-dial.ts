@@ -11,7 +11,7 @@ import type { TurnRoundState } from './sdk-round-state'
  * bridge with the bound that decision picks.
  */
 import { describeCause as describe } from '@amond-ai/redact'
-import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
+import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS } from '../turn-kill'
 import { createTurnResultScanner } from '../turn-result-scan'
 import { ROUND_WINDOW_MS, turnBudgetExhausted } from '../watchdog'
 import { createTurnChannel } from './sdk-channel'

@@ -36,7 +36,7 @@ import { readTranscript } from './read-transcript'
 import { transcriptHistory } from './transcript-history'
 
 export interface ClaudeCodeSessionInput {
-  driver: TurnDriver & { mode: 'rounds' }
+  driver: TurnDriver
   /** The provider, resolved per use like the driver does: a session stub does not outlive a step. */
   sandboxes: SandboxProvider
   harnessId: string
@@ -364,7 +364,7 @@ async function stopActive(turn: {
   active: ActiveTurn | undefined
   handle: TurnHandle | undefined
   turnOpen: boolean
-  driver: TurnDriver & { mode: 'rounds' }
+  driver: TurnDriver
 }): Promise<void> {
   const { active, handle, turnOpen, driver } = turn
   if (active !== undefined) {

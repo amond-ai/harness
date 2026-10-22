@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { classifyFrame, isNoRunningTurnReply, isRefusedInterruptReply } from './sdk-frames'
 
 describe('classifyFrame', () => {
-  it('re-emits a raw frame as one line of the same NDJSON the cli path produces', () => {
+  it('re-emits a raw frame as one line of the same NDJSON a stream-json turn produces', () => {
     const effect = classifyFrame(JSON.stringify({
       type: 'raw',
       seq: 7,

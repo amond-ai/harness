@@ -108,8 +108,8 @@ export function streamPartOf(text: string): string | undefined {
  *
  * A frame that will not parse is `unreadable` rather than thrown: the socket carries the turn's
  * whole record, and one malformed line must not end a turn that is otherwise running. The round
- * logs it and keeps reading, which is the same posture `demuxProcessEvents` takes on the cli
- * path.
+ * logs it and keeps reading, which is the same posture `demuxProcessEvents` takes on a process
+ * log.
  */
 export function classifyFrame(text: string): FrameEffect {
   let parsed: unknown

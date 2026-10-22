@@ -1,8 +1,8 @@
 /**
  * Build the `pleaseworks` e2b template from the image CI publishes (#385).
  *
- * e2b's prebuilt `claude` template carries no `/opt/turn-host`, so the default
- * `TURN_DRIVER=sdk` cannot run on it. `docker/Dockerfile`'s `e2b-sandbox` stage does carry
+ * e2b's prebuilt `claude` template carries no `/opt/turn-host`, so the turn host cannot run
+ * on it. `docker/Dockerfile`'s `e2b-sandbox` stage does carry
  * it; `.github/workflows/docker-sandbox.yml` publishes that stage to
  * `ghcr.io/chatbot-pf/pleaseworks-e2b`, and this script turns it into a template alias.
  *

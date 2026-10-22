@@ -3,10 +3,9 @@
  * calling a driver rather than by calling `sandbox.exec` / `process.logs` / `process.kill`
  * itself (ADR "turns run through the Agent SDK in a turn host", D3).
  *
- * Two drivers. `cli` is the incumbent: the `claude` CLI exec'd in the sandbox, watched by
- * sampling its log cursor, stopped with SIGINT and escalated to the backend's default kill.
- * `sdk` is the Agent SDK turn host, attached to over a WebSocket for one bounded round at a
- * time (D4). `TURN_DRIVER` picks between them, orthogonally to `SANDBOX_BACKEND`.
+ * One driver behind it: the Agent SDK turn host, attached to over a WebSocket for one bounded
+ * round at a time (D4), stopped with an `interrupt` and then SIGINT escalated to the backend's
+ * default kill. It runs orthogonally to `SANDBOX_BACKEND`.
  *
  * Nothing here imports `cloudflare:workers` — including transitively, which is why the socket
  * opener arrives as {@link TurnDriverRun.openSocket} rather than being built here: `sdk-socket.ts`
@@ -16,8 +15,8 @@
  *
  * Two things the ADR's D3 sketch names are deliberately absent until they have a caller:
  *
- * - `attach`/`interrupt`/`sessionArtifacts` belong to the `sdk` driver's attach rounds (D4).
- *   The `cli` driver's watchdog loop is not attach rounds and returns from one `await`.
+ * - `attach`/`interrupt`/`sessionArtifacts` are not methods of their own: they happen inside
+ *   {@link TurnDriver.awaitRound}'s attach rounds (D4).
  * - `readTranscript` is not the turn's read. The settle-time replay lives in `replay-turn.ts`,
  *   on the Run Agent's Durable Object path rather than in the workflow, and the only
  *   `logs({ replay: true })` left in `run-workflow.ts` reads a *materialization's* stderr —
@@ -32,30 +31,16 @@ import type { LiveMirror } from './mirror'
 import type { AttemptOutcome, HostLoss, TurnTimeoutCause, TurnVerdict } from './outcome'
 import type { PermissionMode } from './permission-mode'
 import type { TurnRoundState } from './sdk/sdk-round-state'
-import type { TurnDriverKind } from './turn-driver-kind'
-import { cliTurnDriver } from './cli-turn-driver'
 import { sdkTurnDriver } from './sdk/sdk-turn-driver'
-import { parseTurnDriver } from './turn-driver-kind'
-
-/**
- * One `claude` CLI invocation: the executable, then every argument in order.
- *
- * A tuple rather than `readonly string[]` because the reuse guard compares argv element by
- * element and the executable is the element that must not be optional. Built *outside* this
- * package — the flags, the plugin id and the settings sources a deployment gives a turn are the
- * consumer's, not the seam's — and handed in as {@link TurnDriverRun.claudeArgv}.
- */
-export type ClaudeArgv = readonly [executable: string, ...args: string[]]
 
 /**
  * What the `start-turn-N` step caches: the process the turn runs as, and when it was started.
  *
  * It is a Workflow step result, so it stays JSON-serialisable — and it is *replayed* rather
  * than recomputed, which is why the instant is pinned here rather than re-read from the
- * container on every entry into `await-exit`: `turnStartedAt` falls back to `Date.now()`
- * whenever `process.status()` rejects or answers a timestamp `Date.parse` cannot read, so a
- * restarted turn on a sick container — the case the wall-clock budget exists for — would be
- * handed a whole fresh budget on each restart.
+ * container on every round: a status read can fail or answer a timestamp `Date.parse` cannot
+ * read, so a restarted turn on a sick container — the case the wall-clock budget exists for —
+ * would be handed a whole fresh budget on each restart.
  */
 export interface TurnHandle {
   processId: string
@@ -63,58 +48,51 @@ export interface TurnHandle {
    * Epoch millis, as the driver read the clock when it started or adopted the turn.
    *
    * Absent only for a workflow already in flight when the pinning deploy landed, whose cached
-   * `start-turn-N` result is a bare process id string; `awaitTurn` then reads the instant off
-   * the container, the behaviour it had before.
+   * `start-turn-N` result is a bare process id string; the round then budgets from its own start.
    */
   startedAtMs?: number
   /**
-   * `sdk` only: the port that turn's host bound, chosen by the Worker rather than observed.
+   * The port that turn's host bound, chosen by the Worker rather than observed.
    *
    * On the handle because it is what the next attach round dials, and a round is a separate
    * step: the value has to survive the boundary the way every other step result does.
    */
   port?: number
   /**
-   * `sdk` only: the per-turn credential the bridge gates its upgrade on.
+   * The per-turn credential the bridge gates its upgrade on.
    *
    * Never logged, never in argv. It authorises one bridge port inside one container this Worker
    * already controls end to end, which is why it is allowed to ride a step result at all —
    * `mintChannelToken` states the alternative and what it would cost.
    */
   token?: string
-  /** `sdk` only: `--bridge-state-dir`, where the host journals the turn (D8). */
+  /** `--bridge-state-dir`, where the host journals the turn (D8). */
   bridgeStateDir?: string
 }
 
 /**
  * What one attempt needs to start its turn — the driver's whole input.
  *
- * The turn's *inputs* rather than its command line, because the two drivers spend them
- * differently: the `cli` driver builds `claude` argv around the prompt, while the `sdk` driver
- * starts a host that knows nothing about the turn and hands it the prompt in a frame. A spec
- * that carried argv would make the workflow build something one driver has no use for — and
- * would put the prompt in `listProcesses()` output for the driver that keeps it out.
+ * The turn's *inputs* rather than its command line: the driver starts a host that knows nothing
+ * about the turn and hands it the prompt in a frame. A spec that carried argv would put the
+ * prompt in `listProcesses()` output, which is exactly where it is kept out of.
  */
 export interface TurnStartSpec {
   /** The fully assembled prompt, already recorded by the caller. */
   prompt: string
-  /** The trust posture this run was dispatched under (FR-012); re-validated by each driver. */
+  /** The trust posture this run was dispatched under (FR-012); re-validated by the driver. */
   permissionMode: PermissionMode
   /**
    * The org posture appended to the turn's system prompt — the Claude Code preset stays, and this
-   * text is added after it (`--append-system-prompt` on the `cli` path, `instructions` on the
-   * host's `start` frame on the `sdk` one).
+   * text is added after it (`instructions` on the host's `start` frame).
    *
-   * The same text on every attempt of every run, deliberately: the `cli` driver's reuse guard
-   * compares argv element by element, so a value that varied per attempt would make an adopted
-   * turn look like a different command and start a second one beside it. It is also a
-   * prompt-cache prefix, which a per-run value would break for a different reason.
+   * The same text on every attempt of every run, deliberately: it is a prompt-cache prefix, which
+   * a per-run value would break.
    */
   instructions?: string
   /**
-   * The model this turn runs on, as the consumer named it for the turn. `sdk` only: it is the
-   * `model` of the host's `start` frame, and the `cli` driver does not read it — like
-   * `sessionId`. Absent means the Agent SDK's default model.
+   * The model this turn runs on, as the consumer named it for the turn: the `model` of the
+   * host's `start` frame. Absent means the Agent SDK's default model.
    */
   model?: string
   /** Which attempt this is — a turn host's port and state directory are derived from it. */
@@ -152,8 +130,7 @@ export interface TurnStartSpec {
    * (`sessions/<runId>/<sessionId>.jsonl`) is derivable before a single turn has run.
    *
    * Sent on the `start` frame only when {@link TurnStartSpec.resume} resolved to nothing —
-   * `sessionId` and `resume` are the SDK's two mutually exclusive ways of naming a session. Set
-   * by the workflow under `turnDriver === 'sdk'` alone; the `cli` driver has no field for it.
+   * `sessionId` and `resume` are the SDK's two mutually exclusive ways of naming a session.
    */
   sessionId?: string
   /**
@@ -162,8 +139,7 @@ export interface TurnStartSpec {
    *
    * At most one entry each, and never both for the same request: one deferral is answered once.
    * They ride only on the attempt that follows the decision — the host consumes an entry on use,
-   * so replaying them further would authorize a call nobody asked about. `sdk` only, for
-   * {@link TurnStartSpec.sessionId}'s reason.
+   * so replaying them further would authorize a call nobody asked about.
    */
   approvedRequests?: readonly ApprovedRequest[]
   deniedRequests?: readonly DeniedRequest[]
@@ -173,8 +149,7 @@ export interface TurnStartSpec {
    * On the spec rather than read off the driver's config for the reason the answers above are:
    * a run parked on a decision outlives deploys, and the turn that resumes has to be governed by
    * the rules its own conversation was deferred by. Absent means the driver falls back to the
-   * deployment's current lists, which is what an instance older than this field carries. `sdk`
-   * only — the `cli` driver has no host to enforce them.
+   * deployment's current lists, which is what an instance older than this field carries.
    */
   policy?: { deferTools?: readonly string[], refuseTools?: readonly string[] }
   /**
@@ -191,10 +166,6 @@ export interface TurnStartSpec {
    *
    * It never rejects: everything it cannot arrange resolves to `undefined` and the attempt
    * starts fresh (`run-session.ts`).
-   *
-   * Set by the workflow only under `turnDriver === 'sdk'`. The `cli` driver **throws** on it
-   * rather than ignoring it: a driver that dropped it silently would start a fresh session while
-   * the loop believed the turn was carrying the previous attempt's context.
    */
   resume?: () => Promise<TurnResume | undefined>
   /**
@@ -207,12 +178,6 @@ export interface TurnStartSpec {
    * sandbox out from under a process that is still live.
    */
   beforeExec?: () => Promise<void>
-}
-
-/** What the driver needs to watch a turn: the thresholds it judges by, and where bytes go. */
-export interface TurnAwaitSpec {
-  config: TurnDriverConfig
-  mirror: LiveMirror | undefined
 }
 
 /**
@@ -248,8 +213,7 @@ export interface TurnSession {
 /**
  * How one turn ended, as observed from outside the process.
  *
- * `session` is the `sdk` driver's alone: it comes off the host's `finish` frame, and a `cli`
- * attempt has no host to report one — that driver leaves it `undefined` on every result.
+ * `session` comes off the host's `finish` frame, so only an ending the host reported carries one.
  *
  * `verdict` is on one member only, and the omission is the statement (#376): a turn's own
  * `result` message decides whether *this* ending is worth another turn, but only where the
@@ -267,7 +231,7 @@ export type AttemptResult
     timedOutBy?: undefined
     /** Only an abandoned wait reads a lost host, and that ending is a timeout. */
     hostLost?: undefined
-    /** `sdk` only, and only from a `finish`: an `error` frame names no artifacts. */
+    /** Only from a `finish`: an `error` frame names no artifacts. */
     session?: TurnSession
     /**
      * What the turn's own terminal message said, when the driver read one going past.
@@ -295,12 +259,12 @@ export type AttemptResult
      */
     timedOutBy?: TurnTimeoutCause
     /**
-     * `sdk` only: why a round abandoned the turn as gone with no terminal frame — what the
+     * Why a round abandoned the turn as gone with no terminal frame — what the
      * probe read and how the socket had ended. Absent on every other timeout.
      */
     hostLost?: HostLoss
     /**
-     * `sdk` only. Present on this member too, because the *good* ending of a stop is a
+     * Present on this member too, because the *good* ending of a stop is a
      * `finish { stopped: 'interrupted' }` — a turn that answered `query.interrupt()` with a
      * real result, and whose session is exactly the one the next attempt should resume.
      */
@@ -317,8 +281,6 @@ export type AttemptResult
      * the request to post and to match a decision against. A `finish { stopped: 'deferred' }`
      * that named none is protocol drift and is reported as `failed` instead
      * (`sdk-round-state.ts`), never as a deferral with nothing to decide.
-     *
-     * `sdk` only: the `cli` driver has no defer rule and never sends `deferTools`.
      */
     outcome: 'deferred'
     deferredToolUse: DeferredToolUse
@@ -386,72 +348,50 @@ export interface TurnRoundSpec {
   signal?: AbortSignal
 }
 
-interface TurnDriverBase {
+/**
+ * One turn's lifecycle, as the attempt loop needs it: start it, consume it a bounded round at a
+ * time, and stop it.
+ *
+ * The turn is waited on in rounds rather than once, so a six-hour turn stays under the per-step
+ * CPU meter and an eviction costs one round (D4).
+ */
+export interface TurnDriver {
   /** Start this attempt's turn, or adopt the live one a partially observed start left running. */
   start: (turn: TurnStartSpec) => Promise<TurnHandle>
+  /** Consume frames for one bounded window, answering what the next round resumes from. */
+  awaitRound: (handle: TurnHandle, spec: TurnRoundSpec) => Promise<TurnRoundState>
   /**
    * Best-effort stop, answering whether the turn is known to be over.
    *
-   * Not what the `cli` watchdog uses — that path reaches `killTurn` directly, inside
-   * `cli-turn-watch.ts`, because the decision and the stop are one thing there. This is the
-   * *loop-level* escalation: the ending only the caller can see, which the `sdk` driver needs
-   * for a turn whose attach rounds ran out or whose host escalated on its own (D4). It is on the
-   * interface because a stop is a driver's, not the loop's — both drivers end that ladder here,
-   * and both end it the same way: SIGINT, then the backend's kill.
+   * The *loop-level* escalation: the ending only the caller can see, for a turn whose attach
+   * rounds ran out or whose host escalated on its own (D4). It is on the interface because a stop
+   * is a driver's, not the loop's, and it ends the same way every time: SIGINT, then the
+   * backend's kill.
    */
   kill: (handle: TurnHandle) => Promise<boolean>
 }
 
 /**
- * One turn's lifecycle, as the attempt loop needs it — in one of two shapes.
- *
- * A tagged union rather than one interface with an optional round method, because the two ways
- * to wait are genuinely different and neither driver can do the other's. The `cli` driver waits
- * once, in one step, racing an exit against a log-cursor timer; the `sdk` driver attaches for a
- * bounded window at a time, one step per round, so a six-hour turn stays under the per-step CPU
- * meter and an eviction costs one round (D4). Written as an optional method instead, each driver
- * would carry a member it can never serve, and the workflow would branch on a truthiness check
- * where an exhaustive `switch` is available.
- */
-export type TurnDriver
-  = | (TurnDriverBase & {
-    mode: 'single'
-    /** Wait for the turn to end, racing the wait against the watchdog's liveness sampling. */
-    await: (handle: TurnHandle, spec: TurnAwaitSpec) => Promise<AttemptResult>
-  })
-  | (TurnDriverBase & {
-    mode: 'rounds'
-    /** Consume frames for one bounded window, answering what the next round resumes from. */
-    awaitRound: (handle: TurnHandle, spec: TurnRoundSpec) => Promise<TurnRoundState>
-  })
-
-/**
- * The driver this run's turns go through — the run's pinned kind, not the deployment's.
+ * The driver this run's turns go through.
  *
  * The *provider* and an id, never a resolved session, for two independent reasons. A driver
  * outlives the step it was built in, and `SandboxProvider` requires a session to be resolved per
  * use because a Durable Object stub does not survive a step boundary — passing a session here
  * would make that violation the seam's default rather than a mistake a caller could make. And
- * the `sdk` driver has to ask `portEndpoint(sandboxId, port)` where its bridge is, the one
+ * the driver has to ask `portEndpoint(sandboxId, port)` where its bridge is, the one
  * question a `SandboxSession` deliberately cannot answer (`@amond-ai/sandbox`,
  * `SandboxPortEndpoint`), which is what keeps the driver orthogonal to `SANDBOX_BACKEND`
  * instead of knowing which backend it is on.
  */
 export function turnDriver(provider: SandboxProvider, run: TurnDriverRun): TurnDriver {
-  // Re-parsed rather than trusted: the kind arrives in a workflow payload, which is JSON that
-  // any dispatcher could have written, and a name this build does not know must refuse the run
-  // here — before provisioning — rather than silently run the incumbent.
-  if (parseTurnDriver(run.kind) === 'sdk') {
-    return sdkTurnDriver({
-      provider,
-      sandboxId: run.sandboxId,
-      config: run.config,
-      runId: run.runId,
-      openSocket: run.openSocket,
-      settingSources: run.settingSources,
-    })
-  }
-  return cliTurnDriver(provider, run.sandboxId, run.claudeArgv)
+  return sdkTurnDriver({
+    provider,
+    sandboxId: run.sandboxId,
+    config: run.config,
+    runId: run.runId,
+    openSocket: run.openSocket,
+    settingSources: run.settingSources,
+  })
 }
 
 /** What a driver needs to know about the run it is being built for. */
@@ -460,35 +400,18 @@ export interface TurnDriverRun {
   runId: string
   config: TurnDriverConfig
   /**
-   * Dial one bridge endpoint URL — the `sdk` driver's only unstubbable dependency.
+   * Dial one bridge endpoint URL — the driver's only unstubbable dependency.
    *
    * Passed in rather than built here because opening the socket is the one part that cannot run
    * outside workerd (`sdk-socket.ts` reaches `@cloudflare/sandbox`), and this module has to stay
    * importable from `bun test`. `run-workflow.ts` is workerd-only already, so it passes
-   * `turnHostSocketOpener(env)`; the `cli` driver never calls it. `headers` are the endpoint's
-   * own, as `SdkTurnDriverInput.openSocket` describes.
+   * `turnHostSocketOpener(env)`. `headers` are the endpoint's own, as
+   * `SdkTurnDriverInput.openSocket` describes.
    */
   openSocket: (url: string, headers?: Readonly<Record<string, string>>) => Promise<WsLike>
   /**
-   * Which driver to build — the run's own, pinned at dispatch, never `TURN_DRIVER` read here.
-   *
-   * A run outlives a deploy, and the two drivers' handles are not interchangeable: re-reading the
-   * flag on a workflow re-entry would hand a `cli` handle to the sdk attach path or an sdk host
-   * to the cli watcher. `run-workflow.ts` resolves it from the payload (`RunWorkflowParams`).
-   */
-  kind: TurnDriverKind
-  /**
-   * Build the `cli` driver's argv for one turn — the seam's other unstubbable dependency.
-   *
-   * Injected rather than built here because what a `claude` turn is invoked with is the
-   * consumer's decision, not the seam's: the flags, the plugin it enables and the settings
-   * sources it reads are Pleaseworks' (`claude-run.ts`), and a driver that built them would
-   * carry one deployment's policy into every other one. The `sdk` driver never calls it.
-   */
-  claudeArgv: (turn: TurnStartSpec) => ClaudeArgv
-  /**
-   * `settingSources` as the `sdk` driver's `start` frame carries it — the same list the `cli`
-   * argv names, passed in for the same reason {@link claudeArgv} is.
+   * `settingSources` as the driver's `start` frame carries it — which settings files the turn
+   * reads is the consumer's policy, injected rather than decided here.
    */
   settingSources: readonly string[]
 }

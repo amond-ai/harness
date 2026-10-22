@@ -38,11 +38,14 @@ this section exists to prevent.
 
 ## What it costs to run a turn
 
-Nothing is installed. The `cli` driver execs a `claude` the machine already has and
-`claudeArgv` is injected, so this backend brings no bootstrap directory, no pinned
-`@anthropic-ai/*` copy, and no second platform build of a ~385 MB binary. A command inherits
-the orchestrator's own environment by default — that is how `PATH` finds `claude`, and it is
-one more way this is not a sandbox. Pass `env` to narrow it.
+This backend installs nothing, and a turn needs the turn host on the machine itself. The
+driver execs `node /opt/turn-host/bridge.mjs`, and `exec` passes a command's arguments through
+as written — only `cwd` and the file operations map a leading `/` into the sandbox — so the
+bundle and its Agent SDK have to be installed at that path, as
+[`@amond-ai/harness-claude-code-bridge`](../harness-claude-code-bridge#baking-it-into-an-image)
+describes for an image. The SDK brings its own `claude` binary. A command inherits the
+orchestrator's own environment by default — that is how `PATH` finds `node`, and it is one more
+way this is not a sandbox. Pass `env` to narrow it.
 
 ## Where things live
 
