@@ -58,6 +58,7 @@ export interface WebSocketClassOptions {
 export interface WsClient extends WsLike {}
 
 type Handler = (...args: any[]) => void
+type RoutedProtocol = 'http' | 'https' | 'ws' | 'wss'
 
 /**
  * Where a URL sends the connect, and what is left of it once the tag is gone.
@@ -86,7 +87,7 @@ export function routeFor(
  * opened through that sandbox's binding rather than dialed. An empty id would read back as an
  * untagged URL and be dialed, so it is refused here.
  */
-export function sandboxRoutedUrl(sandboxId: string, port: number, protocol = 'http'): string {
+export function sandboxRoutedUrl(sandboxId: string, port: number, protocol: RoutedProtocol = 'http'): string {
   if (sandboxId === '') {
     throw new Error('sandboxRoutedUrl needs a sandbox id: an empty one reads back as untagged')
   }
