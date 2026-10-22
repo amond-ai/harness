@@ -35,3 +35,12 @@ private rather than publishing it with `exposePort`.
 Two details are load-bearing, both read off the adapter rather than assumed: the bridge
 credential travels in the URL's **query string** (`agent_bridge_token`), and an accepted
 socket never fires `open`, which the adapter waits for — so the shim synthesises it.
+
+## Upstream
+
+This package exists because the AI SDK's bridge adapters dial the endpoint URL with a stock
+`ws` client. If the provider rule in
+[vercel/ai#17638](https://github.com/vercel/ai/issues/17638) changes to allow a
+provider-supplied socket opener, check whether this package is still needed.
+This repository tracks the upstream provider issues in
+[amond-ai/harness#64](https://github.com/amond-ai/harness/issues/64).

@@ -175,3 +175,11 @@ so this is extra information, not a behaviour change.
 
 Everything except `e2b-api.ts` takes e2b as a structural interface, so the whole backend is
 testable against a fake with no network (`bun test`).
+
+## Upstream
+
+The AI SDK tracks a first-party E2B provider in
+[vercel/ai#17636](https://github.com/vercel/ai/issues/17636), with an open PR in
+[vercel/ai#21891](https://github.com/vercel/ai/pull/21891).
+This repository tracks the upstream provider issues in
+[amond-ai/harness#64](https://github.com/amond-ai/harness/issues/64).
