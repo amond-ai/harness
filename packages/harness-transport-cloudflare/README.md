@@ -29,6 +29,7 @@ private rather than publishing it with `exposePort`.
 | `createBridgeSocketOpener(sandbox)` | `HarnessV1PortEndpoint` → an open, `ws`-shaped socket |
 | `createDirectSocketOpener(fetch)` | the same, dialed straight over a `fetch` upgrade |
 | `createWebSocketClass(…)` | a `WebSocket`-shaped class for code that constructs one itself |
+| `openSandbox(namespace, sandboxId)` from `./sandbox` | the sandbox client for an id, opened with `SANDBOX_OPTIONS`; Worker builds only, since `@cloudflare/sandbox` imports `cloudflare:workers` |
 
 Two details are load-bearing, both read off the adapter rather than assumed: the bridge
 credential travels in the URL's **query string** (`agent_bridge_token`), and an accepted

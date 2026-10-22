@@ -35,7 +35,7 @@ The package decides only what each call site would otherwise write inline:
 | Decision | Answer |
 | --- | --- |
 | Namespace | The one passed to `createCloudflareProvider`. |
-| Boot options | `SANDBOX_OPTIONS` from `@amond-ai/harness-transport-cloudflare`, so an id resolves to the same container here and in the transport's `ws` stand-in. You cannot override them, because a wrangler `alias` loads the stand-in and it cannot take configuration either. |
+| Boot options | `SANDBOX_OPTIONS`, applied by `openSandbox` from `@amond-ai/harness-transport-cloudflare/sandbox`. The transport's `ws` stand-in opens its sandbox through the same function, so an id resolves to the same container in both. You cannot override them, because a wrangler `alias` loads the stand-in and it cannot take configuration either. |
 | Port endpoint | A `localhost` URL tagged with `SANDBOX_ID_PARAM`. A Cloudflare sandbox's ports are private, so `@amond-ai/harness-transport-cloudflare` routes a tagged URL through `Sandbox.wsConnect` instead of dialing it. Building the URL does no I/O. |
 
 ## What it does not supply
