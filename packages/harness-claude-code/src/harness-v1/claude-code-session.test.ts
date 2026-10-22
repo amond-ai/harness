@@ -329,6 +329,27 @@ describe('the claude-code harness under HarnessAgent', () => {
     await session.destroy()
   })
 
+  it('reports history as unavailable when the start handoff failed', async () => {
+    const host = fakeHost()
+    const harness = createClaudeCode({
+      sandboxes: host.provider,
+      openSocket: async () => {
+        throw new Error('socket refused')
+      },
+      config: CONFIG,
+      settingSources: ['project'],
+      env: () => ({ ANTHROPIC_API_KEY: 'test-key' }),
+    })
+    const agent = new HarnessAgent({ harness, permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    await agent.generate({ session, prompt: 'say hello' }).catch(() => undefined)
+
+    const error = await session.readHistory().catch((caught: unknown) => caught)
+
+    expect(HarnessHistoryUnavailableError.isInstance(error)).toBe(true)
+    await session.destroy()
+  })
+
   it('keeps knowing a turn started across a detach and a resume', async () => {
     const host = createFakeTurnHost({
       frames: () => [{ type: 'stream-start', warnings: [] }, { type: 'error', error: 'host lost' }],

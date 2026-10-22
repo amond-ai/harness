@@ -138,24 +138,30 @@ describe('transcriptHistory', () => {
     ])
   })
 
-  it('answers a cursor beyond the end with no messages and the real end', () => {
-    expect(transcriptHistory(jsonl(user('one')), 'lines:9')).toEqual({ messages: [], cursor: 'lines:1:u' })
+  it('reads from the start when the cursor is beyond the end, as a fresh file replaced the old one', () => {
+    expect(transcriptHistory(jsonl(user('one')), 'lines:9')).toEqual({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'one' }], at: '2026-01-01T00:00:00.000Z' }],
+      cursor: 'lines:1:u',
+    })
     expect(transcriptHistory('', 'lines:1')).toEqual({ messages: [], cursor: 'lines:0' })
   })
 
-  it('detects a replaced transcript that grew past the old cursor by its fingerprint', () => {
+  it('reads a replaced transcript that grew past the old cursor from its start, detected by fingerprint', () => {
     const before = jsonl(user('one', { uuid: 'old-1' }), user('two', { uuid: 'old-2' }))
     const { cursor } = transcriptHistory(before, undefined)
     const replaced = jsonl(user('x', { uuid: 'new-1' }), user('y', { uuid: 'new-2' }), user('z', { uuid: 'new-3' }))
 
     expect(cursor).toBe('lines:2:old-2')
-    expect(transcriptHistory(replaced, cursor)).toEqual({ messages: [], cursor: 'lines:3:new-3' })
+    expect(transcriptHistory(replaced, cursor)).toEqual({
+      messages: ['x', 'y', 'z'].map(text => ({ role: 'user', content: [{ type: 'text', text }], at: '2026-01-01T00:00:00.000Z' })),
+      cursor: 'lines:3:new-3',
+    })
     expect(transcriptHistory(before + jsonl(user('three', { uuid: 'old-3' })), cursor).messages).toMatchObject([
       { content: [{ text: 'three' }] },
     ])
   })
 
-  it('fingerprints the last counted line that has a uuid, past trailing metadata lines', () => {
+  it('fingerprints the last counted line that has a uuid, so a replacement past trailing metadata reads from its start', () => {
     const original = jsonl(user('one', { uuid: 'old-1' }), user('two', { uuid: 'old-2' }), { type: 'last-prompt' })
     const { cursor } = transcriptHistory(original, undefined)
     const replaced = jsonl(
@@ -166,7 +172,10 @@ describe('transcriptHistory', () => {
     )
 
     expect(cursor).toBe('lines:3:old-2')
-    expect(transcriptHistory(replaced, cursor)).toEqual({ messages: [], cursor: 'lines:4:new-4' })
+    expect(transcriptHistory(replaced, cursor)).toEqual({
+      messages: ['a', 'b', 'c', 'd'].map(text => ({ role: 'user', content: [{ type: 'text', text }], at: '2026-01-01T00:00:00.000Z' })),
+      cursor: 'lines:4:new-4',
+    })
     expect(transcriptHistory(original + jsonl(user('three', { uuid: 'old-3' })), cursor).messages).toMatchObject([
       { content: [{ text: 'three' }] },
     ])

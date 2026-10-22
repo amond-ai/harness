@@ -249,6 +249,9 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
       usable()
       const text = promptText(prompt, input.harnessId)
       const resume = resumeThunk(input, session)
+      // Once the start is sent the host may be running it, so a failed handoff is "transcript
+      // unknown", not "never ran". A start that failed before sending reads the same, conservatively.
+      turnStarted = true
       handle = await input.driver.start({
         prompt: text,
         permissionMode: input.permissionMode,
@@ -269,7 +272,6 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
       })
       cursor = undefined
       turnOpen = true
-      turnStarted = true
       return drive(handle, 1, emit, abortSignal)
     },
 

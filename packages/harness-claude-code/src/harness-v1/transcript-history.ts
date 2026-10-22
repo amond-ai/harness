@@ -7,7 +7,9 @@
  * (`lines:<n>:<uuid>`; metadata lines carry none)
  * so a transcript replaced at the same path is told apart from one that merely grew. A trailing
  * segment with no newline is a line still being written, so it is neither parsed nor counted; the
- * next read picks it up whole.
+ * next read picks it up whole. A cursor that no longer matches the file means a fresh start
+ * replaced it (the only replacement this adapter makes), whose messages are all new, so that
+ * read begins at line 0.
  *
  * Which lines are conversation applies the Agent SDK's per-line filters in file order: user and
  * assistant entries only, no sidechain, no team, no meta, and compact summaries dropped. It does
@@ -187,20 +189,20 @@ function assistantParts(entry: Json): AssistantPart[] {
  * for what follows.
  *
  * A `since` past the current end, or one whose fingerprint is not the `uuid` of the last line it
- * counted that has one, means this is not the transcript the cursor came from (the file was replaced or
- * truncated; a replacement that grew past the old count shows only in the fingerprint). Replaying
- * from the start would hand the caller messages it may already hold, and guessing is worse, so the
- * read is empty and the cursor jumps to the real end. A cursor without a fingerprint is still
- * accepted and is checked by count alone. A `since` that is not a cursor at all is a caller bug
- * and throws.
+ * counted that has one, means the file is not the one the cursor came from. The only replacement
+ * this adapter makes is `resumeThunk`'s fresh start under the same session id, whose messages are
+ * all new to the caller, so the read starts from line 0. A copy that kept the old uuids matches the
+ * fingerprint and continues normally: a matching fingerprint means the same conversation. A cursor
+ * without a fingerprint is checked by count alone. A `since` that is not a cursor at all is a
+ * caller bug and throws.
  */
 export function transcriptHistory(text: string, since: string | undefined): HarnessV1ReadHistoryResult {
-  const { count: start, fingerprint } = since === undefined ? { count: 0, fingerprint: undefined } : parseCursor(since)
+  const cursor = since === undefined ? { count: 0, fingerprint: undefined } : parseCursor(since)
   const lines = text.split('\n')
   lines.pop()
-  if (start > lines.length || (fingerprint !== undefined && uuidAt(lines, start - 1) !== fingerprint)) {
-    return { messages: [], cursor: cursorFor(lines) }
-  }
+  const replaced = cursor.count > lines.length
+    || (cursor.fingerprint !== undefined && uuidAt(lines, cursor.count - 1) !== cursor.fingerprint)
+  const start = replaced ? 0 : cursor.count
   const entries = lines.map(parseLine)
   const names = toolNamesById(entries)
 
