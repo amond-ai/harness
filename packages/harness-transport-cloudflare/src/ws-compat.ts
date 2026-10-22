@@ -39,6 +39,11 @@ export const SANDBOX_ID_PARAM = '__pf_sandbox'
 
 /**
  * The options `openSandbox` in `./sandbox` passes to `getSandbox`.
+ *
+ * `normalizeId` decides which Durable Object an id with uppercase letters maps to, so a call
+ * without it opens a different container than the `ws` bridge does. `sleepAfter` is applied to
+ * that same container, so a call with another value silently changes the bridge's idle timeout.
+ * Open a run's sandbox through `openSandbox` rather than calling `getSandbox` with these yourself.
  */
 export const SANDBOX_OPTIONS: SandboxOptions = { normalizeId: true, sleepAfter: '5m' }
 
