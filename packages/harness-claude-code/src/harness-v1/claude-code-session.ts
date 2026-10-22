@@ -32,6 +32,8 @@ import type { ClaudeCodeLifecycleState, ClaudeCodeRoundCursor, ClaudeCodeTurnHan
 import { HarnessCapabilityUnsupportedError } from '@ai-sdk/harness'
 import { clampedTurnBudget, maxAttachRounds } from '../watchdog'
 import { frameToPart } from './frame-to-part'
+import { readTranscript } from './read-transcript'
+import { transcriptHistory } from './transcript-history'
 
 export interface ClaudeCodeSessionInput {
   driver: TurnDriver & { mode: 'rounds' }
@@ -318,6 +320,17 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
 
     async doCompact() {
       throw unsupported('The claude-code harness cannot compact on request: the Agent SDK compacts its own context.')
+    },
+
+    /**
+     * The conversation is the CLI's JSONL transcript in the sandbox. No path yet means no turn has
+     * run: an empty read, not an unavailable one.
+     */
+    async doReadHistory({ since }) {
+      usable()
+      const path = session?.transcriptPath
+      const text = path === undefined ? '' : await readTranscript({ ...input, path })
+      return transcriptHistory(text, since)
     },
   }
 }
