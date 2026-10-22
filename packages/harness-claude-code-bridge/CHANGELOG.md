@@ -1,0 +1,30 @@
+# Changelog
+
+## [0.2.0](https://github.com/amond-ai/harness/compare/harness-claude-code-bridge-v0.1.0...harness-claude-code-bridge-v0.2.0) (2026-10-22)
+
+
+### Features
+
+* **cf-orchestrator:** add the sdk turn driver behind TURN_DRIVER ([#374](https://github.com/amond-ai/harness/issues/374)) ([b3bf467](https://github.com/amond-ai/harness/commit/b3bf46700803eb538164172a73900b3835c74c56))
+* **cf-orchestrator:** park a deferred tool call on a human's decision ([#378](https://github.com/amond-ai/harness/issues/378)) ([b245f31](https://github.com/amond-ai/harness/commit/b245f31617157d9138b88af19549d21c1135174d))
+* **cf-orchestrator:** preserve the sdk turn's session across attempts ([#377](https://github.com/amond-ai/harness/issues/377)) ([c5bcb88](https://github.com/amond-ai/harness/commit/c5bcb8884ac1fd5cb31e3b57d87240fde77721d4))
+* **harness-claude-code-bridge:** support parallel and sequential tool approvals (upstream 6c65131) ([#41](https://github.com/amond-ai/harness/issues/41)) ([72ae5da](https://github.com/amond-ai/harness/commit/72ae5dacc30d1e3c2685aa80209f569bbcbbb206))
+* **harness-codex-bridge:** run @openai/codex-sdk as a per-turn host in the sandbox ([#17](https://github.com/amond-ai/harness/issues/17)) ([44debbc](https://github.com/amond-ai/harness/commit/44debbcf89e3212c11400198510012c54245471f))
+* re-vendor the AI SDK harness packages to @ai-sdk/harness@1.0.158 ([#40](https://github.com/amond-ai/harness/issues/40)) ([6caeba0](https://github.com/amond-ai/harness/commit/6caeba0b3f885f6243453a35b1622590b0d62aad))
+* **turn-host:** echo the interrupt reason on finish and the run-phase error ([#391](https://github.com/amond-ai/harness/issues/391)) ([e9e4ce1](https://github.com/amond-ai/harness/commit/e9e4ce12f3883b4a11d5bf785266af3ecced5263))
+* **turn-host:** interrupt turns with SIGINT and bake the Agent SDK turn host into the image ([#372](https://github.com/amond-ai/harness/issues/372)) ([a582682](https://github.com/amond-ai/harness/commit/a582682e16b98036a30a5fc525a6abf425c81958))
+
+
+### Bug Fixes
+
+* port turn-lifecycle and bridge fixes from the extraction source ([#20](https://github.com/amond-ai/harness/issues/20)) ([1dbe227](https://github.com/amond-ai/harness/commit/1dbe22704e501e43a317cc6667577f72220f2e9b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @amond-ai/harness-bridge-runtime bumped to 0.2.0
+    * @amond-ai/harness-protocol bumped to 0.2.0
+  * devDependencies
+    * @amond-ai/harness-claude-code bumped to 0.2.0
