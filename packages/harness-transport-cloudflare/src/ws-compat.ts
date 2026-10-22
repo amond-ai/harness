@@ -38,15 +38,12 @@ import type { SandboxOptions } from '@cloudflare/sandbox'
 export const SANDBOX_ID_PARAM = '__pf_sandbox'
 
 /**
- * The options every `getSandbox` call for a run must agree on, wherever it is made.
+ * The options `openSandbox` in `./sandbox` passes to `getSandbox`.
  *
- * Two sites resolve the same sandbox: the backend's `session()`, which the run works through,
- * and `./ws`, which opens the bridge socket into it. `normalizeId` decides how the id becomes
- * a Durable Object id and `sleepAfter` decides how long that object lives, so a site that
- * spelled either differently would address a *different* container — and nothing would say
- * so, because both calls succeed and only the bridge stays silent. Owned here for the same
- * reason {@link SANDBOX_ID_PARAM} is: it is one half of a protocol whose halves have to
- * match, and a second literal is how they stop matching.
+ * `normalizeId` decides which Durable Object an id with uppercase letters maps to, so a call
+ * without it opens a different container than the `ws` bridge does. `sleepAfter` is applied to
+ * that same container, so a call with another value silently changes the bridge's idle timeout.
+ * Open a run's sandbox through `openSandbox` rather than calling `getSandbox` with these yourself.
  */
 export const SANDBOX_OPTIONS: SandboxOptions = { normalizeId: true, sleepAfter: '5m' }
 

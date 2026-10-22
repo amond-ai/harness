@@ -5,8 +5,8 @@ import type {
   SandboxSession,
 } from '@amond-ai/sandbox'
 import type { Sandbox as SandboxDO } from '@cloudflare/sandbox'
-import { SANDBOX_ID_PARAM, SANDBOX_OPTIONS } from '@amond-ai/harness-transport-cloudflare'
-import { getSandbox } from '@cloudflare/sandbox'
+import { SANDBOX_ID_PARAM } from '@amond-ai/harness-transport-cloudflare'
+import { openSandbox } from '@amond-ai/harness-transport-cloudflare/sandbox'
 
 const DEFAULT_PROTOCOL = 'http'
 
@@ -15,8 +15,7 @@ export function createCloudflareProvider(
 ): SandboxProvider {
   return {
     backend: 'cloudflare',
-    session: (sandboxId: string): SandboxSession =>
-      getSandbox(namespace, sandboxId, SANDBOX_OPTIONS),
+    session: (sandboxId: string): SandboxSession => openSandbox(namespace, sandboxId),
     portEndpoint: async (
       sandboxId: string,
       port: number,

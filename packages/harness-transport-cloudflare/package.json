@@ -35,6 +35,10 @@
     "./ws": {
       "types": "./dist/ws.d.mts",
       "default": "./dist/ws.mjs"
+    },
+    "./sandbox": {
+      "types": "./dist/sandbox.d.mts",
+      "default": "./dist/sandbox.mjs"
     }
   },
   "main": "./dist/index.mjs",
@@ -47,7 +51,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsdown src/index.ts src/ws.ts --dts",
+    "build": "tsdown src/index.ts src/ws.ts src/sandbox.ts --dts",
     "check": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
