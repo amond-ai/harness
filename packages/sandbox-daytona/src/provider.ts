@@ -100,9 +100,7 @@ const PREVIEW_TOKEN_HEADER = 'x-daytona-preview-token'
  *
  * A WebSocket opened from a browser or a serverless runtime has no way to set a request header,
  * which is why Daytona's own SDK appends the token as this query parameter instead
- * (`esm/utils/WebSocket.js`, research note 035 §3). Both are emitted for a socket: the header
- * costs nothing where it is honoured, and the query parameter is what actually authenticates the
- * dial workerd makes.
+ * (`esm/utils/WebSocket.js`, research note 035 §3).
  */
 const PREVIEW_TOKEN_PARAM = 'DAYTONA_SANDBOX_AUTH_KEY'
 
@@ -222,6 +220,7 @@ export function createDaytonaProvider(options: DaytonaProviderOptions): SandboxP
       url.protocol = `${TLS_SCHEME[kind]}:`
       if (TLS_SCHEME[kind] === 'wss') {
         url.searchParams.set(PREVIEW_TOKEN_PARAM, preview.token)
+        return { url: url.toString() }
       }
       return { url: url.toString(), headers: { [PREVIEW_TOKEN_HEADER]: preview.token } }
     },
