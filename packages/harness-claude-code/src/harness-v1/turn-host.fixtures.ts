@@ -181,17 +181,22 @@ function fakeProvider(kills: string[]): SandboxProvider {
     },
     exists: async (path: string) => ({ exists: files.has(path) }),
     readFile: async (path: string, options?: { encoding?: string }) => {
-      const content = files.get(path) ?? ''
-      return options?.encoding === 'none'
-        ? {
-            content: new ReadableStream<Uint8Array>({
-              start(controller) {
-                controller.enqueue(new TextEncoder().encode(content))
-                controller.close()
-              },
-            }),
-          }
-        : { content }
+      if (options?.encoding !== 'none') {
+        return { content: files.get(path) ?? '' }
+      }
+      // The streamed read is the transcript's, and the contract rejects a missing path.
+      const content = files.get(path)
+      if (content === undefined) {
+        throw new Error(`ENOENT: ${path}`)
+      }
+      return {
+        content: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(content))
+            controller.close()
+          },
+        }),
+      }
     },
     getProcess: async (id: string) => processes.get(id) ?? null,
     listProcesses: async () => await Promise.all([...processes.values()].map(async handle => await handle.status())),
