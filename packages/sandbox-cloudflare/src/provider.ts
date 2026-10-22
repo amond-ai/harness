@@ -5,10 +5,8 @@ import type {
   SandboxSession,
 } from '@amond-ai/sandbox'
 import type { Sandbox as SandboxDO } from '@cloudflare/sandbox'
-import { SANDBOX_ID_PARAM } from '@amond-ai/harness-transport-cloudflare'
+import { sandboxRoutedUrl } from '@amond-ai/harness-transport-cloudflare'
 import { openSandbox } from '@amond-ai/harness-transport-cloudflare/sandbox'
-
-const DEFAULT_PROTOCOL = 'http'
 
 export function createCloudflareProvider(
   namespace: DurableObjectNamespace<SandboxDO>,
@@ -20,10 +18,6 @@ export function createCloudflareProvider(
       sandboxId: string,
       port: number,
       options?: SandboxPortEndpointOptions,
-    ): Promise<SandboxPortEndpoint> => {
-      const url = new URL(`${options?.protocol ?? DEFAULT_PROTOCOL}://localhost:${String(port)}/`)
-      url.searchParams.set(SANDBOX_ID_PARAM, sandboxId)
-      return { url: url.toString() }
-    },
+    ): Promise<SandboxPortEndpoint> => ({ url: sandboxRoutedUrl(sandboxId, port, options?.protocol) }),
   } satisfies SandboxProvider
 }
