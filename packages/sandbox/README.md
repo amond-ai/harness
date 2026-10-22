@@ -54,7 +54,7 @@ costs, and research note 027 for the measurements.
 
 **A wait that ends before the process does must reject.** `waitForExit` resolving a synthetic
 exit for an expired wait is not a lesser version of throwing — it is the opposite claim. Every
-caller's `catch` *is* its timeout path (`killTurn`, `materializationExit`, `awaitTurn` in
+caller's `catch` *is* its timeout path (`killTurn`, `materializationExit` in
 `run/run-workflow.ts`), so resolving converts "I stopped watching" into "it is dead", and the
 workflow starts a second turn beside the first. `SandboxWaitTimeoutError` is the
 contract's spelling of that rejection.

@@ -280,17 +280,15 @@ export function createVercelSession(
    * {@link SandboxNoExitRecordError} says "it is already gone, retrying the wait buys nothing".
    *
    * **Without a `timeout` there is no deadline at all**, and `SandboxWaitTimeoutError` is
-   * reachable only through the caller's `signal`. `awaitTurn` in `run-workflow.ts` races an
-   * unbounded `waitForExit()` inside a step that already allows a live turn six hours, and
-   * documents that such a wait never rejects — so any cap invented here would escape that race,
-   * escape a step that is never retried, and fail a run whose turn was merely long. Claude turns
-   * past half an hour are ordinary. What keeps a *lost* process from hanging the step is the
+   * reachable only through the caller's `signal`. A caller that passes no `timeout` bounds the
+   * wait itself, so any cap invented here would fail a run whose turn was merely long. Claude
+   * turns past half an hour are ordinary. What keeps a *lost* process from hanging the step is the
    * `'gone'` branch below, which is a real observation rather than a guess dressed up as a limit.
    *
    * `'unknown'` is neither ending, for step 3's asymmetry in {@link statusOf}. A bounded wait
    * over an unobservable process ends in `SandboxWaitTimeoutError` — "still running, wait longer
-   * or kill it", which is exactly what is true — and an unbounded one keeps waiting, which is
-   * what `awaitTurn` wants of a turn that may still be writing to the checkout.
+   * or kill it", which is exactly what is true — and an unbounded one keeps waiting on a turn
+   * that may still be writing to the checkout.
    */
   async function waitForExit(
     meta: JournalMeta,

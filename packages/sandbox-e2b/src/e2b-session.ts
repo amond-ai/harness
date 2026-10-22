@@ -289,11 +289,9 @@ export function createE2bSession(
    * `no_exit_record` failure says "it is already gone, retrying the wait buys nothing".
    *
    * **Without a `timeout` there is no deadline at all**, and `SandboxWaitTimeoutError` is
-   * unreachable. `awaitTurn` in `run-workflow.ts` races an unbounded `waitForExit()` inside
-   * a step that already allows a live turn six hours, and documents that such a wait never
-   * rejects — so any cap invented here would escape that race, escape a step that is never
-   * retried, and fail a run whose turn was merely long. Claude turns past half an hour are
-   * ordinary. What keeps a *lost* process from hanging the step is the `'gone'` check
+   * unreachable. A caller that passes no `timeout` bounds the wait itself, so any cap
+   * invented here would fail a run whose turn was merely long. Claude turns past half an hour
+   * are ordinary. What keeps a *lost* process from hanging the step is the `'gone'` check
    * below, which is a real observation rather than a guess dressed up as a limit.
    */
   async function waitForExit(
@@ -331,8 +329,9 @@ export function createE2bSession(
         // between the wrapper's `printf` and its shell exiting.
         //
         // Gated on the wrapper's session, and on *both* endings rather than only the resolve:
-        // `awaitTurn` reaches an exit through this loop and not through `status()`, so this is
-        // the path #266's forgery actually takes, and the `no_exit_record` throw is what
+        // a caller waiting on a turn reaches its exit through this loop and not through
+        // `status()`, so this is the path #266's forgery actually takes, and the
+        // `no_exit_record` throw is what
         // `killTurn` meets after a fallback kill leaves a reparented child and no `$?`.
         //
         // A survivor is neither ending. It is not a journalled exit — the contract forbids
@@ -340,8 +339,7 @@ export function createE2bSession(
         // and the *caller's* deadline decides. A bounded wait then ends in
         // `SandboxWaitTimeoutError`, which says "still running, wait longer or kill it":
         // exactly true here, and already read as an unconfirmed kill. An unbounded one keeps
-        // waiting, which is what `awaitTurn` wants — it races this against the watchdog, and a
-        // turn still writing to the checkout is precisely what must not settle. Short-circuited
+        // waiting, and a turn still writing to the checkout is precisely what must not settle. Short-circuited
         // behind the liveness verdict and inside the interval block, so it costs at most one
         // command per `LIVENESS_PROBE_INTERVAL_MS` and never one per poll.
         if (await livenessOf(meta.id) === 'gone' && await sessionSurvivors(sessionPid(meta)) === 'none') {

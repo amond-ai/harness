@@ -44,9 +44,9 @@ describe('createE2bSession', () => {
     })
 
     it('keeps waiting on a forged exit whose session still has survivors', async () => {
-      // The path that matters: `awaitTurn` settles a turn through `waitForExit`, not through
-      // `status()`, so #266's forgery — detach a child, kill the wrapper, write `<id>.exit` —
-      // resolves the workflow's own wait unless it is gated here too. The wrapper is gone from
+      // The path that matters: a turn settles through `waitForExit`, not through `status()`,
+      // so #266's forgery — detach a child, kill the wrapper, write `<id>.exit` — resolves the
+      // caller's wait unless it is gated here too. The wrapper is gone from
       // e2b's table and the exit record is there; the session is the only thing left that says
       // the turn's work is still running.
       const fake = fakeSandbox()
@@ -160,9 +160,8 @@ describe('createE2bSession', () => {
     })
 
     it('never expires when no timeout was given, however long the turn runs', async () => {
-      // `awaitTurn` races an unbounded waitForExit() inside a never-retried step that allows
-      // a live turn six hours; any cap here would fail an ordinary long turn instead. The
-      // clock leaps an hour per read, so this pins hours of waiting in milliseconds.
+      // Any cap here would fail an ordinary long turn. The clock leaps an hour per read, so
+      // this pins hours of waiting in milliseconds.
       const fake = fakeSandbox()
       const handle = await session(fake, ['run-1'], {
         pollIntervalMs: 1,

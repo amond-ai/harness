@@ -87,9 +87,8 @@ describe('waitForExit', () => {
   it('never times out without a timeout, however long the process runs', async () => {
     const fake = fakeSandbox()
     const handle = await started(fake)
-    // A clock jumping a full day per reading. `awaitTurn` races an unbounded `waitForExit()`
-    // inside a step that already allows a live turn six hours and documents that such a wait
-    // never rejects, so any cap invented here would fail a run whose turn was merely long.
+    // A clock jumping a full day per reading. Any cap invented here would fail a run whose turn
+    // was merely long.
     const unbounded = createVercelSession(fake.sandbox, {
       journalRoot: ROOT,
       now: () => AT,
