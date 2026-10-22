@@ -179,7 +179,12 @@ export class HarnessSandbox<Env = unknown> extends DurableObject<Env> implements
       throw new Error(`process '${id}' could not be created: its id is in use or ${PROCESS_ROOT} is not writable`)
     }
     const seconds = options?.timeout === undefined ? '' : String(Math.max(0, options.timeout) / 1000)
+    const key = `${PROCESS_KEY_PREFIX}${id}`
     try {
+      // Tracked before it launches, so no storage failure can leave a live process the alarm
+      // never sees: until RUN writes its pid the process reads `starting`, which the alarm keeps.
+      await this.ctx.storage.put(key, [...command])
+      await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS)
       // Ignoring the output is what lets the process outlive this request. The env travels in the
       // environment, not argv, so its values stay out of `ps`; RUN shields itself from its `PATH`.
       await container.exec(['sh', '-c', RUN, 'sh', dir, seconds, ...command], {
@@ -191,10 +196,9 @@ export class HarnessSandbox<Env = unknown> extends DurableObject<Env> implements
     }
     catch (cause) {
       await this.run(container, ['rm', '-rf', dir]).catch(() => undefined)
+      await this.ctx.storage.delete(key).catch(() => undefined)
       throw cause
     }
-    await this.ctx.storage.put(`${PROCESS_KEY_PREFIX}${id}`, [...command])
-    await this.ctx.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS)
 
     const deadline = Date.now() + PID_WAIT_MS
     for (;;) {

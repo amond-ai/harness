@@ -189,7 +189,7 @@ export function createCloudflareSession(
       paths: LOG_PATHS,
       readExitCode: async (readOptions) => {
         const state = (await silenced(sandbox.processStatus(id), readOptions, undefined))?.state
-        return state?.state === 'exited' ? state.code : undefined
+        return state?.state === 'exited' ? exitOf(state.code, state.timedOut) : undefined
       },
       // Up to the end the file had when the read began, in bounded replies: a follow's final
       // drain reads once, so stopping at READ_LIMIT would drop output, while chasing a log that

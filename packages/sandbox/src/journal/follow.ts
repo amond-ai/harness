@@ -50,7 +50,7 @@
  * (e2b's table, then `pgrep -s`) rather than a file read — {@link JournalTail.livenessIntervalMs},
  * mirroring what `waitForExit` spends on the same question.
  */
-import type { ProcessLogEvent } from '../types'
+import type { ProcessExit, ProcessLogEvent } from '../types'
 import type { PartialRead } from './reads'
 import type { JournalSlice } from './replay'
 import { encodeCursor, replayPositioned } from './replay'
@@ -68,6 +68,11 @@ export interface JournalReadOptions {
   partial?: PartialRead
 }
 
+/** What {@link JournalTail.readExitCode} answered, as the exit a terminal event carries. */
+export function exitOfRecord(record: number | ProcessExit): ProcessExit {
+  return typeof record === 'number' ? { code: record, timedOut: false } : record
+}
+
 export interface JournalTail {
   /** Bytes at or after `offset`, plus the file's full length. */
   readSliceFrom: (path: string, offset: number, options?: JournalReadOptions) => Promise<JournalSlice>
@@ -77,8 +82,11 @@ export interface JournalTail {
    * here and nowhere else.
    */
   readEndOffset: (path: string, options?: JournalReadOptions) => Promise<number>
-  /** The journalled exit code, or `undefined` while the process is still running. */
-  readExitCode: (options?: JournalReadOptions) => Promise<number | undefined>
+  /**
+   * The journalled exit, or `undefined` while the process is still running. A bare code is an
+   * exit that did not time out; a backend that records the timeout answers the whole exit.
+   */
+  readExitCode: (options?: JournalReadOptions) => Promise<number | ProcessExit | undefined>
   /**
    * Whether the process is gone for good, as the session decides it: absent from e2b's table
    * *and* leaving no survivor in its own session. The verdict this loop ends on, because it is
@@ -244,7 +252,7 @@ async function* follow(
           state: 'exited',
           cursor,
           timestamp: tail.now(),
-          exit: { code: settled, timedOut: false },
+          exit: exitOfRecord(settled),
         }
   }
 

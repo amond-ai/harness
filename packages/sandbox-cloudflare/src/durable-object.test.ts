@@ -2,6 +2,7 @@ import { SANDBOX_PORT_HEADER } from '@amond-ai/harness-transport-cloudflare'
 import { describe, expect, it, vi } from 'vitest'
 import { endProcess, fakeContainer, fakeSandbox } from './cloudflare.fixtures'
 import { HarnessSandbox } from './durable-object'
+import { RUN } from './process-scripts'
 
 vi.mock('cloudflare:workers', async () => (await import('./fake-workers')).workersModule)
 vi.mock('@cloudflare/sandbox', async () => (await import('./fake-workers')).sandboxModule)
@@ -94,6 +95,26 @@ describe('container lifecycle', () => {
 
     await expect(session().exec(['claude'])).rejects.toThrow(/images\.sandbox/)
     expect(container.start).not.toHaveBeenCalled()
+  })
+})
+
+describe('startProcess', () => {
+  it('tracks the process before launching it, and forgets it when the launch fails', async () => {
+    const { container, storage, session } = fakeSandbox()
+    const exec = container.exec
+    let keysAtLaunch: string[] = []
+    container.exec = async (argv, options) => {
+      if (argv[2] === RUN) {
+        keysAtLaunch = [...storage.data.keys()]
+        throw new Error('exec failed')
+      }
+      return exec(argv, options)
+    }
+
+    await expect(session().exec(['claude'])).rejects.toThrow('exec failed')
+    expect(keysAtLaunch).toEqual(['process:run-1'])
+    expect(storage.data.has('process:run-1')).toBe(false)
+    expect(container.processes.size).toBe(0)
   })
 })
 

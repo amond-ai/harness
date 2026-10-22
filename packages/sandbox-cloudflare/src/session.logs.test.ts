@@ -75,6 +75,15 @@ describe('logs', () => {
     expect(events[2]).toMatchObject({ state: 'exited', exit: { code: 0 }, cursor: '18:5' })
   })
 
+  it('carries a timed-out exit into the replay\'s terminal event', async () => {
+    const { container, session } = fakeSandbox()
+    const handle = await session().exec(['claude'], { timeout: 1_000 })
+    endProcess(container, 'run-1', 143, true)
+
+    const events = await drain(await handle.logs({ replay: true }))
+    expect(events.at(-1)).toMatchObject({ type: 'terminal', state: 'exited', exit: { code: 143, timedOut: true } })
+  })
+
   it('resumes from a cursor without re-serving what the caller already read', async () => {
     const { container, session } = fakeSandbox()
     const handle = await session().exec(['claude'])
