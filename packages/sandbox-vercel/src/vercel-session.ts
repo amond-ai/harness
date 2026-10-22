@@ -280,8 +280,8 @@ export function createVercelSession(
    * {@link SandboxNoExitRecordError} says "it is already gone, retrying the wait buys nothing".
    *
    * **Without a `timeout` there is no deadline at all**, and `SandboxWaitTimeoutError` is
-   * reachable only through the caller's `signal`. A caller that passes no `timeout` bounds the
-   * wait itself, so any cap invented here would fail a run whose turn was merely long. Claude
+   * reachable only through the caller's `signal`. Bounding an untimed wait is left to the caller,
+   * so any cap invented here would fail a run whose turn was merely long. Claude
    * turns past half an hour are ordinary. What keeps a *lost* process from hanging the step is the
    * `'gone'` branch below, which is a real observation rather than a guess dressed up as a limit.
    *

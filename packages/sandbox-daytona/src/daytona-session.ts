@@ -155,8 +155,8 @@ export function createDaytonaSession(
    * gone, retrying the wait buys nothing".
    *
    * **Without a `timeout` there is no deadline at all**, and {@link SandboxWaitTimeoutError} is
-   * unreachable. A caller that passes no `timeout` bounds the wait itself, so any cap invented
-   * here would fail a run whose turn was merely long.
+   * reachable only through the caller's `signal`. Bounding an untimed wait is left to the caller,
+   * so any cap invented here would fail a run whose turn was merely long.
    *
    * The poll costs one `getSessionCommand` and nothing else. There is deliberately no lifetime
    * renewer beside it, unlike the e2b backend's: Daytona's `autoStopInterval` counts *inactivity*

@@ -289,9 +289,9 @@ export function createE2bSession(
    * `no_exit_record` failure says "it is already gone, retrying the wait buys nothing".
    *
    * **Without a `timeout` there is no deadline at all**, and `SandboxWaitTimeoutError` is
-   * unreachable. A caller that passes no `timeout` bounds the wait itself, so any cap
-   * invented here would fail a run whose turn was merely long. Claude turns past half an hour
-   * are ordinary. What keeps a *lost* process from hanging the step is the `'gone'` check
+   * reachable only through the caller's `signal`. Bounding an untimed wait is left to the
+   * caller, so any cap invented here would fail a run whose turn was merely long. Claude
+   * turns past half an hour are ordinary. What keeps a *lost* process from hanging the step is the `'gone'` check
    * below, which is a real observation rather than a guess dressed up as a limit.
    */
   async function waitForExit(
