@@ -15,11 +15,11 @@
  * | positioned (`since`) | the liveness watchdog, per sample | the slice is served |
  * | following (`follow`) | `@amond-ai/harness-sandbox`, live | the process exits or the caller aborts |
  */
-import type { ProcessLogEvent, ProcessLogsOptions } from '../types'
+import type { ProcessExit, ProcessLogEvent, ProcessLogsOptions } from '../types'
 import type { JournalReadOptions } from './follow'
 import type { JournalPaths } from './paths'
 import type { JournalSlice } from './replay'
-import { followJournal } from './follow'
+import { exitOfRecord, followJournal } from './follow'
 import { decodeCursor, encodeCursor, replayPositioned } from './replay'
 
 /**
@@ -36,7 +36,8 @@ export type PartialRead = 'silence' | 'fail'
 
 export interface LogReadSources {
   paths: JournalPaths
-  readExitCode: (options?: JournalReadOptions) => Promise<number | undefined>
+  /** See {@link JournalTail.readExitCode}. */
+  readExitCode: (options?: JournalReadOptions) => Promise<number | ProcessExit | undefined>
   readSliceFrom: (path: string, offset: number, options?: JournalReadOptions) => Promise<JournalSlice>
   /** Where a file ends, for a follower starting at the live tail. See {@link JournalTail.readEndOffset}. */
   readEndOffset: (path: string, options?: JournalReadOptions) => Promise<number>
@@ -122,7 +123,7 @@ export function createProcessLogs(
         state: 'exited',
         cursor: encodeCursor(stdout, stderr),
         timestamp: now(),
-        exit: { code: exitCode, timedOut: false },
+        exit: exitOfRecord(exitCode),
       }
     }
   }

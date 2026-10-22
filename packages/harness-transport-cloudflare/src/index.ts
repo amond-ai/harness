@@ -6,7 +6,7 @@
  * `@amond-ai/harness-transport`. What is left here is the part workerd needs and nothing else
  * can use, which is why the split exists at all: a Cloudflare sandbox's bridge port is
  * *private*, so it is not dialed by URL. The port endpoint is a tag, and the socket is opened by
- * the Sandbox Durable Object (`cf-connect.ts`). A backend with publicly routable ports — e2b —
+ * the sandbox's Durable Object, which forwards the upgrade into the container (`cf-connect.ts`). A backend with publicly routable ports — e2b —
  * answers with a real address, dialed through workerd's own `fetch` upgrade so the endpoint's
  * request headers travel with it (`direct-connect.ts`).
  *
@@ -17,9 +17,9 @@
  * the `ws` package, which cannot run in a Worker at all (see `harness-transport`'s `ws-shim.ts`).
  * A wrangler `alias` points `ws` at `./ws`, and `ws-compat.ts` is what that stand-in does instead.
  */
-export type { WsConnectSandbox } from './cf-connect'
-export { createBridgeSocketOpener } from './cf-connect'
+export type { SandboxFetcher } from './cf-connect'
+export { createBridgeSocketOpener, SANDBOX_PORT_HEADER } from './cf-connect'
 export type { DialFetch } from './direct-connect'
 export { createDirectSocketOpener } from './direct-connect'
 export type { WebSocketClassOptions, WsClient } from './ws-compat'
-export { createWebSocketClass, SANDBOX_ID_PARAM, SANDBOX_OPTIONS, sandboxRoutedUrl } from './ws-compat'
+export { createWebSocketClass, SANDBOX_ID_PARAM, sandboxRoutedUrl } from './ws-compat'

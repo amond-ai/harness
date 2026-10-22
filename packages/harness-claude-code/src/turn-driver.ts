@@ -9,7 +9,7 @@
  *
  * Nothing here imports `cloudflare:workers` — including transitively, which is why the socket
  * opener arrives as {@link TurnDriverRun.openSocket} rather than being built here: `sdk-socket.ts`
- * reaches `@cloudflare/sandbox`, and importing it would make this module workerd-only along with
+ * reaches the Cloudflare sandbox binding, and importing it would make this module workerd-only along with
  * every test that wants to read the seam. The same split `sandbox-backend.ts` keeps from
  * `sandbox-provider.ts`.
  *
@@ -403,7 +403,7 @@ export interface TurnDriverRun {
    * Dial one bridge endpoint URL — the driver's only unstubbable dependency.
    *
    * Passed in rather than built here because opening the socket is the one part that cannot run
-   * outside workerd (`sdk-socket.ts` reaches `@cloudflare/sandbox`), and this module has to stay
+   * outside workerd (`sdk-socket.ts` reaches the Cloudflare sandbox binding), and this module has to stay
    * importable from `bun test`. `run-workflow.ts` is workerd-only already, so it passes
    * `turnHostSocketOpener(env)`. `headers` are the endpoint's own, as
    * `SdkTurnDriverInput.openSocket` describes.

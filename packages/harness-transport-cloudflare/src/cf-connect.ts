@@ -3,16 +3,9 @@
  *
  * `@ai-sdk/harness-claude-code` dials the bridge with `new WebSocket(endpoint.url)` from the
  * `ws` package. That cannot work in a Worker (see `ws-shim.ts`), and it is also the wrong
- * shape here: a Worker does not dial a sandbox by URL, it asks the Sandbox Durable Object to
- * open the socket for it. `Sandbox.wsConnect(request, port)` is the SDK's own API for exactly
- * that — the same upgrade-request pattern its internal RPC control connection uses — and it
- * keeps the bridge port private, unlike `exposePort`, which publishes it.
- *
- * Measured against a real container on 2026-08-25, not only read: the upgrade answers 101, the
- * accepted socket echoes a frame back and closes with 1000, and the peer confirms it received
- * both details below. See `.please/docs/research/md/028-cloudflare-wsconnect-bridge-socket-spike.md`
- * for the run and for what it still does not cover — the peer there is an echo server, not the
- * AI SDK bridge.
+ * shape here: a Worker does not dial a sandbox by URL, it asks the sandbox's Durable Object to
+ * open the socket for it. `@cloudflare/sandbox` 1.0 has no API for that, so the upgrade goes to
+ * the Durable Object's own `fetch()`, with the port named in {@link SANDBOX_PORT_HEADER}.
  *
  * Two details are load-bearing and both come from reading the adapter rather than guessing:
  *
@@ -26,15 +19,18 @@
 import type { BridgeEndpoint, WsLike } from '@amond-ai/harness-transport'
 import { acceptUpgrade, upgradeHeaders } from '@amond-ai/harness-transport'
 
-/** The one `@cloudflare/sandbox` method this module needs, structural so tests can stand in. */
-export interface WsConnectSandbox {
-  wsConnect: (request: Request, port: number) => Promise<Response>
+/** The header that names the container port a request to the sandbox's Durable Object is for. */
+export const SANDBOX_PORT_HEADER = 'X-Sandbox-Port'
+
+/** What this module needs of the sandbox's Durable Object stub, structural so tests can stand in. */
+export interface SandboxFetcher {
+  fetch: (request: Request) => Promise<Response>
 }
 
 /**
  * What a special scheme means by an omitted port.
  *
- * `wsConnect` takes the port as a number and the endpoint URL is the only place to get one,
+ * The Durable Object needs the port as a number and the endpoint URL is the only place to get one,
  * but the string cannot always carry it. WHATWG canonicalisation deletes a port equal to the
  * scheme's default: `new URL('ws://localhost:80/').toString()` is `ws://localhost/`, and
  * reparsing that yields `port === ''` — measured on 2026-08-25 under Bun 1.3.14 for all four
@@ -62,7 +58,7 @@ const DEFAULT_PORTS: Readonly<Record<string, number | undefined>> = {
 }
 
 export function createBridgeSocketOpener(
-  sandbox: WsConnectSandbox,
+  sandbox: SandboxFetcher,
 ): (endpoint: BridgeEndpoint) => Promise<WsLike> {
   return async (endpoint) => {
     const target = new URL(endpoint.url)
@@ -71,13 +67,15 @@ export function createBridgeSocketOpener(
       throw new Error(`bridge endpoint '${endpoint.url}' names no port to connect to`)
     }
 
-    // Rebuilt against `localhost` because the request is routed inside the container by
-    // `wsConnect`, not resolved over DNS — but path and search are carried across verbatim,
+    // Rebuilt against `localhost` because the request is routed inside the container by the
+    // Durable Object, not resolved over DNS — but path and search are carried across verbatim,
     // since the search holds the bridge token.
-    const request = new Request(`http://localhost:${String(port)}${target.pathname}${target.search}`, {
-      headers: upgradeHeaders(endpoint.headers),
-    })
+    // `set`, not a spread: an endpoint header of the same name in another case would otherwise
+    // be appended beside ours and reach the Durable Object as `<theirs>, <port>`.
+    const headers = new Headers(upgradeHeaders(endpoint.headers))
+    headers.set(SANDBOX_PORT_HEADER, String(port))
+    const request = new Request(`http://localhost:${String(port)}${target.pathname}${target.search}`, { headers })
 
-    return acceptUpgrade(await sandbox.wsConnect(request, port))
+    return acceptUpgrade(await sandbox.fetch(request))
   }
 }

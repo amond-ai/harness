@@ -3,8 +3,8 @@
  *
  * A thin queue over `WsLike`: frames in, JSON commands out, and a `next()` that a caller can
  * put a deadline on. It takes the socket already opened rather than opening one, so everything
- * here runs in `bun test` against a scripted socket and the two things that cannot — `wsConnect`
- * and `fetch` — stay in `sdk-socket.ts`.
+ * here runs in `bun test` against a scripted socket and the two things that cannot — the
+ * sandbox Durable Object's upgrade and `fetch` — stay in `sdk-socket.ts`.
  *
  * Frames are queued from the moment the channel is built, never dropped while nothing is
  * reading: the round consumes them one at a time and a burst replayed by `resume` arrives

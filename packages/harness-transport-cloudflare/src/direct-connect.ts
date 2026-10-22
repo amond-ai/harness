@@ -12,7 +12,7 @@
  * headers at all. A `WebSocket`-based dial would therefore *drop* them silently and surface
  * as an authentication refusal from the bridge with nothing pointing at the cause. Workerd's
  * `fetch` performs the upgrade and hands the socket back on the response, so the headers
- * travel and the shape stays identical to the `wsConnect` path.
+ * travel and the shape stays identical to the Durable Object path in `cf-connect.ts`.
  *
  * Which is why {@link toHttpUrl} exists, and it is not tidiness. Workerd's `fetch` refuses
  * the WebSocket schemes outright, before any network activity — measured 2026-08-25 inside
@@ -28,7 +28,7 @@
  * And this is the live path, not a corner: `@ai-sdk/harness-claude-code` asks for the
  * endpoint as `getPortEndpoint({ port, protocol: 'ws' })`, so a backend with routable ports
  * mints `ws://…` and every direct dial would die on a `TypeError` that says nothing about
- * the real cause. The `wsConnect` path never sees this because `cf-connect.ts` rebuilds its
+ * the real cause. The Durable Object path never sees this because `cf-connect.ts` rebuilds its
  * request as `http://localhost:<port>…` for its own reasons.
  */
 import type { BridgeEndpoint, WsLike } from '@amond-ai/harness-transport'

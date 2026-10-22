@@ -9,7 +9,7 @@ import type { BridgeEndpoint, WsLike } from '@amond-ai/harness-transport'
  * adapter's release cadence and needs no upstream change.
  *
  * The shape is not a pretence. A real `WebSocket` constructor returns immediately and connects
- * afterwards, announcing itself with `open` — so starting `wsConnect` in the constructor and
+ * afterwards, announcing itself with `open` — so starting the connect in the constructor and
  * emitting `open` when it lands is what the class is supposed to do, not a workaround. Calls
  * made in the meantime queue, exactly as they must against any client that is still
  * connecting.
@@ -24,7 +24,6 @@ import type { BridgeEndpoint, WsLike } from '@amond-ai/harness-transport'
  * `ws` at runtime gets this too. The in-sandbox bridge is unaffected: it ships as a prebuilt
  * `.mjs` and runs against the real `ws` installed inside the container.
  */
-import type { SandboxOptions } from '@cloudflare/sandbox'
 
 /**
  * How the sandbox travels from the provider to here.
@@ -36,16 +35,6 @@ import type { SandboxOptions } from '@cloudflare/sandbox'
  * endpoint as one to dial rather than to route.
  */
 export const SANDBOX_ID_PARAM = '__pf_sandbox'
-
-/**
- * The options `openSandbox` in `./sandbox` passes to `getSandbox`.
- *
- * `normalizeId` decides which Durable Object an id with uppercase letters maps to, so a call
- * without it opens a different container than the `ws` bridge does. `sleepAfter` is applied to
- * that same container, so a call with another value silently changes the bridge's idle timeout.
- * Open a run's sandbox through `openSandbox` rather than calling `getSandbox` with these yourself.
- */
-export const SANDBOX_OPTIONS: SandboxOptions = { normalizeId: true, sleepAfter: '5m' }
 
 export interface WebSocketClassOptions {
   /** Open the bridge socket for one sandbox — normally `createBridgeSocketOpener(sandbox)`. */

@@ -196,9 +196,7 @@ async function openLogStream(
     // retained log from the beginning rather than from the live tail", so a subscription
     // without it starts at the tail and misses whatever the command already wrote — a fast
     // `echo` here, the bridge's startup banner in the real caller, both written between
-    // `exec` returning and this line (codex review, PR #268). `@cloudflare/sandbox` asks for
-    // the pair everywhere it reads a whole turn: `consumeLogs`, which backs `waitForExit`
-    // and `output`, and `waitForPortSubscriptions` both open `{ replay: true, follow: true }`.
+    // `exec` returning and this line (codex review, PR #268).
     events = await handle.logs({ follow: true, replay: true, signal: abortSignal })
   }
   catch (cause) {
@@ -232,9 +230,8 @@ async function waitForProcessExit(
   // Refuse before asking the backend, for the reason `spawn`'s own pre-check gives one
   // call earlier: `abort` is one-shot, so a backend wait that only registers a listener
   // on an already-aborted signal never settles, and the caller hangs on a process it has
-  // already cancelled. Nothing in the contract obliges a backend to reject that wait —
-  // `@cloudflare/sandbox` does check upfront, but that is its choice, not the contract's
-  // — so the guard belongs here, where every backend passes (cubic review, PR #268).
+  // already cancelled. Nothing in the contract obliges a backend to reject that wait, so the
+  // guard belongs here, where every backend passes (cubic review, PR #268).
   // `throwIfAborted()` throws `signal.reason`, which is the same value the `catch` below
   // restores, so the caller sees one rejection value however the abort was timed.
   abortSignal?.throwIfAborted()
