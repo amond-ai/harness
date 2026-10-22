@@ -32,7 +32,7 @@ injection points below, and the package's own test suite runs in-process.
 | Injection | Where | Why it is not decided here |
 |---|---|---|
 | `SandboxProvider` | `turnDriver(provider, …)` | Which container, on which backend — and it is resolved *per use*, never held across a step. |
-| `openSocket(url, headers?)` | `TurnDriverRun.openSocket` | How a bridge endpoint is dialed: the standard `WebSocket` on most runtimes, `@amond-ai/harness-transport-cloudflare` where the port is private and reachable only through `wsConnect`. Send `headers` with the upgrade — a restricted port (e2b's traffic access token, Daytona's preview token) refuses a dial without them. |
+| `openSocket(url, headers?)` | `TurnDriverRun.openSocket` | How a bridge endpoint is dialed: the standard `WebSocket` on most runtimes, `@amond-ai/harness-transport-cloudflare` where the port is private and reachable only through `wsConnect`. Send `headers` with the upgrade — a restricted port (e2b's traffic access token) refuses a dial without them. |
 | `claudeArgv(turn)` | `TurnDriverRun.claudeArgv` | What a `claude` turn is invoked with — flags, plugins, settings sources — is the deployment's policy. `cli` only. |
 | `settingSources` | `TurnDriverRun.settingSources` | The same list, as the `sdk` host's `start` frame carries it. |
 | `LiveMirror` | `TurnAwaitSpec.mirror` / `TurnRoundSpec.mirror` | Where the turn's bytes are published (R2, a file, nothing) and how they are masked. |

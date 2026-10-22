@@ -42,8 +42,8 @@ export interface CreateClaudeCodeOptions {
   sandboxes: SandboxProvider
   /**
    * Dial one bridge endpoint URL — the one part that cannot be written once for every runtime.
-   * Send `headers` with the upgrade: a restricted port (e2b's traffic access token, Daytona's
-   * preview token) refuses a dial without them.
+   * Send `headers` with the upgrade: a restricted port (e2b's traffic access token) refuses a dial
+   * without them.
    */
   openSocket: (url: string, headers?: Readonly<Record<string, string>>) => Promise<WsLike>
   config: TurnDriverConfig

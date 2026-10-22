@@ -429,11 +429,19 @@ describe('portEndpoint', () => {
    * Daytona's own SDK appends the token as a query parameter instead — and that is exactly the
    * dial `@ai-sdk/harness-claude-code` makes.
    */
-  it('also puts the token in the query string for a socket, which cannot carry headers', async () => {
+  it('puts the token in the query string for a socket, which cannot carry headers', async () => {
     const provider = createDaytonaProvider({ api: fakeApi().api })
     const endpoint = await provider.portEndpoint('run-1', 3000, { protocol: 'ws' })
 
     expect(endpoint.url).toBe('wss://3000-sbx-1.proxy.daytona.works/?DAYTONA_SANDBOX_AUTH_KEY=preview-token')
-    expect(endpoint.headers).toEqual({ 'x-daytona-preview-token': 'preview-token' })
+  })
+
+  it('leaves headers off a socket endpoint, whichever socket scheme the caller named', async () => {
+    const provider = createDaytonaProvider({ api: fakeApi().api })
+    const endpoints = await Promise.all((['ws', 'wss'] as const).map(
+      async protocol => await provider.portEndpoint('run-1', 3000, { protocol }),
+    ))
+
+    expect(endpoints.map(endpoint => endpoint.headers)).toEqual([undefined, undefined])
   })
 })
