@@ -1,7 +1,7 @@
 {
   "name": "@amond-ai/sandbox-cloudflare",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A Cloudflare Sandbox backend for @amond-ai/sandbox — the Durable Object @cloudflare/sandbox 1.0 leaves to the application, and a session that maps it onto the contract",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
