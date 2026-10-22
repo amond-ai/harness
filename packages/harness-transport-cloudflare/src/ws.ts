@@ -15,11 +15,11 @@
  * is the wiring that supplies the real one.
  */
 import type { WsClient } from './ws-compat'
-import { getSandbox } from '@cloudflare/sandbox'
 import { env } from 'cloudflare:workers'
 import { createBridgeSocketOpener } from './cf-connect'
 import { createDirectSocketOpener } from './direct-connect'
-import { createWebSocketClass, SANDBOX_OPTIONS } from './ws-compat'
+import { openSandbox } from './sandbox'
+import { createWebSocketClass } from './ws-compat'
 
 /**
  * Which binding holds the sandbox namespace.
@@ -50,7 +50,7 @@ function sandboxNamespace(): unknown {
 export const WebSocket: new (url: string, init?: { headers?: Record<string, string> }) => WsClient
   = createWebSocketClass({
     openSocket: async (sandboxId, endpoint) => {
-      const sandbox = getSandbox(sandboxNamespace() as never, sandboxId, SANDBOX_OPTIONS)
+      const sandbox = openSandbox(sandboxNamespace() as never, sandboxId)
       return createBridgeSocketOpener(sandbox)(endpoint)
     },
     dialDirect: createDirectSocketOpener((url, init) => fetch(url, init)),
