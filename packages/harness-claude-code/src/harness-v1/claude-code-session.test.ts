@@ -13,6 +13,7 @@ import type { HarnessV1 } from '@ai-sdk/harness'
 import type { SandboxProvider } from '@amond-ai/sandbox'
 import type { TurnDriverConfig } from '../config'
 import type { FakeTurnHost } from './turn-host.fixtures'
+import { HarnessHistoryUnavailableError } from '@ai-sdk/harness'
 import { HarnessAgent } from '@ai-sdk/harness/agent'
 import { describe, expect, it } from 'vitest'
 import { createClaudeCode } from './create-claude-code'
@@ -235,6 +236,167 @@ describe('the claude-code harness under HarnessAgent', () => {
     expect(host.starts[1]).toMatchObject({ prompt: 'say it again', sessionId: 'sess-1' })
     expect(host.starts[1]).not.toHaveProperty('resume')
     await resumed.destroy()
+  })
+
+  it('reads an empty history from a session that has not run a turn', async () => {
+    const agent = new HarnessAgent({ harness: harnessOver(fakeHost()), permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+
+    expect(await session.readHistory()).toEqual({ messages: [], cursor: 'lines:0' })
+    await session.destroy()
+  })
+
+  it('reads the transcript the host reported, and only what follows a cursor', async () => {
+    const host = fakeHost()
+    const agent = new HarnessAgent({ harness: harnessOver(host), permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    await agent.generate({ session, prompt: 'say hello' })
+    const path = '/root/.claude/projects/-workspace/sess-1.jsonl'
+    const line = (type: string, content: unknown): string =>
+      `${JSON.stringify({ type, message: { role: type, id: type, content } })}\n`
+    await host.provider.session('sbx-1').writeFile(path, line('user', 'say hello'))
+
+    const first = await session.readHistory()
+    await host.provider.session('sbx-1').writeFile(path, line('user', 'say hello') + line('assistant', [{ type: 'text', text: 'hi' }]))
+    const next = await session.readHistory({ since: first.cursor })
+
+    expect(first.messages).toMatchObject([{ role: 'user', content: [{ type: 'text', text: 'say hello' }] }])
+    expect(next.messages).toMatchObject([{ role: 'assistant', content: [{ type: 'text', text: 'hi' }] }])
+    expect(next.cursor).toBe('lines:2')
+    await session.destroy()
+  })
+
+  it('reports history as unavailable while a turn runs and its transcript is not reported yet', async () => {
+    const agent = new HarnessAgent({ harness: harnessOver(fakeHost()), permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    const stream = await agent.stream({ session, prompt: 'say hello' })
+    await stream.textStream[Symbol.asyncIterator]().next()
+
+    const error = await session.readHistory().catch((caught: unknown) => caught)
+
+    expect(HarnessHistoryUnavailableError.isInstance(error)).toBe(true)
+    await session.suspendTurn()
+  })
+
+  it('reports history as unavailable when a turn kept a session id but no transcript', async () => {
+    const host = createFakeTurnHost({
+      frames: () => turnFrames().map(frame => frame.type === 'finish'
+        ? { ...frame, sessionArtifacts: { sessionId: 'sess-1', journalPath: '/workspace/.turn-host/s1/1/event-log.ndjson' } }
+        : frame),
+    })
+    const agent = new HarnessAgent({ harness: harnessOver(host), permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    await agent.generate({ session, prompt: 'say hello' })
+
+    const error = await session.readHistory().catch((caught: unknown) => caught)
+
+    expect(HarnessHistoryUnavailableError.isInstance(error)).toBe(true)
+    await session.destroy()
+  })
+
+  it('keeps the earlier transcript readable after a later turn that never got a session id', async () => {
+    const host = createFakeTurnHost({
+      frames: prompt => turnFrames().map(frame => frame.type === 'finish' && prompt === 'fail early'
+        ? { ...frame, sessionArtifacts: { journalPath: '/workspace/.turn-host/s1/2/event-log.ndjson' } }
+        : frame),
+    })
+    const agent = new HarnessAgent({ harness: harnessOver(host), permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    await agent.generate({ session, prompt: 'say hello' })
+    await host.provider.session('sbx-1').writeFile(
+      '/root/.claude/projects/-workspace/sess-1.jsonl',
+      `${JSON.stringify({ type: 'user', uuid: 'u1', message: { role: 'user', content: 'say hello' } })}\n`,
+    )
+
+    await agent.generate({ session, prompt: 'fail early' })
+    const history = await session.readHistory()
+
+    expect(history.messages).toMatchObject([{ role: 'user', content: [{ type: 'text', text: 'say hello' }] }])
+    await session.destroy()
+  })
+
+  it('reports history as unavailable when a turn ended without reporting any session artifacts', async () => {
+    const host = createFakeTurnHost({
+      frames: () => [{ type: 'stream-start', warnings: [] }, { type: 'error', error: 'host lost' }],
+    })
+    const agent = new HarnessAgent({ harness: harnessOver(host), permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    await agent.generate({ session, prompt: 'say hello' }).catch(() => undefined)
+
+    const error = await session.readHistory().catch((caught: unknown) => caught)
+
+    expect(HarnessHistoryUnavailableError.isInstance(error)).toBe(true)
+    await session.destroy()
+  })
+
+  it('reports history as unavailable when the start handoff failed', async () => {
+    const host = fakeHost()
+    const harness = createClaudeCode({
+      sandboxes: host.provider,
+      openSocket: async () => {
+        throw new Error('socket refused')
+      },
+      config: CONFIG,
+      settingSources: ['project'],
+      env: () => ({ ANTHROPIC_API_KEY: 'test-key' }),
+    })
+    const agent = new HarnessAgent({ harness, permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    await agent.generate({ session, prompt: 'say hello' }).catch(() => undefined)
+
+    const error = await session.readHistory().catch((caught: unknown) => caught)
+
+    expect(HarnessHistoryUnavailableError.isInstance(error)).toBe(true)
+    await session.destroy()
+  })
+
+  it('keeps knowing a turn started across a detach and a resume', async () => {
+    const host = createFakeTurnHost({
+      frames: () => [{ type: 'stream-start', warnings: [] }, { type: 'error', error: 'host lost' }],
+    })
+    const harness = harnessOver(host)
+    const agent = new HarnessAgent({ harness, permissionMode: 'allow-all' })
+    const first = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    await agent.generate({ session: first, prompt: 'say hello' }).catch(() => undefined)
+    const parked = await first.detach()
+    expect(parked.data).toMatchObject({ turnStarted: true })
+    const { session: _dropped, ...withoutSession } = parked.data as Record<string, unknown>
+
+    const resumed = await agent.createSession({
+      sessionId: 's1',
+      sandboxSession: SANDBOX_SESSION,
+      resumeFrom: { ...parked, data: withoutSession } as typeof parked,
+    })
+    const error = await resumed.readHistory().catch((caught: unknown) => caught)
+
+    expect(HarnessHistoryUnavailableError.isInstance(error)).toBe(true)
+    await resumed.destroy()
+  })
+
+  it('reports history as unavailable when the transcript cannot be read from here', async () => {
+    const host = fakeHost()
+    const sandboxes: SandboxProvider = {
+      ...host.provider,
+      session: id => ({
+        ...host.provider.session(id),
+        readFile: (async (path: string, options?: never) => {
+          if (path.endsWith('.jsonl')) {
+            throw new Error('no such file')
+          }
+          return host.provider.session(id).readFile(path, options)
+        }) as never,
+      }),
+    }
+    const harness = createClaudeCode({ sandboxes, openSocket: host.openSocket, config: CONFIG, settingSources: ['project'], env: () => ({}) })
+    const agent = new HarnessAgent({ harness, permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    await agent.generate({ session, prompt: 'say hello' })
+
+    const error = await session.readHistory().catch((caught: unknown) => caught)
+
+    expect(HarnessHistoryUnavailableError.isInstance(error)).toBe(true)
+    expect(error).toMatchObject({ message: expect.stringContaining('no such file') })
+    await session.destroy()
   })
 
   it('leaves the suspended host running when the spent session is destroyed', async () => {

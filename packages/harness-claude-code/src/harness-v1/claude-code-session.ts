@@ -29,9 +29,11 @@ import type { PermissionMode } from '../permission-mode'
 import type { AttemptResult, TurnDriver, TurnHandle, TurnResume, TurnRoundState, TurnSession } from '../turn-driver'
 import type { TurnEnding } from './frame-to-part'
 import type { ClaudeCodeLifecycleState, ClaudeCodeRoundCursor, ClaudeCodeTurnHandle } from './lifecycle-state'
-import { HarnessCapabilityUnsupportedError } from '@ai-sdk/harness'
+import { HarnessCapabilityUnsupportedError, HarnessHistoryUnavailableError } from '@ai-sdk/harness'
 import { clampedTurnBudget, maxAttachRounds } from '../watchdog'
 import { frameToPart } from './frame-to-part'
+import { readTranscript } from './read-transcript'
+import { transcriptHistory } from './transcript-history'
 
 export interface ClaudeCodeSessionInput {
   driver: TurnDriver & { mode: 'rounds' }
@@ -71,6 +73,7 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
   // `continueFrom` (the suspended turn is live by definition), cleared when the loop sees the
   // turn end. A stop or a destroy that finds no local loop still has to kill that host.
   let turnOpen = input.continuing && handle !== undefined
+  let turnStarted = input.state.turnStarted === true || input.state.session !== undefined || turnOpen
 
   const unsupported = (message: string): HarnessCapabilityUnsupportedError =>
     new HarnessCapabilityUnsupportedError({ harnessId: input.harnessId, message })
@@ -85,13 +88,16 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
   const remember = (frame: TurnHostOutboundMessage, emit: (part: HarnessV1StreamPart) => void): boolean => {
     const { part, sessionArtifacts, ending } = frameToPart(frame)
     if (sessionArtifacts !== undefined) {
-      session = {
-        ...(sessionArtifacts.sessionId === undefined ? {} : { sessionId: sessionArtifacts.sessionId }),
-        ...(sessionArtifacts.sessionTranscriptPath === undefined
-          ? {}
-          : { transcriptPath: sessionArtifacts.sessionTranscriptPath }),
-        journalPath: sessionArtifacts.journalPath,
-      }
+      // A turn that never got a session id did not touch the session, so the earlier ids stay.
+      session = sessionArtifacts.sessionId === undefined
+        ? { ...session, journalPath: sessionArtifacts.journalPath }
+        : {
+            sessionId: sessionArtifacts.sessionId,
+            ...(sessionArtifacts.sessionTranscriptPath === undefined
+              ? {}
+              : { transcriptPath: sessionArtifacts.sessionTranscriptPath }),
+            journalPath: sessionArtifacts.journalPath,
+          }
     }
     if (part === undefined) {
       return false
@@ -221,6 +227,7 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
     ...(handle === undefined ? {} : { handle: exportedHandle(handle) }),
     ...(cursor === undefined ? {} : { round: cursor }),
     ...(session === undefined ? {} : { session }),
+    ...(turnStarted ? { turnStarted: true as const } : {}),
     attempt: input.state.attempt,
   } satisfies ClaudeCodeLifecycleState as unknown as HarnessV1ContinueTurnState['data'])
 
@@ -231,7 +238,7 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
     // The handle and the cursor are deliberately dropped: a session handed back between turns
     // has no turn to attach to, and a stale handle would invite the next start to dial a host
     // that is no longer running this conversation.
-    data: { sandboxId: input.sandboxId, ...(session === undefined ? {} : { session }), attempt: input.state.attempt } satisfies ClaudeCodeLifecycleState as unknown as HarnessV1ContinueTurnState['data'],
+    data: { sandboxId: input.sandboxId, ...(session === undefined ? {} : { session }), ...(turnStarted ? { turnStarted: true as const } : {}), attempt: input.state.attempt } satisfies ClaudeCodeLifecycleState as unknown as HarnessV1ContinueTurnState['data'],
   })
 
   return {
@@ -242,6 +249,9 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
       usable()
       const text = promptText(prompt, input.harnessId)
       const resume = resumeThunk(input, session)
+      // Once the start is sent the host may be running it, so a failed handoff is "transcript
+      // unknown", not "never ran". A start that failed before sending reads the same, conservatively.
+      turnStarted = true
       handle = await input.driver.start({
         prompt: text,
         permissionMode: input.permissionMode,
@@ -318,6 +328,27 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
 
     async doCompact() {
       throw unsupported('The claude-code harness cannot compact on request: the Agent SDK compacts its own context.')
+    },
+
+    /**
+     * The conversation is the CLI's JSONL transcript in the sandbox. No path with no turn started
+     * is an empty read; no path once a turn has started (still running, or it ended without
+     * reporting the transcript, as under `persistSession: false` or a lost host) is unavailable.
+     */
+    async doReadHistory({ since }) {
+      usable()
+      const path = session?.transcriptPath
+      if (path === undefined && turnStarted) {
+        const why = turnOpen
+          ? 'the running turn has not reported its transcript yet'
+          : 'no transcript was reported for this session'
+        throw new HarnessHistoryUnavailableError({
+          harnessId: input.harnessId,
+          message: `claude-code history for session ${input.sessionId} is not available: ${why}`,
+        })
+      }
+      const text = path === undefined ? '' : await readTranscript({ ...input, path })
+      return transcriptHistory(text, since)
     },
   }
 }
