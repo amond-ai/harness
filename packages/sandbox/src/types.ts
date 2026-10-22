@@ -94,13 +94,14 @@ export interface ProcessLogsOptions {
  * - **with `timeout`** — the wait rejects with {@link SandboxWaitTimeoutError} once the
  *   budget elapses;
  * - **without `timeout`** — the wait does not expire, and
- *   {@link SandboxWaitTimeoutError} is unreachable. It may still reject for a reason the
- *   backend actually observed, such as finding the process gone with no exit recorded.
+ *   {@link SandboxWaitTimeoutError} is reachable only through an aborted `signal`. It may
+ *   still reject for a reason the backend actually observed, such as finding the process
+ *   gone with no exit recorded.
  *
  * That second case is a property callers rely on, not a gap left to each backend's taste:
- * `awaitTurn` in `run-workflow.ts` races an unbounded `waitForExit()` inside a step that
- * allows a live turn six hours and is never retried, so a private cap in one backend does
- * not bound a wait — it fails the run for a turn that was merely long.
+ * bounding an untimed wait is left to the caller — its own deadline or `signal` — so a
+ * private cap in one backend does not bound a wait; it fails the run for a turn that was
+ * merely long.
  */
 export interface WaitForExitOptions {
   timeout?: number

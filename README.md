@@ -21,7 +21,7 @@ out.
 
 | Package | Runs where | What it does |
 | --- | --- | --- |
-| `@amond-ai/harness-claude-code` | the orchestrator | The `TurnDriver` seam and both Claude Code drivers: `sdk` (drives the turn host over the bridge socket, one bounded attach round at a time) and `cli` (execs `claude -p` in the sandbox and watches its log cursor). Runtime-neutral. |
+| `@amond-ai/harness-claude-code` | the orchestrator | The `TurnDriver` seam and the Claude Code driver, which drives the turn host over the bridge socket, one bounded attach round at a time. Runtime-neutral. |
 | `@amond-ai/harness-bridge-runtime` | inside the sandbox image | The transport every bridge shares: a token-gated WebSocket server, the monotonic `seq`, the disk-first journal and the resume replay over it, and the `abort`/`interrupt`/`stop`/`destroy` commands. Knows no agent — that arrives as `onStart`. A fork of Vercel's `@ai-sdk/harness` bridge (Apache-2.0). |
 | `@amond-ai/harness-claude-code-bridge` | inside the sandbox image | The Claude adapter on that runtime: the per-turn Node process that hosts the Agent SDK `query()`. A fork of Vercel's `@ai-sdk/harness-claude-code` bridge (Apache-2.0). |
 | `@amond-ai/harness-codex-bridge` | inside the sandbox image | The Codex adapter on that runtime: the per-turn Node process that hosts `@openai/codex-sdk`, running its thread under `approvalPolicy: 'never'`. A fork of Vercel's `@ai-sdk/harness-codex` bridge (Apache-2.0). |
@@ -101,12 +101,10 @@ const config = {
 }
 
 const driver = turnDriver(provider, {
-  kind: 'sdk',
   sandboxId,
   runId,
   config,
   openSocket: (url, headers) => openSocket({ url, headers }),
-  claudeArgv: turn => ['claude', '-p', turn.prompt, '--output-format', 'stream-json'],
   settingSources: ['user', 'project'],
 })
 
@@ -157,9 +155,8 @@ without host primitives. Everything else has no `node:`, `bun:`, or `cloudflare:
 | --- | --- | --- |
 | `SandboxProvider` | `turnDriver(provider, …)` | Which backend, and it is resolved per use. |
 | `openSocket(url)` | `TurnDriverRun.openSocket` | Dialing is the one part that differs per runtime. |
-| `claudeArgv(turn)` | `TurnDriverRun.claudeArgv` | Flags, plugins, and settings sources are your policy. `cli` driver only. |
-| `settingSources` | `TurnDriverRun.settingSources` | The same list as the `sdk` host's `start` frame carries it. |
-| `LiveMirror` | `TurnAwaitSpec.mirror`, `TurnRoundSpec.mirror` | Where the transcript goes and how it is masked. |
+| `settingSources` | `TurnDriverRun.settingSources` | Which settings files a turn reads, as the host's `start` frame carries them, is your policy. |
+| `LiveMirror` | `TurnRoundSpec.mirror` | Where the transcript goes and how it is masked. |
 | `TurnDriverConfig` | `TurnDriverRun.config` | Liveness, watchdog, wall-clock budget, per-turn ceilings, tool policy, workspace root. |
 
 Credentials enter only through the `env` thunk on `start`, and only on the exec path. The

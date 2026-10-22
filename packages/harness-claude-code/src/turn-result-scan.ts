@@ -2,10 +2,9 @@
  * The turn's verdict, read off the stream while the turn is still running.
  *
  * The settle-time replay parses a *window* of decoded messages (`parseTurnResult`); the attempt
- * loop has no window. What both drivers do have is the turn's NDJSON going past them — the `cli`
- * driver counts its process log's bytes for liveness, the `sdk` driver receives one `raw` frame
- * per SDK message — so the verdict is scanned out of that same traffic rather than re-read
- * afterwards (#376).
+ * loop has no window. What it does have is the turn's NDJSON going past it — the driver receives
+ * one `raw` frame per SDK message — so the verdict is scanned out of that same traffic rather
+ * than re-read afterwards (#376).
  *
  * **The line rules are `decodeNdjson`'s, deliberately, and not a second set.** That decoder is
  * what the settle path reads the very same bytes with, so a line the two disagree about would be
@@ -116,8 +115,8 @@ function parseResultLine(text: string): TurnVerdict | undefined {
  * function's caution ({@link AttemptResult}): a turn a timer ended is not described by whatever
  * `result` line it managed to print first, and a deferral is a question this side has to route
  * rather than an ending to judge. So a verdict scanned on either path is dropped here rather than
- * being made unreachable at the producer — both drivers scan the same stream, and only the ending
- * decides whether the reading is admissible.
+ * being made unreachable at the producer — the scan sees the same stream whatever the ending,
+ * and only the ending decides whether the reading is admissible.
  */
 export function withVerdict(result: AttemptResult, verdict: TurnVerdict | undefined): AttemptResult {
   if (verdict === undefined || result.outcome === 'timed-out' || result.outcome === 'deferred') {

@@ -2,11 +2,10 @@
  * The `sdk` driver: a turn is the Agent SDK's `query()`, hosted in a per-turn process inside the
  * sandbox, driven over a WebSocket the provider knows how to reach (ADR D1/D2/D4).
  *
- * It is the same seam the `cli` driver fills and a different shape behind it. Starting a turn is
- * an exec *and* a handshake; waiting on one is a sequence of bounded attach rounds rather than a
- * single wait; stopping one is an `interrupt` the agent answers with a real `result`, and only
- * then the signal ladder. What it does not change is the decision: `watchdog.ts` judges liveness
- * and the budget for both drivers, from frame arrivals here and log bytes there.
+ * Starting a turn is an exec *and* a handshake; waiting on one is a sequence of bounded attach
+ * rounds rather than a single wait; stopping one is an `interrupt` the agent answers with a real
+ * `result`, and only then the signal ladder. `watchdog.ts` judges liveness and the budget from
+ * frame arrivals.
  *
  * The provider, not just the session, because dialing is `SandboxProvider.portEndpoint`'s to
  * answer — the Cloudflare backend mints a tagged URL its Durable Object opens, e2b a routable
@@ -16,7 +15,7 @@ import type { WsLike } from '@amond-ai/harness-transport'
 import type { SandboxProvider, SandboxSession } from '@amond-ai/sandbox'
 import type { TurnDriverConfig } from '../config'
 import type { AttemptResult, TurnDriver, TurnHandle, TurnResume, TurnRoundSpec, TurnRoundState, TurnStartSpec } from '../turn-driver'
-import { killTurn } from '../cli-turn-kill'
+import { killTurn } from '../turn-kill'
 import { clampedTurnBudget } from '../watchdog'
 import { adoptOrExec } from './sdk-adopt'
 import {
@@ -66,7 +65,7 @@ function turnLimits(config: TurnDriverConfig): { maxBudgetUsd?: number, maxTurns
  * The run's own lists when the workflow pinned them at dispatch, and the deployment's config
  * otherwise — which is what a workflow instance older than {@link TurnStartSpec.policy} carries.
  * Either way this is an `sdk`-only concern: both lists are `start`-frame fields the *host*
- * enforces, so the `cli` driver would only have received members it must ignore.
+ * enforces.
  */
 function turnPolicy(
   spec: TurnStartSpec,
@@ -102,8 +101,6 @@ export function sdkTurnDriver(input: SdkTurnDriverInput): TurnDriver {
   }
 
   return {
-    mode: 'rounds',
-
     async start(turn: TurnStartSpec): Promise<TurnHandle> {
       const turnSession = session()
       const port = turnHostPort(turn.attempt)
@@ -149,9 +146,6 @@ export function sdkTurnDriver(input: SdkTurnDriverInput): TurnDriver {
         permissionMode: turn.permissionMode,
         instructions: turn.instructions,
         model: turn.model,
-        // The two ceilings are read off the deployment's config rather than carried on the spec:
-        // they are `start`-frame fields the SDK enforces, so the `cli` driver would only have
-        // received a member it must ignore. This driver already holds the config.
         settingSources: input.settingSources,
         limits: turnLimits(input.config),
         policy: turnPolicy(turn, input.config),
@@ -198,10 +192,6 @@ export function sdkTurnDriver(input: SdkTurnDriverInput): TurnDriver {
         connect: connect(handle),
         config: spec.config,
         mirror: spec.mirror,
-        // Kept for the `sdk` driver even though rounds make it conservative rather than
-        // necessary: no single step holds the turn any more, so the platform's own step ceiling
-        // is no longer what the budget has to stay under. Clamping anyway keeps one answer to
-        // "how long may a turn run" across both drivers.
         budgetMs: clampedTurnBudget(spec.config.turnWallClockBudgetMs),
         previous: spec.previous,
         onFrame: spec.onFrame,
@@ -213,7 +203,7 @@ export function sdkTurnDriver(input: SdkTurnDriverInput): TurnDriver {
     async kill(handle: TurnHandle): Promise<boolean> {
       return await killTurn(session(), handle.processId)
     },
-  } satisfies TurnDriver & { mode: 'rounds' } as TurnDriver
+  }
 }
 
 /** Re-exported so the workflow can name the type without reaching into the sdk directory. */

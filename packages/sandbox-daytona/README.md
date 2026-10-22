@@ -111,7 +111,7 @@ Read by `apps/cf-orchestrator`'s `sandboxProvider`, not by this package:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `DAYTONA_API_KEY` | *(required)* | Secret. `sandboxProvider` refuses the backend without it |
-| `DAYTONA_SNAPSHOT` | *(unset)* — Daytona's default snapshot | Required with `TURN_DRIVER=sdk`: no default snapshot of ours carries `/opt/turn-host` |
+| `DAYTONA_SNAPSHOT` | *(unset)* — Daytona's default snapshot | Required: no default snapshot of ours carries `/opt/turn-host` |
 | `DAYTONA_API_URL` | `https://app.daytona.io/api` | Control-plane endpoint |
 | `DAYTONA_TARGET` | *(unset)* | Region a created sandbox lands in |
 | `DAYTONA_STATE_ROOT` | `/home/daytona/.agent-runs` | Where the pid and meta files live, *inside the sandbox* |

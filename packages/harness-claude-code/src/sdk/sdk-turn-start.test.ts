@@ -1,8 +1,8 @@
 import type { ProcessLogEvent, SandboxProcessHandle } from '@amond-ai/sandbox'
 import { SandboxNoExitRecordError } from '@amond-ai/sandbox'
 import { describe, expect, it, vi } from 'vitest'
-import { KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
 import { createFakeTurnHost } from '../harness-v1/turn-host.fixtures'
+import { KILL_SETTLE_TIMEOUT_MS } from '../turn-kill'
 import { BRIDGE_READY_TIMEOUT_MS, handTurnToHost, startTurnHost, TurnHostBootError } from './sdk-turn-start'
 
 /**

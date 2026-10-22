@@ -71,8 +71,6 @@ export function createTurnChannel(socket: WsLike): TurnChannel {
       }
       return await new Promise<{ frame: string } | { end: ChannelEnd }>((resolve) => {
         let settle: (value: { frame: string } | { end: ChannelEnd }) => void
-        // Cancelled in the same turn it fires, so a round that ends on a frame leaves no
-        // dangling timer behind — the failure PR-72 removed from the cli watchdog.
         const timer = setTimeout(() => {
           // Only this call's own waiter: a deadline that fired after a frame already settled
           // must not retire whatever the next `next()` is waiting on.

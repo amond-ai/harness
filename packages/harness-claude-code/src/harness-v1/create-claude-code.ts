@@ -26,8 +26,7 @@ import type { SandboxProvider } from '@amond-ai/sandbox'
 import type { TurnDriverConfig } from '../config'
 import type { LiveMirror } from '../mirror'
 import type { PermissionMode } from '../permission-mode'
-import type { ClaudeArgv, TurnDriver, TurnStartSpec } from '../turn-driver'
-import type { TurnDriverKind } from '../turn-driver-kind'
+import type { TurnDriver } from '../turn-driver'
 import type { ClaudeCodeLifecycleState } from './lifecycle-state'
 import { HarnessCapabilityUnsupportedError } from '@ai-sdk/harness'
 import { turnDriver } from '../turn-driver'
@@ -49,15 +48,6 @@ export interface CreateClaudeCodeOptions {
   config: TurnDriverConfig
   /** `settingSources` for the host's `start` frame, as the consumer names them. */
   settingSources: readonly string[]
-  /**
-   * Which driver a turn runs through. `sdk` — the turn host — is the only one this adapter can
-   * serve: the `cli` driver waits once rather than in rounds, and a turn with no round boundary
-   * has nothing for `doSuspendTurn` to suspend at. The option stays so the shape does not have
-   * to change when it can.
-   */
-  kind?: TurnDriverKind
-  /** The `cli` driver's argv builder; required only by a kind this adapter does not yet accept. */
-  claudeArgv?: (turn: TurnStartSpec) => ClaudeArgv
   /** The turn's environment, assembled by the consumer — the only way credentials enter a turn. */
   env: () => Record<string, string>
   /** How a harness permission mode maps onto the CLI's six; {@link defaultPermissionMode} unless set. */
@@ -85,12 +75,6 @@ export function createClaudeCode(options: CreateClaudeCodeOptions): HarnessV1 {
       const state = importedState(startOptions)
       const sandboxId = state?.sandboxId ?? sandboxIdOf(startOptions)
       const driver = driverFor(options, { sandboxId, runId: startOptions.sessionId })
-      if (driver.mode !== 'rounds') {
-        throw new HarnessCapabilityUnsupportedError({
-          harnessId: CLAUDE_CODE_HARNESS_ID,
-          message: `The claude-code harness needs the 'sdk' turn driver: the 'cli' driver waits for a turn in one window, so a turn it runs cannot be suspended at a round boundary.`,
-        })
-      }
       return createClaudeCodeSession({
         driver,
         sandboxes: options.sandboxes,
@@ -123,15 +107,6 @@ function driverFor(
     runId: run.runId,
     config: options.config,
     openSocket: options.openSocket,
-    kind: options.kind ?? 'sdk',
-    // Only the `cli` driver reads it, and that kind is refused above — but a driver built with a
-    // thrower rather than with a stub is one that cannot silently run the wrong command.
-    claudeArgv: options.claudeArgv ?? (() => {
-      throw new HarnessCapabilityUnsupportedError({
-        harnessId: CLAUDE_CODE_HARNESS_ID,
-        message: `The claude-code harness was created without a claudeArgv builder, which the 'cli' driver requires.`,
-      })
-    }),
     settingSources: options.settingSources,
   })
 }

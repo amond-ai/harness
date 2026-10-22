@@ -1,5 +1,5 @@
 /**
- * How one turn ended, in the vocabulary both drivers and the attempt loop share.
+ * How one turn ended, in the vocabulary the driver and the attempt loop share.
  *
  * Here rather than in the orchestrator's `run-state.ts` because the driver is what produces
  * these values: the loop's classifiers (`FailingAttemptOutcome`, `failureCategoryFor`) are built

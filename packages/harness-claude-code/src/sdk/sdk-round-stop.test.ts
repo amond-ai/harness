@@ -5,7 +5,7 @@
  */
 import type { WsLike } from '@amond-ai/harness-transport'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
+import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS } from '../turn-kill'
 import { runAttachRound } from './sdk-round'
 import { RESUME_ACK_TIMEOUT_MS } from './sdk-round-settle'
 import { createFakeSession, createFakeTurnHost, fakeConfig, finishFrame, HANDLE, interruptsSent, runningClock } from './sdk-round.fixtures'

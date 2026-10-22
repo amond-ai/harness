@@ -15,18 +15,13 @@ const run = {
   runId: 'run-1',
   config: {} as TurnDriverConfig,
   openSocket: async () => {
-    throw new Error('the cli driver must not dial anything')
+    throw new Error('building the driver must not dial anything')
   },
-  claudeArgv: () => ['claude'] as const,
   settingSources: ['user', 'project'],
 }
 
 describe('turnDriver', () => {
-  it('builds the incumbent driver, which waits in one step', () => {
-    expect(turnDriver(provider, { ...run, kind: 'cli' }).mode).toBe('single')
-  })
-
   it('builds the sdk driver, which waits one bounded attach round at a time', () => {
-    expect(turnDriver(provider, { ...run, kind: 'sdk' }).mode).toBe('rounds')
+    expect(typeof turnDriver(provider, run).awaitRound).toBe('function')
   })
 })

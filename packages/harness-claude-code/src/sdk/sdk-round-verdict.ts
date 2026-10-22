@@ -9,7 +9,7 @@ import type { HostLoss, HostLossSocket, HostReading, TurnTimeoutCause, TurnVerdi
 import type { AttemptResult } from '../turn-driver'
 import type { TerminalObservation } from './sdk-frames'
 import type { AttachRoundInput, PumpContext } from './sdk-round'
-import { INTERRUPT_SETTLE_TIMEOUT_MS, killTurn } from '../cli-turn-kill'
+import { INTERRUPT_SETTLE_TIMEOUT_MS, killTurn } from '../turn-kill'
 import { withVerdict } from '../turn-result-scan'
 import { turnBudgetExhausted, turnTimeoutCause } from '../watchdog'
 import { readJournalEnding } from './sdk-journal'
@@ -155,7 +155,7 @@ export async function unreachableTimeout(context: PumpContext): Promise<AttemptR
  * exit in the instant the socket was down, and the frame is then only on disk — reported as an
  * unnamed timeout, it *outranks* the transcript the settle replays (`failureOf`), so a completed
  * turn would be recorded as one that wedged. A journal that holds no terminal frame, or that
- * cannot be read at all, leaves the two readings the cli path makes unchanged.
+ * cannot be read at all, leaves the socket-side readings unchanged.
  *
  * The same read answers what the turn said about itself, for the same reason (`readJournalEnding`).
  *

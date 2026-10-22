@@ -27,8 +27,8 @@ import type { ChannelEnd, TurnChannel } from './sdk-channel'
 import type { TerminalObservation } from './sdk-frames'
 import type { TurnRoundState } from './sdk-round-state'
 import { describeCause as describe } from '@amond-ai/redact'
-import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from '../cli-turn-kill'
 import { boundedFlush, LIVE_MIRROR_FLUSH_TIMEOUT_MS } from '../mirror'
+import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from '../turn-kill'
 import { flushOnInterval } from '../turn-mirror-flush'
 import { withVerdict } from '../turn-result-scan'
 import { foldBackgroundWait, foldStreamPart } from './sdk-background-wait'
@@ -173,8 +173,6 @@ export async function runAttachRound(input: AttachRoundInput): Promise<TurnRound
         return context.state
       }
       if (reading !== undefined) {
-        // Gone, and nothing terminal came back with the replay: the same two readings
-        // `abandonedWaitResult` makes on the cli path, decided the same way.
         context.state = {
           ...context.state,
           outcome: await abandoned(input, context.interruptedBy, context.state.verdict, { reading, socket, noTurnCause: context.noTurn?.cause }),
@@ -398,8 +396,8 @@ async function settle(observation: TerminalObservation, context: PumpContext): P
  * `destroy` rather than a signal: the host exits 1000 on it, and a host left listening would
  * hold the next attempt's port (`turnHostPort` offsets by attempt so it cannot, but a host per
  * turn that never exits is a container filling with processes either way). The wait is bounded,
- * and an exit that does not come inside it falls through to the same kill ladder the `cli`
- * driver uses — SIGINT, then the backend's default.
+ * and an exit that does not come inside it falls through to the driver's kill ladder — SIGINT,
+ * then the backend's default.
  */
 async function teardown(context: PumpContext): Promise<number | undefined> {
   const { session, handle } = context.input

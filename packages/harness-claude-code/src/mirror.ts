@@ -28,7 +28,7 @@
  */
 export const LIVE_MIRROR_MAX_BYTES = 16 * 1024 * 1024
 
-/** The live mirror, as `awaitTurn` drives it. */
+/** The live mirror, as an attach round drives it. */
 export interface LiveMirror {
   /**
    * Take one `stdout` event's bytes and the cursor it was delivered at. Never throws; nothing
@@ -49,7 +49,7 @@ export interface LiveMirror {
    * this is the last flush this instance will make, while `complete` claims the turn's process
    * is over — the claim `hasCompleteLiveRecord` makes the settle replay stand down for. A step
    * that gave up waiting on a live process makes a final flush over a turn that is still
-   * running, and the caller passes `ended: false` for it (see `awaitTurn`).
+   * running, and the caller passes `ended: false` for it (see `runAttachRound`).
    *
    * Never rejects, and never lets two puts race: a non-final flush issued while an earlier put
    * is still in flight returns without writing, and a final one waits for that put first.
@@ -60,9 +60,9 @@ export interface LiveMirror {
   /**
    * The cursor of the last event taken, or `undefined` before the first one.
    *
-   * `awaitTurn` starts its first log read here, which is what makes a seeded mirror resume
-   * rather than re-read: the cursor stored with a put is the cursor of the text in that put, so a
-   * resumed mirror reads on from it. Note that this is the *latest* cursor, which a non-final put
+   * A round attaches past this cursor, which is what makes a seeded mirror resume rather than
+   * re-read: the cursor stored with a put is the cursor of the text in that put, so a resumed
+   * mirror reads on from it. Note that this is the *latest* cursor, which a non-final put
    * deliberately does not use — see {@link flush}.
    */
   readonly cursor: string | undefined
@@ -70,7 +70,7 @@ export interface LiveMirror {
    * The record a *resumed* mirror started from — what a previous instance of this step already
    * published — or `undefined` on a first entry (#376).
    *
-   * Here because {@link cursor} is: the first log read starts at that cursor, so every byte the
+   * Here because {@link cursor} is: the first replay starts at that cursor, so every byte the
    * seed holds is a byte this entry will never be handed again. The mirror is the only component
    * that still has them, and a driver that has to read the turn's own `result` out of the stream
    * would otherwise lose it for exactly the turns that were restarted.

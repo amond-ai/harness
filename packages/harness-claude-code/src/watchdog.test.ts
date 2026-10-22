@@ -1,11 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  AWAIT_EXIT_STEP_TIMEOUT,
   AWAIT_EXIT_STEP_TIMEOUT_MS,
   clampedTurnBudget,
   MAX_TURN_WALL_CLOCK_BUDGET_MS,
   maxAttachRounds,
-  nextSampleDelay,
   ROUND_STEP_TIMEOUT,
   ROUND_WINDOW_MS,
   turnBudgetExhausted,
@@ -109,40 +107,6 @@ describe('turnBudgetExhausted', () => {
   })
 })
 
-describe('nextSampleDelay', () => {
-  const SAMPLE_INTERVAL_MS = 30 * SECOND
-
-  it('sleeps the whole sampling interval while the budget has longer left', () => {
-    expect(nextSampleDelay({
-      intervalMs: SAMPLE_INTERVAL_MS,
-      startedAt: 1_000_000,
-      budgetMs: TURN_WALL_CLOCK_BUDGET_MS,
-      now: 1_000_000 + 60 * SECOND,
-    })).toBe(SAMPLE_INTERVAL_MS)
-  })
-
-  // The setting this exists for: an interval longer than the budget would otherwise leave the
-  // budget unjudged until it elapsed.
-  it('cuts the tick short at the deadline when the interval outlasts the budget', () => {
-    expect(nextSampleDelay({
-      intervalMs: 7 * 60 * 60 * SECOND,
-      startedAt: 1_000_000,
-      budgetMs: TURN_WALL_CLOCK_BUDGET_MS,
-      now: 1_000_000 + 30 * SECOND,
-    })).toBe(TURN_WALL_CLOCK_BUDGET_MS - 30 * SECOND)
-  })
-
-  // Fine rather than degenerate: the tick fires at once and that pass reads the budget as spent.
-  it('answers zero once the deadline has already passed', () => {
-    expect(nextSampleDelay({
-      intervalMs: SAMPLE_INTERVAL_MS,
-      startedAt: 1_000_000,
-      budgetMs: TURN_WALL_CLOCK_BUDGET_MS,
-      now: 1_000_000 + TURN_WALL_CLOCK_BUDGET_MS + SECOND,
-    })).toBe(0)
-  })
-})
-
 describe('the turn budget ceiling and the step timeout it is derived from', () => {
   /**
    * The whole point of deriving one from the other: a turn that outlasts its step hands the
@@ -151,12 +115,6 @@ describe('the turn budget ceiling and the step timeout it is derived from', () =
   it('leaves the step a margin the budget can never eat into', () => {
     expect(MAX_TURN_WALL_CLOCK_BUDGET_MS).toBeLessThan(AWAIT_EXIT_STEP_TIMEOUT_MS)
     expect(AWAIT_EXIT_STEP_TIMEOUT_MS - MAX_TURN_WALL_CLOCK_BUDGET_MS).toBe(60 * 60 * SECOND)
-  })
-
-  // The duration string the step config takes, pinned against the number rather than merely
-  // written beside it: the field also accepts a bare number, so the two spellings must agree.
-  it('spells the step timeout as the same duration the number names', () => {
-    expect(AWAIT_EXIT_STEP_TIMEOUT).toBe(`${AWAIT_EXIT_STEP_TIMEOUT_MS / (60 * 60 * SECOND)} hours`)
   })
 })
 
@@ -175,7 +133,7 @@ describe('clampedTurnBudget', () => {
   })
 })
 
-describe('the sdk driver\'s attach rounds', () => {
+describe('attach rounds', () => {
   it('leaves a round\'s step a margin past the window it consumes frames for', () => {
     expect(ROUND_STEP_TIMEOUT).toBe(`${(ROUND_WINDOW_MS * 1.5) / (60 * SECOND)} minutes`)
   })

@@ -100,7 +100,6 @@ export function publishFrame(
 ): void {
   reportFrame(frame, 'seq' in effect ? effect.seq : undefined, context.input.onFrame)
   if (effect.kind === 'log') {
-    // The host's captured console output — the `cli` driver's stderr side channel, live.
     console.warn(`turn host ${effect.stream}: ${effect.line}`)
   }
   if (effect.kind === 'transcript') {

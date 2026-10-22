@@ -105,9 +105,8 @@ describe('waitForExit', () => {
   })
 
   /**
-   * `awaitTurn` races an unbounded `waitForExit()` inside a step that already allows a live turn
-   * six hours and is never retried, so a private cap here would fail a run whose turn was merely
-   * long. The clock leaps an hour per poll to prove no such cap exists.
+   * A private cap here would fail a run whose turn was merely long. The clock leaps an hour per
+   * poll to prove no such cap exists.
    */
   it('never expires a wait the caller put no bound on', async () => {
     const fake = fakeSandbox()

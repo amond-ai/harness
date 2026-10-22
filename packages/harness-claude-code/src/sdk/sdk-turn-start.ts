@@ -1,8 +1,7 @@
 /**
  * Starting one turn on the `sdk` driver: exec the host, wait for it to bind, connect, `start`.
  *
- * Four things happen here that do not happen on the `cli` path, and each is forced by the
- * bridge's own shape. The prompt travels in a frame rather than in argv, so it never appears in
+ * Four things happen here, and each is forced by the bridge's own shape. The prompt travels in a frame rather than in argv, so it never appears in
  * `listProcesses()`. The host must be *listening* before anything can be said to it, and `await
  * exec` only means the process started. A `start` is refused by a bridge that already has a turn
  * running, which is what makes an adopted host safe to re-enter. And the socket is closed again
@@ -17,8 +16,8 @@ import type { TurnHandle } from '../turn-driver'
 import type { TurnChannel } from './sdk-channel'
 import { describeCause as describe, maskCredentialLines } from '@amond-ai/redact'
 import { SandboxNoExitRecordError } from '@amond-ai/sandbox'
-import { INTERRUPT_SETTLE_TIMEOUT_MS, isLive, KILL_SETTLE_TIMEOUT_MS } from '../cli-turn-kill'
 import { iterateStream } from '../process-ndjson'
+import { INTERRUPT_SETTLE_TIMEOUT_MS, isLive, KILL_SETTLE_TIMEOUT_MS } from '../turn-kill'
 import { readBridgeAnnouncement } from './sdk-bridge-config'
 import { createTurnChannel } from './sdk-channel'
 import { classifyFrame } from './sdk-frames'
@@ -42,9 +41,8 @@ export interface SdkStartInput {
   prompt: string
   permissionMode: PermissionMode
   /**
-   * Which settings files the turn reads, as the consumer names them — the same list the `cli`
-   * argv passes to `--setting-sources`, injected for the reason `TurnDriverRun.settingSources`
-   * states.
+   * Which settings files the turn reads, as the consumer names them, injected for the reason
+   * `TurnDriverRun.settingSources` states.
    */
   settingSources: readonly string[]
   /**
@@ -214,8 +212,8 @@ async function awaitStartAck(channel: TurnChannel, processId: string): Promise<v
  *
  * `permissionMode` passes straight through: `PERMISSION_MODES` in `env.ts` and the host's
  * `sdkPermissionModeSchema` are the same six names, so there is no mapping to get wrong and no
- * Worker-only mode to translate. `settingSources` is the same list the `cli` argv names, for the
- * same reasons stated there — passed in by the consumer rather than decided here.
+ * Worker-only mode to translate. `settingSources` is passed in by the consumer rather than decided
+ * here.
  *
  * `approvalPolicy: 'deny'` is D6 layer 1, and it is the only posture a headless turn can take:
  * `canUseTool` may pend indefinitely, and a turn waiting on a human who is not there never ends.
@@ -391,13 +389,13 @@ function isAnnounced(stdout: string, host: BootingHost): boolean {
  * The kill is followed by a wait for the exit, because a settled kill RPC only says the signal
  * left: a caller that retries on the boot error would otherwise start a host beside one still
  * shutting down. The wait runs after a failed kill too — one that timed out may still land — and
- * has the same {@link KILL_SETTLE_TIMEOUT_MS} bound the `cli` ladder gives its own post-kill wait;
+ * has the same {@link KILL_SETTLE_TIMEOUT_MS} bound the kill ladder gives its own post-kill wait;
  * a host that outlasts it is reported rather than waited on.
  *
  * `SandboxNoExitRecordError` says the wrapper left no `$?`, which is usually a stopped host but
  * not always one: a backend that could not aim the kill (Daytona, with no readable pid record)
  * ends the session instead, and the wait rejects the same way. So it is believed only once the
- * status agrees, the re-read the `cli` ladder makes in `confirmDead`.
+ * status agrees, the re-read the kill ladder makes in `confirmDead`.
  */
 async function stopHungHost(process: SandboxProcessHandle): Promise<void> {
   try {

@@ -69,8 +69,8 @@ export interface LocalSessionOptions {
    * The environment a command starts with, before `SandboxExecOptions.env` is layered on.
    *
    * Defaults to the orchestrator's own, and that default is a decision rather than a
-   * convenience: the `cli` turn driver execs a `claude` the machine already has, so a spawn
-   * without `PATH` would not find it. It is also one more way this backend is not a sandbox —
+   * convenience: a turn execs the machine's own `node`, so a spawn without `PATH` would not
+   * find it. It is also one more way this backend is not a sandbox —
    * a command inherits every credential in the environment that started the app. Pass an
    * explicit map to narrow it.
    */

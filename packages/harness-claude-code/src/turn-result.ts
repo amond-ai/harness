@@ -11,8 +11,8 @@
  * In the seam rather than in the orchestrator because *both* readers of the message are here now:
  * the settle-time replay is the consumer's — it reads this parse through its own re-export — and
  * the attempt loop's is the driver's. A turn's own verdict has to reach the loop that decides
- * whether to run another turn, and that decision is made from the {@link TurnVerdict} both drivers
- * now produce while they watch (#376).
+ * whether to run another turn, and that decision is made from the {@link TurnVerdict} the driver
+ * produces while it watches (#376).
  *
  * Two properties this parse has to keep, both of them about *not* being brittle:
  *

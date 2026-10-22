@@ -1,5 +1,5 @@
 /**
- * Stopping a `cli` turn: SIGINT first, the backend's default kill on escalation, and the
+ * Stopping a turn's process: SIGINT first, the backend's default kill on escalation, and the
  * re-check that decides whether another attempt may safely start.
  *
  * Split from the driver so the escalation ladder reads as one thing. {@link isLive} lives here

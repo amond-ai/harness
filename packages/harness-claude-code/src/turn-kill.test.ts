@@ -1,7 +1,7 @@
 import type { ProcessExit, ProcessStatus, SandboxProcessHandle, SandboxSession, WaitForExitOptions } from '@amond-ai/sandbox'
 import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@amond-ai/sandbox'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from './cli-turn-kill'
+import { INTERRUPT_SETTLE_TIMEOUT_MS, KILL_SETTLE_TIMEOUT_MS, killTurn } from './turn-kill'
 
 const SIGINT = 2
 
