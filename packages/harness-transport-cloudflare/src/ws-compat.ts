@@ -58,6 +58,7 @@ export interface WebSocketClassOptions {
 export interface WsClient extends WsLike {}
 
 type Handler = (...args: any[]) => void
+type RoutedProtocol = 'http' | 'https' | 'ws' | 'wss'
 
 /**
  * Where a URL sends the connect, and what is left of it once the tag is gone.
@@ -66,7 +67,7 @@ type Handler = (...args: any[]) => void
  * so there is nothing to take back out. A tagged one names the sandbox whose binding opens
  * the socket, and the tag is stripped so the bridge never sees this repo's own protocol.
  */
-function routeFor(
+export function routeFor(
   url: string,
   headers?: Record<string, string>,
 ): { sandboxId: string | null, endpoint: BridgeEndpoint } {
@@ -77,6 +78,22 @@ function routeFor(
   }
   target.searchParams.delete(SANDBOX_ID_PARAM)
   return { sandboxId, endpoint: { url: target.toString(), headers } }
+}
+
+/**
+ * The URL a backend hands back for a port the transport has to route through a sandbox.
+ *
+ * The host is a placeholder: {@link routeFor} reads the sandbox off the tag, and the socket is
+ * opened through that sandbox's binding rather than dialed. An empty id would read back as an
+ * untagged URL and be dialed, so it is refused here.
+ */
+export function sandboxRoutedUrl(sandboxId: string, port: number, protocol: RoutedProtocol = 'http'): string {
+  if (sandboxId === '') {
+    throw new Error('sandboxRoutedUrl needs a sandbox id: an empty one reads back as untagged')
+  }
+  const url = new URL(`${protocol}://localhost:${String(port)}/`)
+  url.searchParams.set(SANDBOX_ID_PARAM, sandboxId)
+  return url.toString()
 }
 
 /** A `WsLike` that records instead of acting, until there is a socket to replay onto. */

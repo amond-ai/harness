@@ -1,6 +1,6 @@
 import type { WsLike } from '@amond-ai/harness-transport'
 import { describe, expect, it } from 'vitest'
-import { createWebSocketClass, SANDBOX_ID_PARAM } from './ws-compat'
+import { createWebSocketClass, routeFor, SANDBOX_ID_PARAM, sandboxRoutedUrl } from './ws-compat'
 
 function stubSocket() {
   const handlers = new Map<string, ((...args: any[]) => void)[]>()
@@ -186,5 +186,22 @@ describe('createWebSocketClass', () => {
     socket.terminate()
     await settle()
     expect(stub.terminated()).toBe(1)
+  })
+})
+
+describe('sandboxRoutedUrl', () => {
+  it('round-trips through routeFor to the sandbox id and an untagged endpoint', () => {
+    const { sandboxId, endpoint } = routeFor(sandboxRoutedUrl('run-1', 3000, 'ws'))
+
+    expect(sandboxId).toBe('run-1')
+    expect(endpoint.url).toBe('ws://localhost:3000/')
+  })
+
+  it('defaults to http', () => {
+    expect(new URL(sandboxRoutedUrl('run-1', 8080)).protocol).toBe('http:')
+  })
+
+  it('refuses an empty id, which would read back as untagged', () => {
+    expect(() => sandboxRoutedUrl('', 3000)).toThrow()
   })
 })
