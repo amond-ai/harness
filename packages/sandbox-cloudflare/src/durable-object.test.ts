@@ -103,9 +103,11 @@ describe('startProcess', () => {
     const { container, storage, session } = fakeSandbox()
     const exec = container.exec
     let keysAtLaunch: string[] = []
+    let alarmAtLaunch: number | null = null
     container.exec = async (argv, options) => {
       if (argv[2] === RUN) {
         keysAtLaunch = [...storage.data.keys()]
+        alarmAtLaunch = storage.alarm
         throw new Error('exec failed')
       }
       return exec(argv, options)
@@ -113,6 +115,7 @@ describe('startProcess', () => {
 
     await expect(session().exec(['claude'])).rejects.toThrow('exec failed')
     expect(keysAtLaunch).toEqual(['process:run-1'])
+    expect(alarmAtLaunch).not.toBeNull()
     expect(storage.data.has('process:run-1')).toBe(false)
     expect(container.processes.size).toBe(0)
   })

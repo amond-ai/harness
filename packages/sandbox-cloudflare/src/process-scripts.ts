@@ -53,13 +53,16 @@ group_alive() {
  * started, leaving its fields in `$pid`, `$boot` and `$start`. The start time catches a pid
  * reused within one boot. A leader that has exited — even between two reads here — has no `/proc`
  * entry to compare, and its pid cannot be reused while its group still holds it as a pgid. A
- * two-field `pid` file from before the start time was recorded is checked by boot id alone.
+ * two-field `pid` file from before the start time was recorded is checked by boot id alone. A
+ * record naming pid 0 or 1 never passes: no command's leader is PID 1 in a container, so such a
+ * record is corrupt or forged, and KILL would signal `-1` — every process.
  *
  * `supervised DIR` succeeds while the RUN that owns DIR is still alive, without touching `$pid`.
  */
 const CURRENT = `${PROC}
 current() {
   read -r pid boot start 2>/dev/null <"$1" &&
+    [ "$pid" -gt 1 ] 2>/dev/null &&
     [ "$boot" = "$(cat /proc/sys/kernel/random/boot_id)" ] &&
     { [ -z "$start" ] || { now=$(start_of "$pid"); [ -z "$now" ] || [ "$now" = "$start" ]; }; }
 }
@@ -173,7 +176,7 @@ export const KILL = `${CURRENT}
 dir=$1
 if current "$dir/pid" && group_alive "$pid"; then kill -s "$2" -- "-$pid"; exit; fi
 [ -e "$dir/exit-code" ] && exit ${KILL_EXITED}
-supervised "$dir" && exit ${KILL_EXITED}
+[ -e "$dir/pid" ] && supervised "$dir" && exit ${KILL_EXITED}
 exit ${KILL_NO_PID}`
 
 /** Linux signal numbers to the names `kill -s` takes. */

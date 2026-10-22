@@ -195,8 +195,9 @@ export class HarnessSandbox<Env = unknown> extends DurableObject<Env> implements
       })
     }
     catch (cause) {
-      await this.run(container, ['rm', '-rf', dir]).catch(() => undefined)
+      // Key first: once the dir is gone a concurrent start may reuse the id, and keep its key.
       await this.ctx.storage.delete(key).catch(() => undefined)
+      await this.run(container, ['rm', '-rf', dir]).catch(() => undefined)
       throw cause
     }
 
