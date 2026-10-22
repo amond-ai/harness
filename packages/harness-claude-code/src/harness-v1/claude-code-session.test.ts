@@ -379,11 +379,11 @@ describe('the claude-code harness under HarnessAgent', () => {
       ...host.provider,
       session: id => ({
         ...host.provider.session(id),
-        readFile: (async (path: string) => {
+        readFile: (async (path: string, options?: never) => {
           if (path.endsWith('.jsonl')) {
             throw new Error('no such file')
           }
-          return host.provider.session(id).readFile(path)
+          return host.provider.session(id).readFile(path, options)
         }) as never,
       }),
     }

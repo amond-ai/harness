@@ -180,7 +180,19 @@ function fakeProvider(kills: string[]): SandboxProvider {
       files.set(path, content)
     },
     exists: async (path: string) => ({ exists: files.has(path) }),
-    readFile: async (path: string) => ({ content: files.get(path) ?? '' }),
+    readFile: async (path: string, options?: { encoding?: string }) => {
+      const content = files.get(path) ?? ''
+      return options?.encoding === 'none'
+        ? {
+            content: new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode(content))
+                controller.close()
+              },
+            }),
+          }
+        : { content }
+    },
     getProcess: async (id: string) => processes.get(id) ?? null,
     listProcesses: async () => await Promise.all([...processes.values()].map(async handle => await handle.status())),
   } as unknown as SandboxSession
