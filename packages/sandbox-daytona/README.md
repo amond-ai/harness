@@ -119,3 +119,10 @@ Read by `apps/cf-orchestrator`'s `sandboxProvider`, not by this package:
 
 The npm package is **`@daytona/sdk`**, not `@daytonaio/sdk` — the latter is deprecated in favour of
 it at the same version, with the same API.
+
+## Upstream
+
+The AI SDK tracks a first-party Daytona provider in
+[vercel/ai#17641](https://github.com/vercel/ai/issues/17641).
+This repository tracks the upstream provider issues in
+[amond-ai/harness#64](https://github.com/amond-ai/harness/issues/64).

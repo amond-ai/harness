@@ -45,6 +45,16 @@ package. On Cloudflare the consuming Worker supplies it out of band, by intercep
 container's egress with `Sandbox.outboundByHost`; see
 [`@amond-ai/sandbox`](../sandbox#what-a-backend-must-supply).
 
+## Upstream
+
+The AI SDK tracks a first-party Cloudflare provider in
+[vercel/ai#17638](https://github.com/vercel/ai/issues/17638). Its bridge rule asks for a URL a
+stock `ws` client can dial, and a Cloudflare sandbox's private port gives none, so this package
+backs the bridge adapters only together with
+[`@amond-ai/harness-transport-cloudflare`](../harness-transport-cloudflare).
+This repository tracks the upstream provider issues in
+[amond-ai/harness#64](https://github.com/amond-ai/harness/issues/64).
+
 ## License
 
 Apache-2.0. See [LICENSE](./LICENSE).
