@@ -62,6 +62,11 @@ export const claudeCodeLifecycleStateSchema = z.object({
   round: claudeCodeRoundSchema.optional(),
   /** Present once a terminal frame named artifacts — what a later turn resumes the session by. */
   session: claudeCodeTurnSessionSchema.optional(),
+  /**
+   * Set once any turn has started on this session, so a history read can tell "never ran" from
+   * "ran but its transcript was never reported".
+   */
+  turnStarted: z.literal(true).optional(),
   attempt: z.number(),
 })
 

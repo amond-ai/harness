@@ -3,7 +3,8 @@
  *
  * Pure on purpose: the session fetches the file, this turns text into messages, so every rule
  * below is testable without a sandbox. The cursor is a count of complete lines, which is stable
- * because the CLI only ever appends, plus the `uuid` of the last counted line (`lines:<n>:<uuid>`)
+ * because the CLI only ever appends, plus the `uuid` of the last counted line that has one
+ * (`lines:<n>:<uuid>`; metadata lines carry none)
  * so a transcript replaced at the same path is told apart from one that merely grew. A trailing
  * segment with no newline is a line still being written, so it is neither parsed nor counted; the
  * next read picks it up whole.
@@ -67,10 +68,15 @@ function parseCursor(since: string): { count: number, fingerprint: string | unde
   return { count: Number(match[1]), fingerprint: match[2] }
 }
 
-/** The `uuid` of the line at `index`, when it parses and carries one a cursor can hold. */
+/** The `uuid` of the last line at or before `index` that carries one a cursor can hold. */
 function uuidAt(lines: readonly string[], index: number): string | undefined {
-  const uuid = index >= 0 && index < lines.length ? parseLine(lines[index]!)?.uuid : undefined
-  return typeof uuid === 'string' && FINGERPRINT_PATTERN.test(uuid) ? uuid : undefined
+  for (let i = Math.min(index, lines.length - 1); i >= 0; i--) {
+    const uuid = parseLine(lines[i]!)?.uuid
+    if (typeof uuid === 'string' && FINGERPRINT_PATTERN.test(uuid)) {
+      return uuid
+    }
+  }
+  return undefined
 }
 
 function cursorFor(lines: readonly string[]): string {
@@ -180,8 +186,8 @@ function assistantParts(entry: Json): AssistantPart[] {
  * Messages recorded after `since` (all of them when it is undefined) and the cursor to pass back
  * for what follows.
  *
- * A `since` past the current end, or one whose fingerprint is not the `uuid` of the line it
- * counted to, means this is not the transcript the cursor came from (the file was replaced or
+ * A `since` past the current end, or one whose fingerprint is not the `uuid` of the last line it
+ * counted that has one, means this is not the transcript the cursor came from (the file was replaced or
  * truncated; a replacement that grew past the old count shows only in the fingerprint). Replaying
  * from the start would hand the caller messages it may already hold, and guessing is worse, so the
  * read is empty and the cursor jumps to the real end. A cursor without a fingerprint is still

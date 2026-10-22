@@ -155,8 +155,25 @@ describe('transcriptHistory', () => {
     ])
   })
 
-  it('accepts a cursor without a fingerprint and omits one the last line cannot give', () => {
-    const text = jsonl(user('one'), { type: 'user', message: { content: 'no uuid' } })
+  it('fingerprints the last counted line that has a uuid, past trailing metadata lines', () => {
+    const original = jsonl(user('one', { uuid: 'old-1' }), user('two', { uuid: 'old-2' }), { type: 'last-prompt' })
+    const { cursor } = transcriptHistory(original, undefined)
+    const replaced = jsonl(
+      user('a', { uuid: 'new-1' }),
+      user('b', { uuid: 'new-2' }),
+      user('c', { uuid: 'new-3' }),
+      user('d', { uuid: 'new-4' }),
+    )
+
+    expect(cursor).toBe('lines:3:old-2')
+    expect(transcriptHistory(replaced, cursor)).toEqual({ messages: [], cursor: 'lines:4:new-4' })
+    expect(transcriptHistory(original + jsonl(user('three', { uuid: 'old-3' })), cursor).messages).toMatchObject([
+      { content: [{ text: 'three' }] },
+    ])
+  })
+
+  it('accepts a cursor without a fingerprint and omits one when no counted line has a uuid', () => {
+    const text = jsonl({ type: 'user', message: { content: 'first' } }, { type: 'user', message: { content: 'no uuid' } })
 
     expect(transcriptHistory(text, 'lines:1').messages).toMatchObject([{ content: [{ text: 'no uuid' }] }])
     expect(transcriptHistory(text, undefined).cursor).toBe('lines:2')
