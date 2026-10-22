@@ -266,6 +266,34 @@ describe('the claude-code harness under HarnessAgent', () => {
     await session.destroy()
   })
 
+  it('reports history as unavailable while a turn runs and its transcript is not reported yet', async () => {
+    const agent = new HarnessAgent({ harness: harnessOver(fakeHost()), permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    const stream = await agent.stream({ session, prompt: 'say hello' })
+    await stream.textStream[Symbol.asyncIterator]().next()
+
+    const error = await session.readHistory().catch((caught: unknown) => caught)
+
+    expect(HarnessHistoryUnavailableError.isInstance(error)).toBe(true)
+    await session.suspendTurn()
+  })
+
+  it('reports history as unavailable when a turn kept a session id but no transcript', async () => {
+    const host = createFakeTurnHost({
+      frames: () => turnFrames().map(frame => frame.type === 'finish'
+        ? { ...frame, sessionArtifacts: { sessionId: 'sess-1', journalPath: '/workspace/.turn-host/s1/1/event-log.ndjson' } }
+        : frame),
+    })
+    const agent = new HarnessAgent({ harness: harnessOver(host), permissionMode: 'allow-all' })
+    const session = await agent.createSession({ sessionId: 's1', sandboxSession: SANDBOX_SESSION })
+    await agent.generate({ session, prompt: 'say hello' })
+
+    const error = await session.readHistory().catch((caught: unknown) => caught)
+
+    expect(HarnessHistoryUnavailableError.isInstance(error)).toBe(true)
+    await session.destroy()
+  })
+
   it('reports history as unavailable when the transcript cannot be read from here', async () => {
     const host = fakeHost()
     const sandboxes: SandboxProvider = {

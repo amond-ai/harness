@@ -3,13 +3,21 @@
  *
  * Pure on purpose: the session fetches the file, this turns text into messages, so every rule
  * below is testable without a sandbox. The cursor is a count of complete lines, which is stable
- * because the CLI only ever appends. A trailing segment with no newline is a line still being
- * written, so it is neither parsed nor counted; the next read picks it up whole.
+ * because the CLI only ever appends, plus the `uuid` of the last counted line (`lines:<n>:<uuid>`)
+ * so a transcript replaced at the same path is told apart from one that merely grew. A trailing
+ * segment with no newline is a line still being written, so it is neither parsed nor counted; the
+ * next read picks it up whole.
  *
- * Which lines are conversation mirrors the Agent SDK's own `getSessionMessages` filter, so a
- * history read and a resumed session agree on what was said. The CLI writes one content block per
- * line for a single API message, so consecutive assistant lines sharing a `message.id` are one
- * assistant message here.
+ * Which lines are conversation applies the Agent SDK's per-line filters in file order: user and
+ * assistant entries only, no sidechain, no team, no meta, and compact summaries dropped. It does
+ * not rebuild the `parentUuid` chain that `getSessionMessages` walks, so a transcript with rewound
+ * or forked branches would show the abandoned branch too. This bridge never rewinds or forks a
+ * session (no `resumeSessionAt`, no `forkSession`), so file order is the conversation.
+ *
+ * The CLI writes one content block per line for a single API message, so consecutive assistant
+ * lines sharing a `message.id` are one assistant message here. A read can end between two lines of
+ * one message; the next read then returns the rest as a separate assistant message, because
+ * merging across reads would mean holding back or repeating the tail.
  */
 import type { HarnessV1Message, HarnessV1ReadHistoryResult } from '@ai-sdk/harness'
 
@@ -48,12 +56,26 @@ function parseLine(line: string): Json | undefined {
   }
 }
 
-function parseCursor(since: string): number {
-  const digits = since.startsWith(CURSOR_PREFIX) ? since.slice(CURSOR_PREFIX.length) : ''
-  if (!/^\d+$/.test(digits)) {
+const CURSOR_PATTERN = /^lines:(\d+)(?::([\w-]+))?$/
+const FINGERPRINT_PATTERN = /^[\w-]+$/
+
+function parseCursor(since: string): { count: number, fingerprint: string | undefined } {
+  const match = CURSOR_PATTERN.exec(since)
+  if (match === null) {
     throw new Error(`Invalid claude-code history cursor: ${JSON.stringify(since)}`)
   }
-  return Number(digits)
+  return { count: Number(match[1]), fingerprint: match[2] }
+}
+
+/** The `uuid` of the line at `index`, when it parses and carries one a cursor can hold. */
+function uuidAt(lines: readonly string[], index: number): string | undefined {
+  const uuid = index >= 0 && index < lines.length ? parseLine(lines[index]!)?.uuid : undefined
+  return typeof uuid === 'string' && FINGERPRINT_PATTERN.test(uuid) ? uuid : undefined
+}
+
+function cursorFor(lines: readonly string[]): string {
+  const uuid = uuidAt(lines, lines.length - 1)
+  return uuid === undefined ? `${CURSOR_PREFIX}${lines.length}` : `${CURSOR_PREFIX}${lines.length}:${uuid}`
 }
 
 function blocksOf(entry: Json): Json[] {
@@ -158,18 +180,20 @@ function assistantParts(entry: Json): AssistantPart[] {
  * Messages recorded after `since` (all of them when it is undefined) and the cursor to pass back
  * for what follows.
  *
- * A `since` past the current end means this is not the transcript the cursor came from (the file
- * was replaced or truncated). Replaying from the start would hand the caller messages it may
- * already hold, and guessing is worse, so the read is empty and the cursor jumps to the real end.
- * A `since` that is not a cursor at all is a caller bug and throws.
+ * A `since` past the current end, or one whose fingerprint is not the `uuid` of the line it
+ * counted to, means this is not the transcript the cursor came from (the file was replaced or
+ * truncated; a replacement that grew past the old count shows only in the fingerprint). Replaying
+ * from the start would hand the caller messages it may already hold, and guessing is worse, so the
+ * read is empty and the cursor jumps to the real end. A cursor without a fingerprint is still
+ * accepted and is checked by count alone. A `since` that is not a cursor at all is a caller bug
+ * and throws.
  */
 export function transcriptHistory(text: string, since: string | undefined): HarnessV1ReadHistoryResult {
-  const start = since === undefined ? 0 : parseCursor(since)
+  const { count: start, fingerprint } = since === undefined ? { count: 0, fingerprint: undefined } : parseCursor(since)
   const lines = text.split('\n')
   lines.pop()
-  const end = lines.length
-  if (start > end) {
-    return { messages: [], cursor: `${CURSOR_PREFIX}${end}` }
+  if (start > lines.length || (fingerprint !== undefined && uuidAt(lines, start - 1) !== fingerprint)) {
+    return { messages: [], cursor: cursorFor(lines) }
   }
   const entries = lines.map(parseLine)
   const names = toolNamesById(entries)
@@ -200,5 +224,5 @@ export function transcriptHistory(text: string, since: string | undefined): Harn
     }
     openId = id
   }
-  return { messages, cursor: `${CURSOR_PREFIX}${end}` }
+  return { messages, cursor: cursorFor(lines) }
 }

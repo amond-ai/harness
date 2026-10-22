@@ -22,7 +22,7 @@ describe('transcriptHistory', () => {
 
     expect(result).toEqual({
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hello there' }], at: '2026-01-01T00:00:00.000Z' }],
-      cursor: 'lines:1',
+      cursor: 'lines:1:u',
     })
   })
 
@@ -105,7 +105,7 @@ describe('transcriptHistory', () => {
       { role: 'user', content: [{ text: 'kept' }] },
       { role: 'tool', content: [{ toolName: 'unknown', output: { type: 'text', value: '' } }] },
     ])
-    expect(result.cursor).toBe('lines:11')
+    expect(result.cursor).toBe('lines:11:u')
   })
 
   it('returns only later messages for a cursor but resolves a tool name from before it', () => {
@@ -118,8 +118,8 @@ describe('transcriptHistory', () => {
 
     const next = transcriptHistory(head + tail, first.cursor)
 
-    expect(first.cursor).toBe('lines:2')
-    expect(next.cursor).toBe('lines:3')
+    expect(first.cursor).toBe('lines:2:a')
+    expect(next.cursor).toBe('lines:3:u')
     expect(next.messages).toMatchObject([
       { role: 'tool', content: [{ toolCallId: 't1', toolName: 'grep' }] },
     ])
@@ -132,20 +132,41 @@ describe('transcriptHistory', () => {
     const result = transcriptHistory(complete + partial, undefined)
 
     expect(result.messages).toHaveLength(1)
-    expect(result.cursor).toBe('lines:1')
+    expect(result.cursor).toBe('lines:1:u')
     expect(transcriptHistory(`${complete}${partial}\n`, result.cursor).messages).toMatchObject([
       { content: [{ text: 'two' }] },
     ])
   })
 
   it('answers a cursor beyond the end with no messages and the real end', () => {
-    expect(transcriptHistory(jsonl(user('one')), 'lines:9')).toEqual({ messages: [], cursor: 'lines:1' })
+    expect(transcriptHistory(jsonl(user('one')), 'lines:9')).toEqual({ messages: [], cursor: 'lines:1:u' })
     expect(transcriptHistory('', 'lines:1')).toEqual({ messages: [], cursor: 'lines:0' })
+  })
+
+  it('detects a replaced transcript that grew past the old cursor by its fingerprint', () => {
+    const before = jsonl(user('one', { uuid: 'old-1' }), user('two', { uuid: 'old-2' }))
+    const { cursor } = transcriptHistory(before, undefined)
+    const replaced = jsonl(user('x', { uuid: 'new-1' }), user('y', { uuid: 'new-2' }), user('z', { uuid: 'new-3' }))
+
+    expect(cursor).toBe('lines:2:old-2')
+    expect(transcriptHistory(replaced, cursor)).toEqual({ messages: [], cursor: 'lines:3:new-3' })
+    expect(transcriptHistory(before + jsonl(user('three', { uuid: 'old-3' })), cursor).messages).toMatchObject([
+      { content: [{ text: 'three' }] },
+    ])
+  })
+
+  it('accepts a cursor without a fingerprint and omits one the last line cannot give', () => {
+    const text = jsonl(user('one'), { type: 'user', message: { content: 'no uuid' } })
+
+    expect(transcriptHistory(text, 'lines:1').messages).toMatchObject([{ content: [{ text: 'no uuid' }] }])
+    expect(transcriptHistory(text, undefined).cursor).toBe('lines:2')
   })
 
   it('throws on a cursor that is not in this format', () => {
     expect(() => transcriptHistory('', 'cursor-7')).toThrow(/cursor-7/)
     expect(() => transcriptHistory('', 'lines:-1')).toThrow(/lines:-1/)
+    expect(() => transcriptHistory('', 'lines:1:')).toThrow(/lines:1:/)
+    expect(() => transcriptHistory('', 'lines:1:a:b')).toThrow(/lines:1:a:b/)
     expect(() => transcriptHistory('', '')).toThrow(/Invalid claude-code history cursor/)
   })
 })

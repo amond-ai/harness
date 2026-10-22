@@ -29,7 +29,7 @@ import type { PermissionMode } from '../permission-mode'
 import type { AttemptResult, TurnDriver, TurnHandle, TurnResume, TurnRoundState, TurnSession } from '../turn-driver'
 import type { TurnEnding } from './frame-to-part'
 import type { ClaudeCodeLifecycleState, ClaudeCodeRoundCursor, ClaudeCodeTurnHandle } from './lifecycle-state'
-import { HarnessCapabilityUnsupportedError } from '@ai-sdk/harness'
+import { HarnessCapabilityUnsupportedError, HarnessHistoryUnavailableError } from '@ai-sdk/harness'
 import { clampedTurnBudget, maxAttachRounds } from '../watchdog'
 import { frameToPart } from './frame-to-part'
 import { readTranscript } from './read-transcript'
@@ -323,12 +323,22 @@ export function createClaudeCodeSession(input: ClaudeCodeSessionInput): HarnessV
     },
 
     /**
-     * The conversation is the CLI's JSONL transcript in the sandbox. No path yet means no turn has
-     * run: an empty read, not an unavailable one.
+     * The conversation is the CLI's JSONL transcript in the sandbox. No path with no turn run is an
+     * empty read; no path with a turn running (its terminal frame has not reported the transcript)
+     * or a session id but no transcript (`persistSession: false`) is unavailable, not empty.
      */
     async doReadHistory({ since }) {
       usable()
       const path = session?.transcriptPath
+      if (path === undefined && (turnOpen || session?.sessionId !== undefined)) {
+        const why = turnOpen
+          ? 'the running turn has not reported its transcript yet'
+          : 'the session kept no transcript'
+        throw new HarnessHistoryUnavailableError({
+          harnessId: input.harnessId,
+          message: `claude-code history for session ${input.sessionId} is not available: ${why}`,
+        })
+      }
       const text = path === undefined ? '' : await readTranscript({ ...input, path })
       return transcriptHistory(text, since)
     },
