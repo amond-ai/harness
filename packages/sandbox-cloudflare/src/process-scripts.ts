@@ -57,9 +57,10 @@ current() {
 }`
 
 /**
- * `$1` is the directory, `$2` the timeout in seconds or empty, `$3` the number of `NAME=VALUE`
- * pairs that follow, and the rest is the argv. The pairs are exported only in the shell that
- * `exec`s the command, so the supervisor keeps the container's own environment.
+ * `$1` is the directory, `$2` the timeout in seconds or empty, and the rest is the argv. The
+ * caller's env arrives in the environment, never in argv, where `ps` would show it. The supervisor
+ * runs on a fixed `PATH` so a caller's `PATH` cannot hide `setsid`, `sleep` or `mv` from it; the
+ * inherited one is restored just before the command is `exec`ed.
  *
  * The exit is published once the whole group is gone, not when its leader exits: ProcessStatus
  * describes the supervised group, so a command that detached a child is `running` — and
@@ -71,6 +72,8 @@ current() {
  */
 export const RUN = `${PROC}
 dir=$1; seconds=$2; shift 2
+cmd_path=\${PATH-}
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; export PATH
 if [ -n "$seconds" ]; then
   (
     sleep "$seconds"
@@ -86,10 +89,10 @@ if [ -n "$seconds" ]; then
     [ -e "$dir/exit-code" ] || kill -s KILL -- "-$pid"
   ) >/dev/null 2>&1 &
 fi
-setsid sh -c 'd=$0; n=$1; shift
+setsid sh -c 'd=$0; p=$1; shift
 echo "$$ $(cat /proc/sys/kernel/random/boot_id) $(cut -d" " -f22 /proc/$$/stat)" >"$d/pid"
-while [ "$n" -gt 0 ]; do export "$1"; shift; n=$((n - 1)); done
-exec "$@"' "$dir" "$@" >"$dir/stdout.log" 2>"$dir/stderr.log"
+PATH=$p; export PATH
+exec "$@"' "$dir" "$cmd_path" "$@" >"$dir/stdout.log" 2>"$dir/stderr.log"
 status=$?
 if read -r pid boot start 2>/dev/null <"$dir/pid"; then
   while group_alive "$pid"; do sleep 0.2; done

@@ -167,10 +167,9 @@ export class HarnessSandbox<Env = unknown> extends DurableObject<Env> implements
     if (command.length === 0) {
       throw new Error('cannot start an empty argv: there is no command to run')
     }
-    const env = Object.entries(options?.env ?? {})
-    const badName = env.find(([name]) => !ENV_NAME.test(name))
+    const badName = Object.keys(options?.env ?? {}).find(name => !ENV_NAME.test(name))
     if (badName !== undefined) {
-      throw new Error(`invalid environment variable name '${badName[0]}': expected [A-Za-z_][A-Za-z0-9_]*`)
+      throw new Error(`invalid environment variable name '${badName}': expected [A-Za-z_][A-Za-z0-9_]*`)
     }
     await this.ensureRunning()
     const container = this.container
@@ -181,13 +180,11 @@ export class HarnessSandbox<Env = unknown> extends DurableObject<Env> implements
     }
     const seconds = options?.timeout === undefined ? '' : String(Math.max(0, options.timeout) / 1000)
     try {
-      // Ignoring the output is what lets the process outlive this request.
-      // The caller's env goes to the command alone, as `NAME=VALUE` arguments RUN exports just
-      // before `exec`: on the exec options it would reach the supervising shell too, and a `PATH`
-      // override could leave it unable to find `setsid`, `sleep` or `mv`.
-      const pairs = env.map(([name, value]) => `${name}=${value}`)
-      await container.exec(['sh', '-c', RUN, 'sh', dir, seconds, String(pairs.length), ...pairs, ...command], {
+      // Ignoring the output is what lets the process outlive this request. The env travels in the
+      // environment, not argv, so its values stay out of `ps`; RUN shields itself from its `PATH`.
+      await container.exec(['sh', '-c', RUN, 'sh', dir, seconds, ...command], {
         cwd: options?.cwd,
+        env: options?.env,
         stdout: 'ignore',
         stderr: 'ignore',
       })

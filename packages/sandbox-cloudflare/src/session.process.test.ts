@@ -8,7 +8,7 @@ vi.mock('@cloudflare/sandbox', async () => (await import('./fake-workers')).sand
 describe('exec', () => {
   it('starts the container and resolves with a handle whose status names the recorded pid', async () => {
     const { container, session } = fakeSandbox()
-    const handle = await session().exec(['claude', '-p', 'hi'], { cwd: '/workspace', env: { CI: '1' } })
+    const handle = await session().exec(['claude', '-p', 'hi'], { cwd: '/workspace', env: { CI: '1', TOKEN: 's3cret' } })
 
     expect(container.start).toHaveBeenCalledWith({
       image: 'registry.example/sandbox:1',
@@ -25,8 +25,9 @@ describe('exec', () => {
       state: 'running',
     })
     const run = container.execs.find(({ argv }) => argv[2] === RUN)!
-    expect(run.argv.slice(4)).toEqual([`${PROCESS_ROOT}/run-1`, '', '1', 'CI=1', 'claude', '-p', 'hi'])
-    expect(run.options).toEqual({ cwd: '/workspace', stdout: 'ignore', stderr: 'ignore' })
+    expect(run.argv.slice(4)).toEqual([`${PROCESS_ROOT}/run-1`, '', 'claude', '-p', 'hi'])
+    expect(run.argv.some(arg => arg.includes('s3cret'))).toBe(false)
+    expect(run.options).toEqual({ cwd: '/workspace', env: { CI: '1', TOKEN: 's3cret' }, stdout: 'ignore', stderr: 'ignore' })
   })
 
   it('rejects an environment variable name the shell could not export, before starting anything', async () => {
