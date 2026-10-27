@@ -224,7 +224,7 @@ export function journalledScript(
   return [
     `${SCRIPT_OPEN}${journalIdOf(paths)}${SCRIPT_OPEN_CLOSE}${pgidRecord(paths)}`
     + ` ; ${ARGV_OPEN}${quoteArgv(argv)}${ARGV_CLOSE}${redirection(paths)} & __c=$!`,
-    `printf '%s' "$__c" > ${quoteArg(paths.pid)}`,
+    `printf '%s' "$__c" > ${quoteArg(paths.pid, 'the pid journal path')}`,
     ...watchdog(paths, timeoutMs),
     `wait $__c`,
     `__e=$?`,
@@ -255,7 +255,7 @@ function reapAfterTimeout(paths: JournalPaths, timeoutMs?: number): string[] {
   if (timeoutMs === undefined) {
     return []
   }
-  return [`[ -f ${quoteArg(paths.timeout)} ] && kill -KILL -$$ 2> /dev/null`]
+  return [`[ -f ${quoteArg(paths.timeout, 'the timeout marker path')} ] && kill -KILL -$$ 2> /dev/null`]
 }
 
 /**
@@ -267,7 +267,7 @@ function reapAfterTimeout(paths: JournalPaths, timeoutMs?: number): string[] {
  * reason: every line after it can fail and still leave the group killable.
  */
 function pgidRecord(paths: JournalPaths): string {
-  return `printf '%s' "$$" > ${quoteArg(paths.pgid)}`
+  return `printf '%s' "$$" > ${quoteArg(paths.pgid, 'the pgid journal path')}`
 }
 
 /**
@@ -298,14 +298,14 @@ function publish(variable: string, paths: JournalPaths): string[] {
   // And `--`, because a journal root beginning with `-` makes the pending path an option rather
   // than an operand, which quoting does not change: `mv: illegal option -- w`.
   return [
-    `printf '%s' "${variable}" > ${quoteArg(paths.exitPending)}`,
-    `command -p mv -- ${quoteArg(paths.exitPending)} ${quoteArg(paths.exit)}`,
+    `printf '%s' "${variable}" > ${quoteArg(paths.exitPending, 'the exit journal path')}`,
+    `command -p mv -- ${quoteArg(paths.exitPending, 'the exit journal path')} ${quoteArg(paths.exit, 'the exit journal path')}`,
   ]
 }
 
 /** The redirection both streams take, and the anchor {@link parseJournalScript} derives. */
 function redirection(paths: JournalPaths): string {
-  return ` > ${quoteArg(paths.out)} 2> ${quoteArg(paths.err)}`
+  return ` > ${quoteArg(paths.out, 'the stdout journal path')} 2> ${quoteArg(paths.err, 'the stderr journal path')}`
 }
 
 /**
@@ -328,7 +328,7 @@ function watchdog(paths: JournalPaths, timeoutMs?: number): string[] {
   const seconds = Math.max(0, timeoutMs) / 1000
   return [
     `{ sleep ${seconds} ; kill -0 $__c 2> /dev/null`
-    + ` && { printf t > ${quoteArg(paths.timeout)} ; kill -TERM $__c 2> /dev/null`
+    + ` && { printf t > ${quoteArg(paths.timeout, 'the timeout marker path')} ; kill -TERM $__c 2> /dev/null`
     + ` ; sleep ${TIMEOUT_GRACE_SECONDS} ; kill -KILL $__c 2> /dev/null ; } ; } & __w=$!`,
   ]
 }

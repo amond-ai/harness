@@ -139,12 +139,12 @@ export function wrappedCommand(input: {
   if (env.length > 0) {
     // The whole `NAME=value` pair is quoted rather than the value alone: `env` takes it as one
     // word, and a name that is not a bare identifier would otherwise split the command line.
-    launch.push('env', ...env.map(([name, value]) => quoteArg(`${name}=${value}`)))
+    launch.push('env', ...env.map(([name, value]) => quoteArg(`${name}=${value}`, `env ${name}`)))
   }
   launch.push(quoteArgv(input.command))
-  const run = input.cwd === undefined ? launch.join(' ') : `cd ${quoteArg(input.cwd)} && ${launch.join(' ')}`
+  const run = input.cwd === undefined ? launch.join(' ') : `cd ${quoteArg(input.cwd, 'the working directory')} && ${launch.join(' ')}`
   const record = `printf "%s %s %s" "$$" "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" "$(${START_TIME_OF('$$')})"`
-  const script = `${record} > ${quoteArg(input.pidPath)} ; ${run}`
+  const script = `${record} > ${quoteArg(input.pidPath, 'the pid journal path')} ; ${run}`
   return `setsid --wait sh -c ${quoteArg(script)}`
 }
 

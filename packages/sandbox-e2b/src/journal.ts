@@ -74,8 +74,8 @@ export function journalledCommand(argv: readonly string[], paths: JournalPaths):
 
 /** The journal script itself, before {@link SESSION_OPEN} wraps it. */
 function journalledScript(argv: readonly string[], paths: JournalPaths): string {
-  return `${ARGV_OPEN}${quoteArgv(argv)}${ARGV_CLOSE}${quoteArg(paths.stdout)} 2> ${quoteArg(paths.stderr)}`
-    + ` ; printf '%s' "$?" > ${quoteArg(paths.exit)}`
+  return `${ARGV_OPEN}${quoteArgv(argv)}${ARGV_CLOSE}${quoteArg(paths.stdout, 'the stdout journal path')} 2> ${quoteArg(paths.stderr, 'the stderr journal path')}`
+    + ` ; printf '%s' "$?" > ${quoteArg(paths.exit, 'the exit journal path')}`
 }
 
 /**

@@ -43,6 +43,13 @@ describe('exec', () => {
     expect(command).toContain(`cd '\\''/workspace/repo'\\'' && exec env '\\''TOKEN=a b'\\''`)
   })
 
+  /** A NUL has no shell spelling, so the error has to say which caller input carried it. */
+  it('names the env variable that carries a NUL byte', async () => {
+    await expect(session(fakeSandbox()).exec(['ls'], { env: { TOKEN: 'a\0b' } }))
+      .rejects
+      .toThrow(/cannot quote env TOKEN containing a NUL byte/)
+  })
+
   /**
    * Verified rather than trusted. A missing state root fails *silently* otherwise: the wrapper's
    * `printf … > <root>/<id>.pid` redirection dies, the shell never reaches the command, and the
