@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/amond-ai/harness/compare/sandbox-vercel-v0.2.0...sandbox-vercel-v0.2.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sandbox:** thread the abort signal through Vercel and local whole-transcript replays ([#82](https://github.com/amond-ai/harness/issues/82)) ([e962d87](https://github.com/amond-ai/harness/commit/e962d87168191623d05a1b4be756399f63ece38f)), closes [#80](https://github.com/amond-ai/harness/issues/80)
+
 ## [0.2.0](https://github.com/amond-ai/harness/compare/sandbox-vercel-v0.1.0...sandbox-vercel-v0.2.0) (2026-10-27)
 
 

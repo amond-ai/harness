@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/amond-ai/harness/compare/sandbox-daytona-v0.2.0...sandbox-daytona-v0.2.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sandbox-daytona:** check the abort signal before starting daemon reads ([#84](https://github.com/amond-ai/harness/issues/84)) ([b004320](https://github.com/amond-ai/harness/commit/b0043202c627425c1936952deb72bffe181bf468))
+
 ## [0.2.0](https://github.com/amond-ai/harness/compare/sandbox-daytona-v0.1.0...sandbox-daytona-v0.2.0) (2026-10-27)
 
 
