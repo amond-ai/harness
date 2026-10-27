@@ -76,6 +76,77 @@ describe('the whole-transcript read', () => {
     // `processStderr` keeps only stderr's bounded tail — both written against a stream.
     expect(events.filter(event => event.type === 'stdout')).toHaveLength(4)
   })
+
+  it('stops waiting on a whole-transcript read when the caller aborts', async () => {
+    // A replay reaching a sandbox that has stopped answering (#80): reading the stream must
+    // reject with the reason, not stay pending on a read that never settles.
+    const fake = fakeSandbox()
+    const handle = await started(fake)
+    fake.sandbox.readFileToBuffer = async () => new Promise(() => {})
+    const controller = new AbortController()
+
+    const replay = streamOf(await handle.logs({ replay: true, signal: controller.signal }))
+    setTimeout(() => controller.abort(new Error('caller left')), 5)
+
+    await expect(replay).rejects.toThrow('caller left')
+  })
+
+  it('starts no exit probe for a replay whose caller has already aborted', async () => {
+    // `exitOf` is a shell probe in the sandbox; an abort that already fired must not start it
+    // only to abandon it (codex review, PR #82).
+    const fake = fakeSandbox()
+    const handle = await started(fake)
+    const before = fake.calls.runCommand
+
+    const replay = streamOf(await handle.logs({ replay: true, signal: AbortSignal.abort(new Error('caller left')) }))
+
+    await expect(replay).rejects.toThrow('caller left')
+    expect(fake.calls.runCommand).toBe(before)
+  })
+
+  it('settles a cancel of a whole-transcript read while a read hangs', async () => {
+    // The stream keeps one pull in flight, so without a stop of its own the `return()` queues
+    // behind the stalled read and `cancel()` never settles (cubic review, PR #77).
+    const fake = fakeSandbox()
+    const handle = await started(fake)
+    fake.sandbox.readFileToBuffer = async () => new Promise(() => {})
+    const reader = (await handle.logs({ replay: true })).getReader()
+
+    const pending = reader.read()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    await expect(reader.cancel()).resolves.toBeUndefined()
+    await expect(pending).resolves.toMatchObject({ done: true })
+  })
+
+  it('serves no more of a loaded transcript once the caller aborts between chunks', async () => {
+    // Each file arrives whole, so the abort can only land while the stream is paused between
+    // 64 KiB events — after every read has settled (codex and cubic review, PR #77).
+    const fake = fakeSandbox()
+    const handle = await started(fake)
+    writeOut(fake, handle.id, 'x'.repeat(200_000))
+    endProcess(fake, handle.id, 0)
+    const controller = new AbortController()
+
+    const reader = (await handle.logs({ replay: true, signal: controller.signal })).getReader()
+    expect((await reader.read()).value).toMatchObject({ type: 'stdout' })
+    controller.abort(new Error('caller left'))
+
+    // The stream may already hold the next chunk it prefetched; nothing after that is served.
+    const served: string[] = []
+    const drained = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) {
+          return
+        }
+        served.push(value.type)
+      }
+    })()
+    await expect(drained).rejects.toThrow('caller left')
+    expect(served).not.toContain('terminal')
+    expect(served.length).toBeLessThanOrEqual(1)
+  })
 })
 
 describe('the positioned read', () => {

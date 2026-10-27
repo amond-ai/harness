@@ -36,6 +36,7 @@ import type {
 import type { JournalMeta } from './journal'
 import type { VercelCommandLike, VercelSandboxLike } from './vercel-surface'
 import { SandboxNoExitRecordError, SandboxWaitTimeoutError } from '@amond-ai/sandbox'
+import { abortable } from '@amond-ai/sandbox/journal'
 import {
   isProcessId,
   journalledScript,
@@ -258,7 +259,14 @@ export function createVercelSession(
       status: () => statusOf(meta),
       logs: createProcessLogs({
         paths,
-        readExit: () => exitOf(meta),
+        // `exitOf` takes no signal, so the caller stops waiting on it rather than the read stopping.
+        // The signal is checked first: `exitOf` runs a shell probe in the sandbox, and an abort
+        // that has already fired must not start remote work it would only abandon (codex review,
+        // PR #82).
+        readExit: async (signal) => {
+          signal?.throwIfAborted()
+          return await abortable(exitOf(meta), signal)
+        },
         readSliceFrom: io.readSliceFrom,
         readWhole: io.readWhole,
         probe: () => probe.read(meta),

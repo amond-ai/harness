@@ -32,8 +32,13 @@ const CHUNK_BYTES = 64 * 1024
 const EXIT_RECORD_BYTES = 16
 
 export interface JournalIo {
-  /** The exit the wrapper recorded, or `undefined` while it has recorded none. */
-  readExit: (paths: JournalPaths) => Promise<ProcessExit | undefined>
+  /**
+   * The exit the wrapper recorded, or `undefined` while it has recorded none.
+   *
+   * Rejects with `signal`'s reason once it aborts. A file read takes no signal, so the caller
+   * stops waiting on it rather than the read stopping.
+   */
+  readExit: (paths: JournalPaths, signal?: AbortSignal) => Promise<ProcessExit | undefined>
   /** The wrapped command's own pid, or `undefined` before the wrapper has written it. */
   readCommandPid: (paths: JournalPaths) => Promise<number | undefined>
   /**
@@ -45,14 +50,20 @@ export interface JournalIo {
   readSliceFrom: (path: string, offset: number, signal?: AbortSignal) => Promise<LocalSlice>
   /** Where a file ends, for a follower that starts at the live tail rather than the beginning. */
   readEndOffset: (path: string) => Promise<number>
-  /** The file from `offset` to its end, in chunks, so a long transcript never lands in memory whole. */
-  streamFile: (path: string, offset?: number) => AsyncGenerator<Uint8Array>
+  /**
+   * The file from `offset` to its end, in chunks, so a long transcript never lands in memory whole.
+   *
+   * Rejects with `signal`'s reason once it aborts, like {@link JournalIo.readSliceFrom}: the read
+   * in flight is abandoned rather than stopped, and no further chunk is read.
+   */
+  streamFile: (path: string, offset?: number, signal?: AbortSignal) => AsyncGenerator<Uint8Array>
 }
 
 export function createJournalIo(host: LocalHost): JournalIo {
   return {
-    readExit: async (paths: JournalPaths) => {
-      const { data, total } = await host.readSlice(paths.exit, 0, EXIT_RECORD_BYTES)
+    readExit: async (paths: JournalPaths, signal?: AbortSignal) => {
+      signal?.throwIfAborted()
+      const { data, total } = await abortable(host.readSlice(paths.exit, 0, EXIT_RECORD_BYTES), signal)
       if (data.length === 0) {
         // No file. An absent one reads as empty rather than throwing, and absence is the
         // ordinary state for most of a turn: not over yet.
@@ -76,7 +87,7 @@ export function createJournalIo(host: LocalHost): JournalIo {
       // A shell reports a signalled command as 128+n and this passes that through rather than
       // decoding it: `exit 137` is a legal exit code, so the two are genuinely
       // indistinguishable here, and `ProcessExit.signal` is for a backend that was told.
-      return { code, timedOut: await host.exists(paths.timeout) }
+      return { code, timedOut: await abortable(host.exists(paths.timeout), signal) }
     },
     readCommandPid: async (paths: JournalPaths) => {
       const { data, total } = await host.readSlice(paths.pid, 0, EXIT_RECORD_BYTES)
@@ -101,10 +112,11 @@ export function createJournalIo(host: LocalHost): JournalIo {
     readSliceFrom: async (path: string, offset: number, signal?: AbortSignal) =>
       abortable(host.readSlice(path, offset), signal),
     readEndOffset: async (path: string) => await host.size(path) ?? 0,
-    async* streamFile(path: string, offset = 0) {
+    async* streamFile(path: string, offset = 0, signal?: AbortSignal) {
+      signal?.throwIfAborted()
       let at = offset
       while (true) {
-        const { data, total } = await host.readSlice(path, at, CHUNK_BYTES)
+        const { data, total } = await abortable(host.readSlice(path, at, CHUNK_BYTES), signal)
         if (data.length === 0) {
           return
         }

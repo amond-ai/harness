@@ -115,6 +115,65 @@ describe('logs', () => {
     expect(reads.sort()).toEqual([PATHS.stderr, PATHS.stdout].sort())
   })
 
+  it('stops waiting on a whole-transcript read when the caller aborts', async () => {
+    // A file read takes no signal, so this never settles: a replay must still reject with the
+    // reason rather than stay pending on a filesystem that has stopped answering (#80).
+    const fake = fakeHost()
+    recorded(fake)
+    const handle = await sessionOver(fake).getProcess('p1')
+    fake.host.readSlice = async () => new Promise(() => {})
+    const controller = new AbortController()
+
+    const replay = collect(await handle!.logs({ replay: true, signal: controller.signal }))
+    setTimeout(() => controller.abort(new Error('caller left')), 5)
+
+    await expect(replay).rejects.toThrow('caller left')
+  })
+
+  it('settles a cancel of a whole-transcript read while a read hangs', async () => {
+    // The stream keeps one pull in flight, so without a stop of its own the `return()` queues
+    // behind the stalled read and `cancel()` never settles (cubic review, PR #77).
+    const fake = fakeHost()
+    recorded(fake)
+    const handle = await sessionOver(fake).getProcess('p1')
+    fake.host.readSlice = async () => new Promise(() => {})
+    const reader = (await handle!.logs({ replay: true })).getReader()
+
+    const pending = reader.read()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    await expect(reader.cancel()).resolves.toBeUndefined()
+    await expect(pending).resolves.toMatchObject({ done: true })
+  })
+
+  it('serves no more of a transcript once the caller aborts between chunks', async () => {
+    const fake = fakeHost()
+    recorded(fake)
+    fake.put(PATHS.stdout, 'x'.repeat(200_000))
+    fake.put(PATHS.exit, '0')
+    const controller = new AbortController()
+
+    const handle = await sessionOver(fake).getProcess('p1')
+    const reader = (await handle!.logs({ replay: true, signal: controller.signal })).getReader()
+    expect((await reader.read()).value).toMatchObject({ type: 'stdout' })
+    controller.abort(new Error('caller left'))
+
+    // The stream may already hold the next chunk it prefetched; nothing after that is served.
+    const served: string[] = []
+    const drained = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) {
+          return
+        }
+        served.push(value.type)
+      }
+    })()
+    await expect(drained).rejects.toThrow('caller left')
+    expect(served).not.toContain('terminal')
+    expect(served.length).toBeLessThanOrEqual(1)
+  })
+
   it('reads an unusable cursor as the beginning rather than as the end', async () => {
     const fake = fakeHost()
     recorded(fake)

@@ -93,19 +93,27 @@ export function createProcessLogs(
    * into a bounded window precisely so the whole of it never exists in memory at once, and
    * handing them a single `Uint8Array` per stream would defeat the guarantee they were written
    * against. The exit is read first, before the transcript can move the clock.
+   *
+   * The caller's `signal` reaches every read, so a replay stalled against the filesystem stops
+   * waiting when the caller leaves instead of staying pending (#80). It is checked again before
+   * every event, so a caller that aborts while the stream is paused between chunks is not served
+   * the rest of the transcript and the terminal (codex and cubic review, PR #77).
    */
-  async function* wholeTranscript(): AsyncGenerator<ProcessLogEvent> {
-    const exit = await io.readExit(paths)
+  async function* wholeTranscript(signal: AbortSignal | undefined): AsyncGenerator<ProcessLogEvent> {
+    const exit = await io.readExit(paths, signal)
     let stdout = 0
-    for await (const chunk of io.streamFile(paths.stdout)) {
+    for await (const chunk of io.streamFile(paths.stdout, 0, signal)) {
+      signal?.throwIfAborted()
       stdout += chunk.length
       yield { type: 'stdout', cursor: encodeCursor(stdout, 0), timestamp: now(), data: chunk }
     }
     let stderr = 0
-    for await (const chunk of io.streamFile(paths.stderr)) {
+    for await (const chunk of io.streamFile(paths.stderr, 0, signal)) {
+      signal?.throwIfAborted()
       stderr += chunk.length
       yield { type: 'stderr', cursor: encodeCursor(stdout, stderr), timestamp: now(), data: chunk }
     }
+    signal?.throwIfAborted()
     if (exit) {
       yield {
         type: 'terminal',
@@ -115,6 +123,38 @@ export function createProcessLogs(
         exit,
       }
     }
+  }
+
+  /**
+   * The whole-transcript read, with a stop signal of its own for the reason
+   * {@link followingStream} has one: a consumer that cancels the stream while a read is stalled
+   * would otherwise queue `return()` behind that read, and `cancel()` would not settle until it
+   * did (cubic review, PR #77; #80). The caller's abort is forwarded with its reason.
+   *
+   * Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside the stream,
+   * which is the thing being avoided.
+   */
+  function replayStream(caller: AbortSignal | undefined): ReadableStream<ProcessLogEvent> {
+    const stop = new AbortController()
+    const onAbort = (): void => stop.abort(caller?.reason)
+    if (caller?.aborted === true) {
+      stop.abort(caller.reason)
+    }
+    else {
+      caller?.addEventListener('abort', onAbort, { once: true })
+    }
+    async function* replayed(): AsyncGenerator<ProcessLogEvent> {
+      try {
+        yield* wholeTranscript(stop.signal)
+      }
+      finally {
+        caller?.removeEventListener('abort', onAbort)
+      }
+    }
+    return pulledStream(replayed(), () => {
+      stop.abort()
+      caller?.removeEventListener('abort', onAbort)
+    })
   }
 
   /** The watchdog's read: what arrived since last time, and nothing before it. */
@@ -255,8 +295,6 @@ export function createProcessLogs(
         },
       })
     }
-    // Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside the
-    // stream, which is the thing being avoided.
-    return pulledStream(wholeTranscript())
+    return replayStream(logOptions?.signal)
   }
 }
