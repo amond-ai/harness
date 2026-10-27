@@ -1,7 +1,7 @@
 {
   "name": "@amond-ai/harness-codex-bridge",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The per-turn host that runs inside the sandbox image — hosts @openai/codex-sdk and serves the Worker over a WebSocket",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",

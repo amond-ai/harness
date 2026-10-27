@@ -1,7 +1,7 @@
 {
   "name": "@amond-ai/sandbox-vercel",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A Vercel Sandbox backend for @amond-ai/sandbox — journals a process's output to the sandbox filesystem, because Vercel forgets a command across a session resume and exposes no process list",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
