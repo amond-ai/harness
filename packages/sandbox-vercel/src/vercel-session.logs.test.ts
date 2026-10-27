@@ -91,6 +91,19 @@ describe('the whole-transcript read', () => {
     await expect(replay).rejects.toThrow('caller left')
   })
 
+  it('starts no exit probe for a replay whose caller has already aborted', async () => {
+    // `exitOf` is a shell probe in the sandbox; an abort that already fired must not start it
+    // only to abandon it (codex review, PR #82).
+    const fake = fakeSandbox()
+    const handle = await started(fake)
+    const before = fake.calls.runCommand
+
+    const replay = streamOf(await handle.logs({ replay: true, signal: AbortSignal.abort(new Error('caller left')) }))
+
+    await expect(replay).rejects.toThrow('caller left')
+    expect(fake.calls.runCommand).toBe(before)
+  })
+
   it('settles a cancel of a whole-transcript read while a read hangs', async () => {
     // The stream keeps one pull in flight, so without a stop of its own the `return()` queues
     // behind the stalled read and `cancel()` never settles (cubic review, PR #77).
