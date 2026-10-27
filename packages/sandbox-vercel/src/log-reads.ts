@@ -43,12 +43,20 @@ const CHUNK_BYTES = 65_536
 
 export interface LogReadSources {
   paths: JournalPaths
-  /** How the process ended, or `undefined` while it is still running. */
-  readExit: () => Promise<ProcessExit | undefined>
+  /**
+   * How the process ended, or `undefined` while it is still running.
+   *
+   * Rejects with `signal`'s reason once it aborts, whether or not the read itself stops.
+   */
+  readExit: (signal?: AbortSignal) => Promise<ProcessExit | undefined>
   /** Rejects with `signal`'s reason once it aborts. */
   readSliceFrom: (path: string, offset: number, signal?: AbortSignal) => Promise<JournalSlice>
-  /** A whole journal file, or `undefined` when it is not there. */
-  readWhole: (path: string) => Promise<Uint8Array | undefined>
+  /**
+   * A whole journal file, or `undefined` when it is not there.
+   *
+   * Rejects with `signal`'s reason once it aborts, like {@link LogReadSources.readSliceFrom}.
+   */
+  readWhole: (path: string, signal?: AbortSignal) => Promise<Uint8Array | undefined>
   /** One liveness-plus-lengths reading. See {@link JournalTail.probe}. Follow reads only. */
   probe: () => Promise<ProbeReading>
   now: () => string
@@ -111,19 +119,28 @@ export function createProcessLogs(
    *
    * stdout runs to completion before stderr starts, because `demuxProcessEvents` splits on the
    * event tag and reassembles each stream in the order its chunks arrive.
+   *
+   * The caller's `signal` reaches every read, so a replay stalled against the sandbox stops
+   * waiting when the caller leaves instead of staying pending (#80). It is checked again before
+   * every event: each file arrives whole, so a caller that aborts while the stream is paused
+   * between 64 KiB chunks would otherwise still be served the rest of it and the terminal (codex
+   * and cubic review, PR #77).
    */
-  async function* wholeTranscript(): AsyncGenerator<ProcessLogEvent> {
-    const exit = await readExit()
+  async function* wholeTranscript(signal: AbortSignal | undefined): AsyncGenerator<ProcessLogEvent> {
+    const exit = await readExit(signal)
     let stdout = 0
-    for (const chunk of chunked(await readWhole(paths.out))) {
+    for (const chunk of chunked(await readWhole(paths.out, signal))) {
+      signal?.throwIfAborted()
       stdout += chunk.length
       yield { type: 'stdout', cursor: encodeCursor(stdout, 0), timestamp: now(), data: chunk }
     }
     let stderr = 0
-    for (const chunk of chunked(await readWhole(paths.err))) {
+    for (const chunk of chunked(await readWhole(paths.err, signal))) {
+      signal?.throwIfAborted()
       stderr += chunk.length
       yield { type: 'stderr', cursor: encodeCursor(stdout, stderr), timestamp: now(), data: chunk }
     }
+    signal?.throwIfAborted()
     if (exit !== undefined) {
       yield {
         type: 'terminal',
@@ -133,6 +150,38 @@ export function createProcessLogs(
         exit,
       }
     }
+  }
+
+  /**
+   * The whole-transcript read, with a stop signal of its own for the reason
+   * {@link followingStream} has one: a consumer that cancels the stream while a read is stalled
+   * would otherwise queue `return()` behind that read, and `cancel()` would not settle until it
+   * did (cubic review, PR #77; #80). The caller's abort is forwarded with its reason.
+   *
+   * Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside the stream
+   * on top of the copy the read already holds.
+   */
+  function replayStream(caller: AbortSignal | undefined): ReadableStream<ProcessLogEvent> {
+    const stop = new AbortController()
+    const onAbort = (): void => stop.abort(caller?.reason)
+    if (caller?.aborted === true) {
+      stop.abort(caller.reason)
+    }
+    else {
+      caller?.addEventListener('abort', onAbort, { once: true })
+    }
+    async function* replayed(): AsyncGenerator<ProcessLogEvent> {
+      try {
+        yield* wholeTranscript(stop.signal)
+      }
+      finally {
+        caller?.removeEventListener('abort', onAbort)
+      }
+    }
+    return pulledStream(replayed(), () => {
+      stop.abort()
+      caller?.removeEventListener('abort', onAbort)
+    })
   }
 
   /** The watchdog's read: what arrived since last time, and nothing before it. */
@@ -213,8 +262,6 @@ export function createProcessLogs(
         },
       })
     }
-    // Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside the stream
-    // on top of the copy the read already holds.
-    return pulledStream(wholeTranscript())
+    return replayStream(logOptions?.signal)
   }
 }
