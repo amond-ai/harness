@@ -84,7 +84,7 @@ export function createDaytonaSession(
    *
    * `command` is required by `ProcessStatus` and cannot be recovered — Daytona's `Command` holds
    * the *wrapper* string, and reading argv back out of a shell word list is a parser this package
-   * deliberately does not carry (`shell-quote.ts`). Named for what it is rather than guessed at.
+   * deliberately does not carry (`daytona-process.ts` quotes, and never reads a word list back). Named for what it is rather than guessed at.
    */
   function withoutMeta(id: string): ProcessMeta {
     return { id, command: ['<unrecorded>'], startedAt: now() }

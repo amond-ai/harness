@@ -19,8 +19,8 @@
  * NDJSON a turn writes must not be interleaved with whatever the CLI prints beside it.
  */
 import type { SandboxCommand } from '@amond-ai/sandbox'
+import { quoteArg, quoteArgv, unquoteArgv } from '@amond-ai/sandbox/journal'
 import { isProcessId, withoutTrailingSlashes } from './paths'
-import { quoteArg, quoteArgv, unquoteArgv } from './shell-quote'
 
 /**
  * What every journal script opens with: the shell's no-op builtin, given this wrapper's

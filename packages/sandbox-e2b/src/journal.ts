@@ -13,7 +13,8 @@
  * NDJSON turn output must not be polluted by whatever the CLI writes to stderr.
  */
 import type { JournalPaths } from '@amond-ai/sandbox/journal'
-import { quoteArg, quoteArgv, unquotedIndexOf, unquoteFirstArg } from './shell-quote'
+import { quoteArg, quoteArgv, unquoteFirstArg } from '@amond-ai/sandbox/journal'
+import { unquotedIndexOf } from './shell-quote'
 
 // The layout moved into `@amond-ai/sandbox/journal`; re-exported so this module stays the one
 // place the rest of the backend (and its tests) import it from.
@@ -73,8 +74,8 @@ export function journalledCommand(argv: readonly string[], paths: JournalPaths):
 
 /** The journal script itself, before {@link SESSION_OPEN} wraps it. */
 function journalledScript(argv: readonly string[], paths: JournalPaths): string {
-  return `${ARGV_OPEN}${quoteArgv(argv)}${ARGV_CLOSE}${quoteArg(paths.stdout)} 2> ${quoteArg(paths.stderr)}`
-    + ` ; printf '%s' "$?" > ${quoteArg(paths.exit)}`
+  return `${ARGV_OPEN}${quoteArgv(argv)}${ARGV_CLOSE}${quoteArg(paths.stdout, 'the stdout journal path')} 2> ${quoteArg(paths.stderr, 'the stderr journal path')}`
+    + ` ; printf '%s' "$?" > ${quoteArg(paths.exit, 'the exit journal path')}`
 }
 
 /**

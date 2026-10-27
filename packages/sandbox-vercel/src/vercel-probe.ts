@@ -18,8 +18,8 @@
  */
 import type { JournalMeta } from './journal'
 import type { VercelCommandLike, VercelSandboxLike } from './vercel-surface'
+import { quoteArg } from '@amond-ai/sandbox/journal'
 import { journalPaths, WRAPPER_SHELL, wrapperMarker } from './journal'
-import { quoteArg } from './shell-quote'
 import { isNotFound } from './vercel-surface'
 
 /**
@@ -150,7 +150,7 @@ export function probeScript(processId: string, root: string): string {
     // "No such file or directory" for a journal file that does not exist yet is written to the
     // probe's stderr with fd 2 still attached — measured against a real `sh`, 2026-09-14. Every
     // poll of a turn before its first write would carry that noise.
-    `g=$(cat 2> /dev/null < ${quoteArg(paths.pgid)})`,
+    `g=$(cat 2> /dev/null < ${quoteArg(paths.pgid, 'the pgid journal path')})`,
     `c=$(tr 2> /dev/null '\\0' ' ' < /proc/"$g"/cmdline)`,
     `if [ -z "$g" ] ; then printf '%s\\n' nopid`,
     // The pid is in use, so it settles the question on its own: ours, or a stranger that
@@ -165,8 +165,8 @@ export function probeScript(processId: string, root: string): string {
     + ` ; else printf '%s\\n' none ; fi ; fi`,
     length(paths.out),
     length(paths.err),
-    `if [ -f ${quoteArg(paths.timeout)} ] ; then printf '%s\\n' t ; else printf '%s\\n' '' ; fi`,
-    `head -c ${String(EXIT_RECORD_LIMIT)} 2> /dev/null < ${quoteArg(paths.exit)}`,
+    `if [ -f ${quoteArg(paths.timeout, 'the timeout marker path')} ] ; then printf '%s\\n' t ; else printf '%s\\n' '' ; fi`,
+    `head -c ${String(EXIT_RECORD_LIMIT)} 2> /dev/null < ${quoteArg(paths.exit, 'the exit journal path')}`,
     // The probe's own exit code says whether the *probe* ran, and nothing about the turn, so the
     // last command's status must not leak into it: `head` on an absent exit record exits
     // non-zero on every poll of a turn that has not finished, which is almost all of them.
@@ -176,7 +176,7 @@ export function probeScript(processId: string, root: string): string {
 
 /** One journal file's length, or `-1` when there is no such file yet. */
 function length(path: string): string {
-  return `if [ -f ${quoteArg(path)} ] ; then printf '%s\\n' "$(wc -c < ${quoteArg(path)})"`
+  return `if [ -f ${quoteArg(path, 'a journal path')} ] ; then printf '%s\\n' "$(wc -c < ${quoteArg(path, 'a journal path')})"`
     + ` ; else printf '%s\\n' -1 ; fi`
 }
 

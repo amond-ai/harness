@@ -18,15 +18,13 @@ export type { JournalSlice } from './log-replay'
 export { createVercelProvider, sandboxNameFor } from './provider'
 export type { VercelProviderOptions } from './provider'
 
-export { quoteArg, quoteArgv } from './shell-quote'
 export { vercelSandboxApi, VercelSandboxAuthError } from './vercel-api'
-
 export type { VercelApiOptions, VercelCreateParams, VercelSandboxApi } from './vercel-api'
+
 export { createVercelSession } from './vercel-session'
-
 export type { VercelSessionOptions } from './vercel-session'
-export { isNotFound, isUnauthorized } from './vercel-surface'
 
+export { isNotFound, isUnauthorized } from './vercel-surface'
 export type {
   VercelCommandFinished,
   VercelCommandLike,
@@ -34,3 +32,5 @@ export type {
   VercelRunParams,
   VercelSandboxLike,
 } from './vercel-surface'
+
+export { quoteArg, quoteArgv } from '@amond-ai/sandbox/journal'

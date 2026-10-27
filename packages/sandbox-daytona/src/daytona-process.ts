@@ -12,7 +12,14 @@
  * from a file the turn could write.
  */
 import type { SandboxCommand } from '@amond-ai/sandbox'
-import { quoteArg, quoteArgv } from './shell-quote'
+// Quoting only, and deliberately no `unquoteArgv`. The contract passes commands as argv, but
+// Daytona's session API accepts a *string* — `executeSessionCommand(sessionId, { command })` — so
+// the "no shell escaping needed" guarantee stops holding at this boundary and `quoteArgv` is what
+// restores it. Nothing here ever reads a shell word list back into argv: Daytona records the
+// command a session ran on the session itself and its exit code in the toolbox daemon, unlike
+// e2b, which recovers a live turn's argv from the wrapper's command line in its process table
+// (exited commands drop out of that table, and the journal carries what is left after exit).
+import { quoteArg, quoteArgv } from '@amond-ai/sandbox/journal'
 
 /**
  * Ids that are safe to interpolate into a path and a command line.
@@ -133,12 +140,12 @@ export function wrappedCommand(input: {
   if (env.length > 0) {
     // The whole `NAME=value` pair is quoted rather than the value alone: `env` takes it as one
     // word, and a name that is not a bare identifier would otherwise split the command line.
-    launch.push('env', ...env.map(([name, value]) => quoteArg(`${name}=${value}`)))
+    launch.push('env', ...env.map(([name, value]) => quoteArg(`${name}=${value}`, `env ${name}`)))
   }
   launch.push(quoteArgv(input.command))
-  const run = input.cwd === undefined ? launch.join(' ') : `cd ${quoteArg(input.cwd)} && ${launch.join(' ')}`
+  const run = input.cwd === undefined ? launch.join(' ') : `cd ${quoteArg(input.cwd, 'the working directory')} && ${launch.join(' ')}`
   const record = `printf "%s %s %s" "$$" "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" "$(${START_TIME_OF('$$')})"`
-  const script = `${record} > ${quoteArg(input.pidPath)} ; ${run}`
+  const script = `${record} > ${quoteArg(input.pidPath, 'the pid journal path')} ; ${run}`
   return `setsid --wait sh -c ${quoteArg(script)}`
 }
 

@@ -1,6 +1,6 @@
+import { quoteArg, quoteArgv, unquoteArgv } from '@amond-ai/sandbox/journal'
 import { describe, expect, it } from 'vitest'
 import { journalledCommand, journalledScriptIn, journalPaths, parseJournalMeta, serializeJournalMeta, SESSION_OPEN } from './journal'
-import { quoteArg, quoteArgv, unquoteArgv } from './shell-quote'
 
 /**
  * The wrapper the pre-#276 writer emitted, byte for byte.

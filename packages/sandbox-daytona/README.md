@@ -97,7 +97,6 @@ and `waitForExit`'s poll is activity.
 | `daytona-files.ts` | The contract's file surface over `fs.downloadFile`/`uploadFileStream` |
 | `log-reads.ts` | The three shapes `logs()` answers in — whole transcript, positioned, following |
 | `log-replay.ts` | Log strings → `ProcessLogEvent`s, with a byte-offset cursor |
-| `shell-quote.ts` | Restores argv safety at Daytona's string-only command boundary |
 | `daytona-surface.ts` | The SDK slice this backend uses, structurally — plus what a 404 is |
 | `daytona-api.ts` | The only file that touches the real `@daytona/sdk` |
 

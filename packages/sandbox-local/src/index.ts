@@ -42,4 +42,4 @@ export type { LocalProviderOptions } from './provider'
 export { createProcessRegistry } from './registry'
 export type { Liveness, ProcessRegistry, ProcessRegistryOptions } from './registry'
 
-export { quoteArg, quoteArgv, unquoteArgv } from './shell-quote'
+export { quoteArg, quoteArgv, unquoteArgv } from '@amond-ai/sandbox/journal'

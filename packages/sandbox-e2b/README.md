@@ -169,7 +169,7 @@ so this is extra information, not a behaviour change.
 | `log-reads.ts` | The three shapes `logs()` answers in — whole transcript, positioned, following |
 | `log-replay.ts` | Journal bytes → `ProcessLogEvent`s, with a byte-offset cursor |
 | `log-follow.ts` | The tail: polls the journal until the process exits or the caller aborts |
-| `shell-quote.ts` | Restores argv safety at e2b's string-only command boundary |
+| `shell-quote.ts` | The double-layer quoting search e2b alone needs; the quoting itself is shared via `@amond-ai/sandbox/journal` |
 | `e2b-api.ts` | The only file that touches the real e2b SDK |
 | `template-config.ts` | What `scripts/build-template.ts` needs, read off the environment |
 
