@@ -75,6 +75,22 @@ describe('logs', () => {
     expect(events[2]).toMatchObject({ state: 'exited', exit: { code: 0 }, cursor: '18:5' })
   })
 
+  it('errors the replay with the reason when the caller aborts a log read that hangs', async () => {
+    // The replay reads under `'fail'`, but the abort must not depend on that: it is the caller
+    // leaving, not a read that died (cubic review, PR #66; #69).
+    const { container, sandbox, session } = fakeSandbox()
+    const handle = await session().exec(['claude'])
+    writeLog(container, 'run-1', 'stdout', '{"type":"result"}\n')
+    endProcess(container, 'run-1', 0)
+    sandbox.readProcessLog = () => new Promise(() => {})
+    const controller = new AbortController()
+
+    const replay = drain(await handle.logs({ replay: true, signal: controller.signal }))
+    setTimeout(() => controller.abort(new Error('caller left')), 5)
+
+    await expect(replay).rejects.toThrow('caller left')
+  })
+
   it('carries a timed-out exit into the replay\'s terminal event', async () => {
     const { container, session } = fakeSandbox()
     const handle = await session().exec(['claude'], { timeout: 1_000 })

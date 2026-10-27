@@ -52,6 +52,53 @@ describe('journal read cancellation', () => {
     expect(seen.every(signal => signal === controller.signal)).toBe(true)
   })
 
+  it('ends a whole-transcript read with the abort reason when the caller leaves a stalled one', async () => {
+    // The whole-transcript read had no signal to stop on, so a replay stalled against the sandbox
+    // stayed pending after the caller aborted (cubic review, PR #66; #69).
+    const exitSignals: (AbortSignal | undefined)[] = []
+    const fileSignals: (AbortSignal | undefined)[] = []
+    const logs = createProcessLogs(sources({
+      readExitCode: async (options) => {
+        exitSignals.push(options?.signal)
+        return undefined
+      },
+      async* streamFile(_path, _partial, signal) {
+        fileSignals.push(signal)
+        yield await hang<Uint8Array>(signal)
+      },
+    }))
+    const controller = new AbortController()
+
+    const finished = collect(await logs({ replay: true, signal: controller.signal }))
+    await vi.waitFor(() => expect(fileSignals).toHaveLength(1))
+    controller.abort(new Error('caller left'))
+
+    await expect(finished).rejects.toThrow('caller left')
+    // The reads get the replay's own stop signal rather than the caller's (so a cancel can end
+    // them too), and it must carry the caller's abort through: one signal each, aborted with the
+    // caller's reason. `toEqual` would compare signals structurally and pass for any of them.
+    for (const signals of [exitSignals, fileSignals]) {
+      expect(signals).toHaveLength(1)
+      expect(signals[0]?.aborted).toBe(true)
+      expect(signals[0]?.reason).toBe(controller.signal.reason)
+    }
+  })
+
+  it('settles a cancel of a whole-transcript read while a read hangs', async () => {
+    const logs = createProcessLogs(sources({
+      async* streamFile(_path, _partial, signal) {
+        yield await hang<Uint8Array>(signal)
+      },
+    }))
+    const reader = (await logs({ replay: true })).getReader()
+
+    const pending = reader.read()
+    await Promise.resolve()
+
+    await expect(reader.cancel()).resolves.toBeUndefined()
+    await expect(pending).resolves.toMatchObject({ done: true })
+  })
+
   it('does not read the journal for a follower aborted before it started', async () => {
     const readEndOffset = vi.fn(async () => 0)
     const controller = new AbortController()

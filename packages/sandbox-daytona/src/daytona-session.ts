@@ -194,7 +194,8 @@ export function createDaytonaSession(
       logs: createProcessLogs({
         // `getSessionCommandLogs` takes no signal, so the caller stops waiting on it instead.
         readLogs: signal => abortable(reader.logs(meta.id), signal),
-        ending: () => endingOf(meta.id),
+        // `reader.verdict` takes no signal, so the caller stops waiting instead, as with `readLogs`.
+        ending: signal => abortable(endingOf(meta.id), signal),
         now,
         followIntervalMs: followMs,
       }),

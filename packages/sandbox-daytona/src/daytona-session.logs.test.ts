@@ -68,6 +68,48 @@ describe('logs(): the whole transcript', () => {
     expect(events.filter(event => event.type === 'stdout').length).toBeGreaterThan(1)
     expect(textOf(events, 'stdout').length).toBe(70_000)
   })
+
+  it('stops waiting on a whole-transcript read when the caller aborts', async () => {
+    // The same degraded daemon, reached by a replay rather than a watchdog sample (cubic review,
+    // PR #66; #69): reading the stream must reject with the reason, not stay pending.
+    const fake = fakeSandbox()
+    const handle = await session(fake).exec(['claude'])
+    fake.sandbox.process.getSessionCommandLogs = async () => new Promise(() => {})
+    const controller = new AbortController()
+
+    const replay = collect(await handle.logs({ replay: true, signal: controller.signal }))
+    setTimeout(() => controller.abort(new Error('caller left')), 5)
+
+    await expect(replay).rejects.toThrow('caller left')
+  })
+
+  it('serves no more of a loaded transcript once the caller aborts between chunks', async () => {
+    // The log arrives whole, so the abort can only land while the stream is paused between 64 KiB
+    // events — after every read has settled (codex and cubic review, PR #77).
+    const fake = fakeSandbox()
+    const handle = await session(fake).exec(['claude'])
+    setLogs(fake, 'run-1', { stdout: 'x'.repeat(70_000) })
+    endProcess(fake, 'run-1', 0)
+    const controller = new AbortController()
+
+    const reader = (await handle.logs({ replay: true, signal: controller.signal })).getReader()
+    expect((await reader.read()).value).toMatchObject({ type: 'stdout' })
+    controller.abort(new Error('caller left'))
+
+    // The stream may already hold the next chunk it prefetched; nothing after that is served.
+    const served: string[] = []
+    const drained = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) {
+          return
+        }
+        served.push(value.type)
+      }
+    })()
+    await expect(drained).rejects.toThrow('caller left')
+    expect(served).not.toContain('terminal')
+  })
 })
 
 describe('logs({ since }): the watchdog\'s sample', () => {
@@ -191,5 +233,40 @@ describe('logs({ follow: true }): the live read', () => {
     const reader = (await handle.logs({ follow: true, replay: true })).getReader()
     await reader.read()
     await expect(reader.cancel()).resolves.toBeUndefined()
+  })
+
+  /**
+   * `getSessionCommandLogs` takes no signal, so a poll against a degraded daemon never settles on
+   * its own. The stop signal has to reach the read itself, not only the sleep between polls, or
+   * the follow outlives the caller that left it.
+   */
+  describe('while a poll hangs', () => {
+    function hangingHandle() {
+      const fake = fakeSandbox()
+      fake.sandbox.process.getSessionCommandLogs = async () => new Promise(() => {})
+      return session(fake).exec(['claude'])
+    }
+
+    it('closes the stream when the caller aborts', async () => {
+      const handle = await hangingHandle()
+      const controller = new AbortController()
+
+      const finished = collect(await handle.logs({ follow: true, replay: true, signal: controller.signal }))
+      await Promise.resolve()
+      controller.abort(new Error('caller left'))
+
+      await expect(finished).resolves.toEqual([])
+    })
+
+    it('settles a cancel', async () => {
+      const handle = await hangingHandle()
+      const reader = (await handle.logs({ follow: true, replay: true })).getReader()
+
+      const pending = reader.read()
+      await Promise.resolve()
+
+      await expect(reader.cancel()).resolves.toBeUndefined()
+      await expect(pending).resolves.toMatchObject({ done: true })
+    })
   })
 })

@@ -43,7 +43,8 @@ const CHUNK_BYTES = 65_536
 export interface LogReadSources {
   /** Rejects with `signal`'s reason once it aborts, whether or not the read itself stops. */
   readLogs: (signal?: AbortSignal) => Promise<DaytonaSessionLogs>
-  ending: () => Promise<ProcessEnding | undefined>
+  /** Rejects with `signal`'s reason once it aborts, like {@link LogReadSources.readLogs}. */
+  ending: (signal?: AbortSignal) => Promise<ProcessEnding | undefined>
   now: () => string
   /** How long a following read waits between polls. */
   followIntervalMs: number
@@ -126,23 +127,64 @@ export function createProcessLogs(
    * backend: a whole-transcript read of a process that vanished has already said so through
    * `status()`, and a terminal error appended to a replay would be a second, later-timestamped
    * account of the same failure.
+   *
+   * The caller's `signal` reaches both reads, so a replay stalled against the daemon stops
+   * waiting when the caller leaves instead of staying pending (cubic review, PR #66; #69). It is
+   * checked again before every event: the log arrives whole, so a caller that aborts while the
+   * stream is paused between 64 KiB chunks would otherwise still be served the rest of it and the
+   * terminal (codex and cubic review, PR #77).
    */
-  async function* wholeTranscript(): AsyncGenerator<ProcessLogEvent> {
-    const ended = await ending()
-    const logs = await readLogs()
+  async function* wholeTranscript(signal: AbortSignal | undefined): AsyncGenerator<ProcessLogEvent> {
+    const ended = await ending(signal)
+    const logs = await readLogs(signal)
     let stdout = 0
     for (const chunk of chunked(logs.stdout)) {
+      signal?.throwIfAborted()
       stdout += chunk.length
       yield { type: 'stdout', cursor: encodeCursor(stdout, 0), timestamp: now(), data: chunk }
     }
     let stderr = 0
     for (const chunk of chunked(logs.stderr)) {
+      signal?.throwIfAborted()
       stderr += chunk.length
       yield { type: 'stderr', cursor: encodeCursor(stdout, stderr), timestamp: now(), data: chunk }
     }
+    signal?.throwIfAborted()
     if (ended?.state === 'exited') {
       yield terminalEvent(ended, encodeCursor(stdout, stderr), now())
     }
+  }
+
+  /**
+   * The whole-transcript read, with a stop signal of its own for the reason
+   * {@link followingStream} has one: a consumer that cancels the stream while a read is stalled
+   * would otherwise queue `return()` behind that read, and `cancel()` would not settle until it
+   * did (cubic review, PR #77). The caller's abort is forwarded with its reason.
+   *
+   * Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside the stream
+   * on top of the copy the read already holds.
+   */
+  function replayStream(caller: AbortSignal | undefined): ReadableStream<ProcessLogEvent> {
+    const stop = new AbortController()
+    const onAbort = (): void => stop.abort(caller?.reason)
+    if (caller?.aborted === true) {
+      stop.abort(caller.reason)
+    }
+    else {
+      caller?.addEventListener('abort', onAbort, { once: true })
+    }
+    async function* replayed(): AsyncGenerator<ProcessLogEvent> {
+      try {
+        yield* wholeTranscript(stop.signal)
+      }
+      finally {
+        caller?.removeEventListener('abort', onAbort)
+      }
+    }
+    return pulledStream(replayed(), () => {
+      stop.abort()
+      caller?.removeEventListener('abort', onAbort)
+    })
   }
 
   /**
@@ -168,9 +210,13 @@ export function createProcessLogs(
    * process is alive — and it must close once it is not, whether the command exited or its
    * session vanished. Either ending buys one final poll first: bytes flushed between the last
    * poll and the verdict would otherwise be lost.
+   *
+   * `signal` reaches every read, not only the sleep between them: a poll stuck against a degraded
+   * daemon would otherwise hold a cancelled follow open until that poll settled. The read rejects
+   * with the abort, and {@link followingStream} reads that as the caller leaving.
    */
   async function* followed(options: ProcessLogsOptions, signal: AbortSignal): AsyncGenerator<ProcessLogEvent> {
-    const first = await readLogs()
+    const first = await readLogs(signal)
     const at = options.since !== undefined
       ? decodeCursor(options.since)
       // `replay` is the contract's own word for the difference — the retained log from the
@@ -194,9 +240,9 @@ export function createProcessLogs(
         return
       }
       yield* drain(logs)
-      const ended = await ending()
+      const ended = await ending(signal)
       if (ended) {
-        yield* drain(await readLogs())
+        yield* drain(await readLogs(signal))
         // No terminal for a positioned follow, for the reason `log-replay.ts` gives: a caller
         // resuming from a cursor is sampling, and re-serving the exit would double-count it. The
         // stream still closes, which is what a follower reads.
@@ -206,7 +252,7 @@ export function createProcessLogs(
         return
       }
       await sleep(sources.followIntervalMs, signal)
-      logs = await readLogs()
+      logs = await readLogs(signal)
     }
   }
 
@@ -223,6 +269,13 @@ export function createProcessLogs(
     async function* guarded(): AsyncGenerator<ProcessLogEvent> {
       try {
         yield* followed(options, stop.signal)
+      }
+      catch (cause) {
+        // A read rejected by the abort is the caller leaving, which ends a follow the way the
+        // already-aborted check does: a closed stream, not an error.
+        if (!stop.signal.aborted) {
+          throw cause
+        }
       }
       finally {
         // Dropped in a `finally` rather than at the cancel site: a follow that ends on its own
@@ -249,8 +302,6 @@ export function createProcessLogs(
         },
       })
     }
-    // Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside the stream
-    // on top of the copy the read already holds.
-    return pulledStream(wholeTranscript())
+    return replayStream(logOptions?.signal)
   }
 }

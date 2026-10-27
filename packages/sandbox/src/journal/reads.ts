@@ -41,8 +41,15 @@ export interface LogReadSources {
   readSliceFrom: (path: string, offset: number, options?: JournalReadOptions) => Promise<JournalSlice>
   /** Where a file ends, for a follower starting at the live tail. See {@link JournalTail.readEndOffset}. */
   readEndOffset: (path: string, options?: JournalReadOptions) => Promise<number>
-  /** A whole file in chunks; see {@link PartialRead} for what a failed read means. */
-  streamFile: (path: string, partial?: PartialRead) => AsyncGenerator<Uint8Array>
+  /**
+   * A whole file in chunks; see {@link PartialRead} for what a failed read means.
+   *
+   * `signal` is the caller's, as a third positional argument like `partial` before it: it ends
+   * the read with the signal's reason, and an abort is never swallowed into a short transcript
+   * even under `'silence'` — it is the caller leaving, not a read that died (cubic review,
+   * PR #66; #69).
+   */
+  streamFile: (path: string, partial?: PartialRead, signal?: AbortSignal) => AsyncGenerator<Uint8Array>
   /** The session's liveness verdict — see {@link JournalTail.isGone}. Follow reads only. */
   isGone: (signal?: AbortSignal) => Promise<boolean>
   now: () => string
@@ -104,19 +111,30 @@ export function createProcessLogs(
    * read would otherwise end the replay with no terminal event, as if the turn were still
    * running. A record that reads but is oversized or not a number still counts as none — the
    * wrapper did not write that.
+   *
+   * The caller's `signal` reaches all three reads, so a replay stalled against the sandbox stops
+   * waiting when the caller leaves instead of staying pending (cubic review, PR #66; #69). It is
+   * also checked up front and between chunks, so an already-aborted signal rejects the read and
+   * an abort that lands after a chunk errors the stream with the reason rather than letting it
+   * end as a short transcript — a source that ignores the signal cannot turn the abort into one.
    */
-  async function* wholeTranscript(): AsyncGenerator<ProcessLogEvent> {
-    const exitCode = await readExitCode({ partial: 'fail' })
+  async function* wholeTranscript(signal: AbortSignal | undefined): AsyncGenerator<ProcessLogEvent> {
+    signal?.throwIfAborted()
+    const exitCode = await readExitCode({ partial: 'fail', signal })
     let stdout = 0
-    for await (const chunk of streamFile(paths.stdout, 'fail')) {
+    for await (const chunk of streamFile(paths.stdout, 'fail', signal)) {
+      signal?.throwIfAborted()
       stdout += chunk.length
       yield { type: 'stdout', cursor: encodeCursor(stdout, 0), timestamp: now(), data: chunk }
     }
     let stderr = 0
-    for await (const chunk of streamFile(paths.stderr, 'fail')) {
+    signal?.throwIfAborted()
+    for await (const chunk of streamFile(paths.stderr, 'fail', signal)) {
+      signal?.throwIfAborted()
       stderr += chunk.length
       yield { type: 'stderr', cursor: encodeCursor(stdout, stderr), timestamp: now(), data: chunk }
     }
+    signal?.throwIfAborted()
     if (exitCode !== undefined) {
       yield {
         type: 'terminal',
@@ -217,8 +235,39 @@ export function createProcessLogs(
         },
       })
     }
-    // Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside the
-    // stream, which is the thing being avoided.
-    return pulledStream(wholeTranscript())
+    return replayStream(logOptions?.signal)
+  }
+
+  /**
+   * The whole-transcript read, with a stop signal of its own for the reason
+   * {@link followingStream} has one: a consumer that cancels the stream while a read is stalled
+   * would otherwise queue `return()` behind that read, and `cancel()` would not settle until it
+   * did (cubic review, PR #77). The caller's abort is forwarded with its reason, so an aborted
+   * replay still rejects with the caller's reason rather than a generic `AbortError`.
+   *
+   * Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside the stream,
+   * which is the thing being avoided.
+   */
+  function replayStream(caller: AbortSignal | undefined): ReadableStream<ProcessLogEvent> {
+    const stop = new AbortController()
+    const onAbort = () => stop.abort(caller?.reason)
+    if (caller?.aborted === true) {
+      stop.abort(caller.reason)
+    }
+    else {
+      caller?.addEventListener('abort', onAbort, { once: true })
+    }
+    async function* replayed(): AsyncGenerator<ProcessLogEvent> {
+      try {
+        yield* wholeTranscript(stop.signal)
+      }
+      finally {
+        caller?.removeEventListener('abort', onAbort)
+      }
+    }
+    return pulledStream(replayed(), () => {
+      stop.abort()
+      caller?.removeEventListener('abort', onAbort)
+    })
   }
 }

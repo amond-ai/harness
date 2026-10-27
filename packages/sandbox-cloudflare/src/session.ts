@@ -222,15 +222,19 @@ export function createCloudflareSession(
         return { data, total: at }
       },
       readEndOffset: (path, readOptions) => abortable(sandbox.processLogSize(id, file(path)), readOptions?.signal),
-      async* streamFile(path, partial) {
+      // The signal ends a whole-transcript read that stalls (cubic review, PR #66; #69). An abort
+      // rethrows even under `'silence'`: it is the caller leaving, not a read that died, and
+      // reading it as one would serve a short transcript as if it were all there.
+      async* streamFile(path, partial, signal) {
+        signal?.throwIfAborted()
         let offset = 0
         for (;;) {
           let data: Uint8Array
           try {
-            data = await sandbox.readProcessLog(id, file(path), offset, READ_LIMIT)
+            data = await abortable(sandbox.readProcessLog(id, file(path), offset, READ_LIMIT), signal)
           }
           catch (cause) {
-            if (partial === 'fail') {
+            if (partial === 'fail' || signal?.aborted === true) {
               throw cause
             }
             return

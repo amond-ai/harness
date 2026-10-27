@@ -177,6 +177,29 @@ describe('createE2bSession', () => {
       await expect(drain(fake)).rejects.toThrow('e2b unavailable')
     })
 
+    it('rejects with the reason when the caller aborts a whole-transcript read that hangs', async () => {
+      // The read behind the replay is a stream that never delivers; only the caller's signal can
+      // end it (cubic review, PR #66; #69).
+      const fake = fakeSandbox()
+      const handle = await session(fake).exec(['claude'])
+      fake.files.set(`${ROOT}/run-1.out`, encode('{"type":"result"}\n'))
+      const inner = fake.sandbox.files.read
+      fake.sandbox.files.read = ((path: string, opts: { format: 'bytes' | 'stream' }) =>
+        path === `${ROOT}/run-1.out` && opts.format === 'stream'
+          ? new Promise(() => {})
+          : inner(path, opts as { format: 'bytes' })) as E2bSandboxLike['files']['read']
+      const controller = new AbortController()
+
+      const replay = (async () => {
+        for await (const _ of streamOf(await handle.logs({ replay: true, signal: controller.signal }))) {
+          // Nothing arrives before the abort.
+        }
+      })()
+      setTimeout(() => controller.abort(new Error('caller left')), 5)
+
+      await expect(replay).rejects.toThrow('caller left')
+    })
+
     it('fails rather than dropping the terminal when the exit record will not open', async () => {
       // Read as absent, the record would leave the replay without a terminal event — a turn
       // that finished reported as one still running.
