@@ -77,7 +77,6 @@
       "bump-minor-pre-major": true
     }
   },
-  "group-pull-request-title-pattern": "chore: release ${version}",
   "pull-request-title-pattern": "chore${scope}: release${component} ${version}",
   "separate-pull-requests": false,
   "plugins": [
