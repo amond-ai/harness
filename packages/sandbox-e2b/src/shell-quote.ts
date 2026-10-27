@@ -1,8 +1,10 @@
 /**
  * The half of e2b's quoting that only its double layer needs.
  *
- * `quoteArg`, `quoteArgv`, `unquoteArgv` and `unquoteFirstArg` are shared with every other
- * backend and live in `@amond-ai/sandbox/journal`. What stays here exists because e2b's
+ * `quoteArg`, `quoteArgv`, `unquoteArgv` and `unquoteFirstArg` live in `@amond-ai/sandbox/journal`:
+ * every backend that hands a command to a shell quotes through the first two (Cloudflare passes
+ * argv natively and quotes nothing), and only the ones that read a command line back use the
+ * readers (Daytona has none). What stays here exists because e2b's
  * `commands.run` takes a *string*: the journal wrapper quotes the argv, then quotes that whole
  * script again as one word (`journalledScriptIn`), so recovering anything from a process table
  * means peeling two layers, and finding a marker means knowing which layer it sits in.

@@ -17,7 +17,8 @@ import type { SandboxCommand } from '@amond-ai/sandbox'
 // the "no shell escaping needed" guarantee stops holding at this boundary and `quoteArgv` is what
 // restores it. Nothing here ever reads a shell word list back into argv: Daytona records the
 // command a session ran on the session itself and its exit code in the toolbox daemon, unlike
-// e2b, whose process table is the only place an exited turn's argv survives.
+// e2b, which recovers a live turn's argv from the wrapper's command line in its process table
+// (exited commands drop out of that table, and the journal carries what is left after exit).
 import { quoteArg, quoteArgv } from '@amond-ai/sandbox/journal'
 
 /**
