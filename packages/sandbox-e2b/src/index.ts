@@ -23,4 +23,4 @@ export type { JournalSlice } from './log-replay'
 export { createE2bProvider, SANDBOX_ID_METADATA_KEY } from './provider'
 export type { E2bProviderOptions, E2bSandboxApi } from './provider'
 
-export { quoteArg, quoteArgv } from './shell-quote'
+export { quoteArg, quoteArgv } from '@amond-ai/sandbox/journal'

@@ -9,8 +9,8 @@
 import type { SandboxCommand } from '@amond-ai/sandbox'
 import type { E2bSandboxLike } from './e2b-surface'
 import type { JournalMeta } from './journal'
+import { unquoteArgv, unquoteFirstArg } from '@amond-ai/sandbox/journal'
 import { ARGV_CLOSE, ARGV_OPEN, isProcessId, journalledScriptIn, STDOUT_SUFFIX } from './journal'
-import { unquoteArgv, unquoteFirstArg } from './shell-quote'
 
 /**
  * How long the kill walk gets before it is abandoned for e2b's own `kill`.

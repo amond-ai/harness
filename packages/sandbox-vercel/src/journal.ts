@@ -22,7 +22,16 @@
  * a turn writes must not be polluted by whatever the CLI prints beside it.
  */
 import type { SandboxCommand } from '@amond-ai/sandbox'
-import { quoteArg, quoteArgv, unquoteArgv } from './shell-quote'
+// There is exactly one layer of quoting in this backend, and that is the difference from e2b.
+// `runCommand` takes an executable plus an argv array (`{ cmd: 'setsid', args: ['--wait', 'sh',
+// '-c', script] }`), so the script reaches the sandbox as one argument the SDK transports
+// verbatim — nothing re-parses it on the way. e2b's `commands.run` takes a *string*, which forces
+// a second layer over the first and a matching double-peel on the way back (`journalledScriptIn`,
+// `unquotedIndexOf`); none of that exists here, and neither does the class of failure it was
+// written for. What remains is the quoting `journalledScript` puts *inside* the script, and
+// `unquoteArgv`, which reads it back out of a command line when the record naming the process
+// is gone.
+import { quoteArg, quoteArgv, unquoteArgv } from '@amond-ai/sandbox/journal'
 
 /**
  * What every journal script opens with: the shell's no-op builtin, given the process id as its

@@ -13,7 +13,8 @@
  * NDJSON turn output must not be polluted by whatever the CLI writes to stderr.
  */
 import type { JournalPaths } from '@amond-ai/sandbox/journal'
-import { quoteArg, quoteArgv, unquotedIndexOf, unquoteFirstArg } from './shell-quote'
+import { quoteArg, quoteArgv, unquoteFirstArg } from '@amond-ai/sandbox/journal'
+import { unquotedIndexOf } from './shell-quote'
 
 // The layout moved into `@amond-ai/sandbox/journal`; re-exported so this module stays the one
 // place the rest of the backend (and its tests) import it from.

@@ -18,8 +18,8 @@
  */
 import type { JournalMeta } from './journal'
 import type { VercelCommandLike, VercelSandboxLike } from './vercel-surface'
+import { quoteArg } from '@amond-ai/sandbox/journal'
 import { journalPaths, WRAPPER_SHELL, wrapperMarker } from './journal'
-import { quoteArg } from './shell-quote'
 import { isNotFound } from './vercel-surface'
 
 /**

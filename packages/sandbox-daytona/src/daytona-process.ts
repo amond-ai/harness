@@ -12,7 +12,13 @@
  * from a file the turn could write.
  */
 import type { SandboxCommand } from '@amond-ai/sandbox'
-import { quoteArg, quoteArgv } from './shell-quote'
+// Quoting only, and deliberately no `unquoteArgv`. The contract passes commands as argv, but
+// Daytona's session API accepts a *string* — `executeSessionCommand(sessionId, { command })` — so
+// the "no shell escaping needed" guarantee stops holding at this boundary and `quoteArgv` is what
+// restores it. Nothing here ever reads a shell word list back into argv: Daytona records the
+// command a session ran on the session itself and its exit code in the toolbox daemon, unlike
+// e2b, whose process table is the only place an exited turn's argv survives.
+import { quoteArg, quoteArgv } from '@amond-ai/sandbox/journal'
 
 /**
  * Ids that are safe to interpolate into a path and a command line.

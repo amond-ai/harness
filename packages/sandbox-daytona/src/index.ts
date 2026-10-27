@@ -37,4 +37,4 @@ export type { LogSlice } from './log-replay'
 export { createDaytonaProvider, SANDBOX_ID_LABEL } from './provider'
 export type { DaytonaProviderOptions, DaytonaSandboxApi } from './provider'
 
-export { quoteArg, quoteArgv } from './shell-quote'
+export { quoteArg, quoteArgv } from '@amond-ai/sandbox/journal'

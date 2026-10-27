@@ -4,10 +4,10 @@
  * suites so each file stays readable; they share `e2b-session.fixtures.ts` so all three are
  * written against one fake sandbox.
  */
+import { quoteArg, quoteArgv } from '@amond-ai/sandbox/journal'
 import { describe, expect, it } from 'vitest'
 import { decode, encode, fakeSandbox, ROOT, session } from './e2b-session.fixtures'
 import { journalledScriptIn, journalPaths, SESSION_OPEN } from './journal'
-import { quoteArg, quoteArgv } from './shell-quote'
 
 describe('createE2bSession', () => {
   describe('exec()', () => {
