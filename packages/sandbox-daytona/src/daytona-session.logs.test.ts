@@ -82,6 +82,34 @@ describe('logs(): the whole transcript', () => {
 
     await expect(replay).rejects.toThrow('caller left')
   })
+
+  it('serves no more of a loaded transcript once the caller aborts between chunks', async () => {
+    // The log arrives whole, so the abort can only land while the stream is paused between 64 KiB
+    // events — after every read has settled (codex and cubic review, PR #77).
+    const fake = fakeSandbox()
+    const handle = await session(fake).exec(['claude'])
+    setLogs(fake, 'run-1', { stdout: 'x'.repeat(70_000) })
+    endProcess(fake, 'run-1', 0)
+    const controller = new AbortController()
+
+    const reader = (await handle.logs({ replay: true, signal: controller.signal })).getReader()
+    expect((await reader.read()).value).toMatchObject({ type: 'stdout' })
+    controller.abort(new Error('caller left'))
+
+    // The stream may already hold the next chunk it prefetched; nothing after that is served.
+    const served: string[] = []
+    const drained = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) {
+          return
+        }
+        served.push(value.type)
+      }
+    })()
+    await expect(drained).rejects.toThrow('caller left')
+    expect(served).not.toContain('terminal')
+  })
 })
 
 describe('logs({ since }): the watchdog\'s sample', () => {

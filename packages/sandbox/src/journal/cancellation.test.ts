@@ -74,8 +74,29 @@ describe('journal read cancellation', () => {
     controller.abort(new Error('caller left'))
 
     await expect(finished).rejects.toThrow('caller left')
-    expect(exitSignals).toEqual([controller.signal])
-    expect(fileSignals).toEqual([controller.signal])
+    // The reads get the replay's own stop signal rather than the caller's (so a cancel can end
+    // them too), and it must carry the caller's abort through: one signal each, aborted with the
+    // caller's reason. `toEqual` would compare signals structurally and pass for any of them.
+    for (const signals of [exitSignals, fileSignals]) {
+      expect(signals).toHaveLength(1)
+      expect(signals[0]?.aborted).toBe(true)
+      expect(signals[0]?.reason).toBe(controller.signal.reason)
+    }
+  })
+
+  it('settles a cancel of a whole-transcript read while a read hangs', async () => {
+    const logs = createProcessLogs(sources({
+      async* streamFile(_path, _partial, signal) {
+        yield await hang<Uint8Array>(signal)
+      },
+    }))
+    const reader = (await logs({ replay: true })).getReader()
+
+    const pending = reader.read()
+    await Promise.resolve()
+
+    await expect(reader.cancel()).resolves.toBeUndefined()
+    await expect(pending).resolves.toMatchObject({ done: true })
   })
 
   it('does not read the journal for a follower aborted before it started', async () => {

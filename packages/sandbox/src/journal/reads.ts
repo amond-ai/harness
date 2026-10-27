@@ -235,8 +235,39 @@ export function createProcessLogs(
         },
       })
     }
-    // Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside the
-    // stream, which is the thing being avoided.
-    return pulledStream(wholeTranscript(logOptions?.signal))
+    return replayStream(logOptions?.signal)
+  }
+
+  /**
+   * The whole-transcript read, with a stop signal of its own for the reason
+   * {@link followingStream} has one: a consumer that cancels the stream while a read is stalled
+   * would otherwise queue `return()` behind that read, and `cancel()` would not settle until it
+   * did (cubic review, PR #77). The caller's abort is forwarded with its reason, so an aborted
+   * replay still rejects with the caller's reason rather than a generic `AbortError`.
+   *
+   * Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside the stream,
+   * which is the thing being avoided.
+   */
+  function replayStream(caller: AbortSignal | undefined): ReadableStream<ProcessLogEvent> {
+    const stop = new AbortController()
+    const onAbort = () => stop.abort(caller?.reason)
+    if (caller?.aborted === true) {
+      stop.abort(caller.reason)
+    }
+    else {
+      caller?.addEventListener('abort', onAbort, { once: true })
+    }
+    async function* replayed(): AsyncGenerator<ProcessLogEvent> {
+      try {
+        yield* wholeTranscript(stop.signal)
+      }
+      finally {
+        caller?.removeEventListener('abort', onAbort)
+      }
+    }
+    return pulledStream(replayed(), () => {
+      stop.abort()
+      caller?.removeEventListener('abort', onAbort)
+    })
   }
 }
