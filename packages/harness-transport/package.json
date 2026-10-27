@@ -1,7 +1,7 @@
 {
   "name": "@amond-ai/harness-transport",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The bridge socket a turn driver speaks over — the `ws`-shaped socket shim, the upgrade handshake, and a dialer built on the standard WebSocket constructor",
   "author": "Passion Factory Corp.",
   "license": "Apache-2.0",
