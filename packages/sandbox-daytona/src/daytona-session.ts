@@ -192,10 +192,17 @@ export function createDaytonaSession(
       id: meta.id,
       status: () => statusOf(meta),
       logs: createProcessLogs({
-        // `getSessionCommandLogs` takes no signal, so the caller stops waiting on it instead.
-        readLogs: signal => abortable(reader.logs(meta.id), signal),
-        // `reader.verdict` takes no signal, so the caller stops waiting instead, as with `readLogs`.
-        ending: signal => abortable(endingOf(meta.id), signal),
+        // Neither daemon call takes a signal, so the caller stops waiting on it instead. The signal
+        // is checked before each starts: an abort that has already fired must not start a request
+        // to the toolbox daemon that it would only abandon (codex review, PR #82).
+        readLogs: async (signal) => {
+          signal?.throwIfAborted()
+          return await abortable(reader.logs(meta.id), signal)
+        },
+        ending: async (signal) => {
+          signal?.throwIfAborted()
+          return await abortable(endingOf(meta.id), signal)
+        },
         now,
         followIntervalMs: followMs,
       }),

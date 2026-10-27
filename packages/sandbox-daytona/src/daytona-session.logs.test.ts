@@ -83,6 +83,19 @@ describe('logs(): the whole transcript', () => {
     await expect(replay).rejects.toThrow('caller left')
   })
 
+  it('makes no daemon call for a replay whose caller has already aborted', async () => {
+    // Both reads are requests to the toolbox daemon; an abort that already fired must not start
+    // one only to abandon it (codex review, PR #82).
+    const fake = fakeSandbox()
+    const handle = await session(fake).exec(['claude'])
+    const before = { ...fake.calls }
+
+    const replay = collect(await handle.logs({ replay: true, signal: AbortSignal.abort(new Error('caller left')) }))
+
+    await expect(replay).rejects.toThrow('caller left')
+    expect(fake.calls).toEqual(before)
+  })
+
   it('serves no more of a loaded transcript once the caller aborts between chunks', async () => {
     // The log arrives whole, so the abort can only land while the stream is paused between 64 KiB
     // events — after every read has settled (codex and cubic review, PR #77).
