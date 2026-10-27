@@ -172,9 +172,13 @@ export function createProcessLogs(
    * process is alive — and it must close once it is not, whether the command exited or its
    * session vanished. Either ending buys one final poll first: bytes flushed between the last
    * poll and the verdict would otherwise be lost.
+   *
+   * `signal` reaches every read, not only the sleep between them: a poll stuck against a degraded
+   * daemon would otherwise hold a cancelled follow open until that poll settled. The read rejects
+   * with the abort, and {@link followingStream} reads that as the caller leaving.
    */
   async function* followed(options: ProcessLogsOptions, signal: AbortSignal): AsyncGenerator<ProcessLogEvent> {
-    const first = await readLogs()
+    const first = await readLogs(signal)
     const at = options.since !== undefined
       ? decodeCursor(options.since)
       // `replay` is the contract's own word for the difference — the retained log from the
@@ -198,9 +202,9 @@ export function createProcessLogs(
         return
       }
       yield* drain(logs)
-      const ended = await ending()
+      const ended = await ending(signal)
       if (ended) {
-        yield* drain(await readLogs())
+        yield* drain(await readLogs(signal))
         // No terminal for a positioned follow, for the reason `log-replay.ts` gives: a caller
         // resuming from a cursor is sampling, and re-serving the exit would double-count it. The
         // stream still closes, which is what a follower reads.
@@ -210,7 +214,7 @@ export function createProcessLogs(
         return
       }
       await sleep(sources.followIntervalMs, signal)
-      logs = await readLogs()
+      logs = await readLogs(signal)
     }
   }
 
@@ -227,6 +231,13 @@ export function createProcessLogs(
     async function* guarded(): AsyncGenerator<ProcessLogEvent> {
       try {
         yield* followed(options, stop.signal)
+      }
+      catch (cause) {
+        // A read rejected by the abort is the caller leaving, which ends a follow the way the
+        // already-aborted check does: a closed stream, not an error.
+        if (!stop.signal.aborted) {
+          throw cause
+        }
       }
       finally {
         // Dropped in a `finally` rather than at the cancel site: a follow that ends on its own

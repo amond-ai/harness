@@ -206,4 +206,39 @@ describe('logs({ follow: true }): the live read', () => {
     await reader.read()
     await expect(reader.cancel()).resolves.toBeUndefined()
   })
+
+  /**
+   * `getSessionCommandLogs` takes no signal, so a poll against a degraded daemon never settles on
+   * its own. The stop signal has to reach the read itself, not only the sleep between polls, or
+   * the follow outlives the caller that left it.
+   */
+  describe('while a poll hangs', () => {
+    function hangingHandle() {
+      const fake = fakeSandbox()
+      fake.sandbox.process.getSessionCommandLogs = async () => new Promise(() => {})
+      return session(fake).exec(['claude'])
+    }
+
+    it('closes the stream when the caller aborts', async () => {
+      const handle = await hangingHandle()
+      const controller = new AbortController()
+
+      const finished = collect(await handle.logs({ follow: true, replay: true, signal: controller.signal }))
+      await Promise.resolve()
+      controller.abort(new Error('caller left'))
+
+      await expect(finished).resolves.toEqual([])
+    })
+
+    it('settles a cancel', async () => {
+      const handle = await hangingHandle()
+      const reader = (await handle.logs({ follow: true, replay: true })).getReader()
+
+      const pending = reader.read()
+      await Promise.resolve()
+
+      await expect(reader.cancel()).resolves.toBeUndefined()
+      await expect(pending).resolves.toMatchObject({ done: true })
+    })
+  })
 })
