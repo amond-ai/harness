@@ -68,6 +68,20 @@ describe('logs(): the whole transcript', () => {
     expect(events.filter(event => event.type === 'stdout').length).toBeGreaterThan(1)
     expect(textOf(events, 'stdout').length).toBe(70_000)
   })
+
+  it('stops waiting on a whole-transcript read when the caller aborts', async () => {
+    // The same degraded daemon, reached by a replay rather than a watchdog sample (cubic review,
+    // PR #66; #69): reading the stream must reject with the reason, not stay pending.
+    const fake = fakeSandbox()
+    const handle = await session(fake).exec(['claude'])
+    fake.sandbox.process.getSessionCommandLogs = async () => new Promise(() => {})
+    const controller = new AbortController()
+
+    const replay = collect(await handle.logs({ replay: true, signal: controller.signal }))
+    setTimeout(() => controller.abort(new Error('caller left')), 5)
+
+    await expect(replay).rejects.toThrow('caller left')
+  })
 })
 
 describe('logs({ since }): the watchdog\'s sample', () => {

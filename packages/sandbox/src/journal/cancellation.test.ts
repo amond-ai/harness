@@ -52,6 +52,32 @@ describe('journal read cancellation', () => {
     expect(seen.every(signal => signal === controller.signal)).toBe(true)
   })
 
+  it('ends a whole-transcript read with the abort reason when the caller leaves a stalled one', async () => {
+    // The whole-transcript read had no signal to stop on, so a replay stalled against the sandbox
+    // stayed pending after the caller aborted (cubic review, PR #66; #69).
+    const exitSignals: (AbortSignal | undefined)[] = []
+    const fileSignals: (AbortSignal | undefined)[] = []
+    const logs = createProcessLogs(sources({
+      readExitCode: async (options) => {
+        exitSignals.push(options?.signal)
+        return undefined
+      },
+      async* streamFile(_path, _partial, signal) {
+        fileSignals.push(signal)
+        yield await hang<Uint8Array>(signal)
+      },
+    }))
+    const controller = new AbortController()
+
+    const finished = collect(await logs({ replay: true, signal: controller.signal }))
+    await vi.waitFor(() => expect(fileSignals).toHaveLength(1))
+    controller.abort(new Error('caller left'))
+
+    await expect(finished).rejects.toThrow('caller left')
+    expect(exitSignals).toEqual([controller.signal])
+    expect(fileSignals).toEqual([controller.signal])
+  })
+
   it('does not read the journal for a follower aborted before it started', async () => {
     const readEndOffset = vi.fn(async () => 0)
     const controller = new AbortController()

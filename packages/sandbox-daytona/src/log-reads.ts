@@ -43,7 +43,8 @@ const CHUNK_BYTES = 65_536
 export interface LogReadSources {
   /** Rejects with `signal`'s reason once it aborts, whether or not the read itself stops. */
   readLogs: (signal?: AbortSignal) => Promise<DaytonaSessionLogs>
-  ending: () => Promise<ProcessEnding | undefined>
+  /** Rejects with `signal`'s reason once it aborts, like {@link LogReadSources.readLogs}. */
+  ending: (signal?: AbortSignal) => Promise<ProcessEnding | undefined>
   now: () => string
   /** How long a following read waits between polls. */
   followIntervalMs: number
@@ -126,10 +127,13 @@ export function createProcessLogs(
    * backend: a whole-transcript read of a process that vanished has already said so through
    * `status()`, and a terminal error appended to a replay would be a second, later-timestamped
    * account of the same failure.
+   *
+   * The caller's `signal` reaches both reads, so a replay stalled against the daemon stops
+   * waiting when the caller leaves instead of staying pending (cubic review, PR #66; #69).
    */
-  async function* wholeTranscript(): AsyncGenerator<ProcessLogEvent> {
-    const ended = await ending()
-    const logs = await readLogs()
+  async function* wholeTranscript(signal: AbortSignal | undefined): AsyncGenerator<ProcessLogEvent> {
+    const ended = await ending(signal)
+    const logs = await readLogs(signal)
     let stdout = 0
     for (const chunk of chunked(logs.stdout)) {
       stdout += chunk.length
@@ -251,6 +255,6 @@ export function createProcessLogs(
     }
     // Pulled rather than pushed: enqueuing eagerly would buffer the transcript inside the stream
     // on top of the copy the read already holds.
-    return pulledStream(wholeTranscript())
+    return pulledStream(wholeTranscript(logOptions?.signal))
   }
 }
